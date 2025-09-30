@@ -46,16 +46,18 @@ Artifacts will appear under `build/webrtc_vst/bin` (platform specific bundle lay
 
 ## Configuration
 
-All runtime settings are exposed as VST3 parameters via the edit controller. Most hosts surface these in their generic parameter view, allowing automation and preset storage without shell variables:
+All runtime settings are exposed via the bundled VSTGUI editor and mirrored as VST3 parameters, so hosts can automate and store presets without shell variables:
 
 | Parameter | Description | Default |
 | --- | --- | --- |
-| `Mode` | `Play` (viewer) or `Seed` (publisher). | `Play` |
+| `Connection Mode` | Choose `Play` to monitor a remote stream or `Seed` to publish the host input. | `Play` |
 | `Stream ID` | Stream identifier advertised to VDO.Ninja peers. | `vst-stream` |
-| `Room ID` | Optional room joined before seeding or playing. | *(empty)* |
-| `Signaling URL` | WebSocket endpoint for the VDO.Ninja handshake. | `wss://wss0.vdo.ninja` |
-| `Password` | Optional room password / encryption key. Leave blank to rely on the SDK default. | *(empty)* |
-| `Disable Encryption` | When enabled, SDP/ICE payloads are sent in plain text. | `false` |
+| `Room Name` | Optional room namespace joined before seeding or playing. | *(empty)* |
+| `Handshake URL` | WebSocket endpoint used for the VDO.Ninja handshake. | `wss://wss0.vdo.ninja` |
+| `Password` | Optional room password / encryption key. Leave blank to use the default; entering `0`, `off` or `false` automatically disables encryption. | *(empty)* |
+| `Disable Encryption` | Manual override to send SDP/ICE payloads in plain text. | `false` |
+
+Passwords set to `0`, `off`, or `false` automatically flip **Disable Encryption** on; clearing the field restores the default shared key.
 
 For backwards compatibility the plugin still honours the legacy environment variables below during initialisation. If present they prime the same parameters; any subsequent edits inside the host override the values.
 
@@ -63,8 +65,8 @@ For backwards compatibility the plugin still honours the legacy environment vari
 | --- | --- |
 | `WEBRTC_VST_MODE` | Preferred mode (`seed` / `play`). |
 | `WEBRTC_VST_STREAM_ID` | Initial stream identifier. |
-| `WEBRTC_VST_ROOM_ID` | Initial room identifier. |
-| `WEBRTC_VST_SIGNALING_URL` | Signaling WebSocket URL. |
+| `WEBRTC_VST_ROOM_NAME` / `WEBRTC_VST_ROOM_ID` | Initial room name (legacy alias supported). |
+| `WEBRTC_VST_HANDSHAKE_URL` / `WEBRTC_VST_SIGNALING_URL` | Signaling WebSocket URL. |
 | `WEBRTC_VST_PASSWORD` | Initial password value. |
 | `WEBRTC_VST_DISABLE_ENCRYPTION` | `1/true` to disable SDP/ICE encryption. |
 
@@ -74,10 +76,12 @@ State chunks written by the host serialise the same fields as JSON. You can auth
 {
   "mode": "seed",
   "streamId": "my-stream",
-  "roomId": "mixbus",
-  "signalingUrl": "wss://wss0.vdo.ninja",
+  "roomName": "mixbus",
+  "handshakeUrl": "wss://wss0.vdo.ninja",
   "password": "super-secret",
-  "disableEncryption": false
+  "disableEncryption": false,
+  "roomId": "mixbus",
+  "signalingUrl": "wss://wss0.vdo.ninja"
 }
 ```
 

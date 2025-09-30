@@ -51,7 +51,7 @@ endif()
 set(vst3sdk_SOURCE_DIR "${VST3_SDK_ROOT}" CACHE PATH "Path to the VST3 SDK" FORCE)
 set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "Disable VST3 example projects" FORCE)
 set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "Disable VST3 hosting examples" FORCE)
-set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "Disable VSTGUI support" FORCE)
+set(SMTG_ENABLE_VSTGUI_SUPPORT ON CACHE BOOL "Disable VSTGUI support" FORCE)
 set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "Skip running the VST3 validator during build" FORCE)
 
 add_subdirectory(${vst3sdk_SOURCE_DIR} ${CMAKE_BINARY_DIR}/vst3sdk)
@@ -119,6 +119,7 @@ set(PLUGIN_SOURCES
     src/PluginController.cpp
     src/ParameterStringRegistry.cpp
     src/plugin_entry.cpp
+    resources/webrtc_vst.uidesc
 )
 
 set(PLUGIN_HEADERS
@@ -148,12 +149,18 @@ target_include_directories(${PLUGIN_NAME}
 target_link_libraries(${PLUGIN_NAME}
     PRIVATE
         sdk
+        vstgui_support
         LibDataChannel::LibDataChannel
         ixwebsocket
         nlohmann_json::nlohmann_json
         opus
         Threads::Threads
         OpenSSL::Crypto
+)
+
+smtg_target_add_plugin_resources(${PLUGIN_NAME}
+    RESOURCES
+        resources/webrtc_vst.uidesc
 )
 
 if(MSVC)

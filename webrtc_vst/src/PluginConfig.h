@@ -12,8 +12,8 @@ enum class ConnectionMode {
 struct PluginConfig {
     ConnectionMode mode{ConnectionMode::Play};
     std::string streamId;
-    std::string roomId;
-    std::string signalingUrl{"wss://wss0.vdo.ninja"};
+    std::string roomName;
+    std::string handshakeUrl{"wss://wss0.vdo.ninja"};
     bool enableAutoReconnect{true};
     bool enableAec{false};
     bool disableEncryption{false};
