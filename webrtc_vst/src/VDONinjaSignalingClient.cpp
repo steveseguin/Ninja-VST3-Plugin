@@ -3,6 +3,7 @@
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXSocketTLSOptions.h>
 #include <ixwebsocket/IXWebSocket.h>
+#include <ixwebsocket/IXWebSocketCloseConstants.h>
 
 #include <iostream>
 #include <exception>
@@ -11,12 +12,21 @@ namespace webrtc_vst {
 
 namespace {
 std::once_flag g_ixInitFlag;
+
+void ensureIxInitialized() {
+    std::call_once(g_ixInitFlag, [] { ix::initNetSystem(); });
 }
 
+std::unique_ptr<ix::WebSocket> makeWebSocket() {
+    ensureIxInitialized();
+    (void)ix::WebSocketCloseConstants::kInternalErrorMessage;
+    return std::make_unique<ix::WebSocket>();
+}
+} // namespace
+
 VDONinjaSignalingClient::VDONinjaSignalingClient(std::string url)
-    : url_(std::move(url)), socket_(std::make_unique<ix::WebSocket>()) {
-    std::call_once(g_ixInitFlag, [] { ix::initNetSystem(); });
-    configureCallbacks();
+    : url_(std::move(url)) {
+    ensureIxInitialized();
 }
 
 VDONinjaSignalingClient::~VDONinjaSignalingClient() {
@@ -91,7 +101,7 @@ void VDONinjaSignalingClient::connectAsync() {
     {
         std::lock_guard<SpinLock> lock(mutex_);
         if (!socket_) {
-            socket_ = std::make_unique<ix::WebSocket>();
+            socket_ = makeWebSocket();
         }
         socket = socket_.get();
     }
@@ -133,7 +143,7 @@ void VDONinjaSignalingClient::disconnect() {
 
     if (socketToStop) {
         try {
-            socketToStop->setOnMessageCallback(nullptr);
+            socketToStop->setOnMessageCallback([](const ix::WebSocketMessagePtr&) {});
             socketToStop->stop(1000, "client shutdown");
         } catch (const std::exception& ex) {
             std::lock_guard<SpinLock> lock(mutex_);
@@ -149,7 +159,7 @@ void VDONinjaSignalingClient::disconnect() {
     {
         std::lock_guard<SpinLock> lock(mutex_);
         if (!socket_) {
-            socket_ = std::make_unique<ix::WebSocket>();
+            socket_ = makeWebSocket();
         }
         configureCallbacks();
     }

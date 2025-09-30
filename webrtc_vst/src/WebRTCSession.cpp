@@ -754,7 +754,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
     sampleRate_ = sampleRate;
    channelCount_ = channels;
 
-    salt_ = deriveSalt(config_.signalingUrl);
+    salt_ = deriveSalt(config_.handshakeUrl);
     cachedPassword_.reset();
     hashedStreamId_ = buildHashedStreamId();
     hashedRoomId_.clear();
@@ -762,11 +762,11 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
     outgoingResampler_.configure(sampleRate_, 48000.0, channelCount_);
     incomingResampler_.configure(48000.0, sampleRate_, channelCount_);
 
-    if (!config_.roomId.empty()) {
+    if (!config_.roomName.empty()) {
         if (const auto password = effectivePassword()) {
-            hashedRoomId_ = hashRoom(config_.roomId, *password);
+            hashedRoomId_ = hashRoom(config_.roomName, *password);
         } else {
-            hashedRoomId_ = config_.roomId;
+            hashedRoomId_ = config_.roomName;
         }
     }
 
@@ -794,7 +794,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
     roomJoined_ = false;
     roleAnnounced_ = false;
 
-    signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.signalingUrl);
+    signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
     signalingClient_->setCallbacks({
         [this]() {
             log("Connected to VDO.Ninja signaling server");
@@ -1102,10 +1102,10 @@ void WebRTCSession::postInitialRequests() {
         return;
     }
 
-    if (!config_.roomId.empty()) {
+    if (!config_.roomName.empty()) {
         nlohmann::json joinMessage = {
             {"request", "joinroom"},
-            {"roomid", hashedRoomId_.empty() ? config_.roomId : hashedRoomId_}
+            {"roomid", hashedRoomId_.empty() ? config_.roomName : hashedRoomId_}
         };
         signalingClient_->send(joinMessage);
     } else {
@@ -1119,7 +1119,7 @@ void WebRTCSession::announceRoleIfReady() {
         return;
     }
 
-    if (!config_.roomId.empty() && !roomJoined_) {
+    if (!config_.roomName.empty() && !roomJoined_) {
         return;
     }
 
