@@ -1,4 +1,5 @@
 #include "WebRTCSession.h"
+#include "StreamIdGenerator.h"
 
 #include <rtc/rtc.hpp>
 #include <rtc/rtppacketizationconfig.hpp>
@@ -111,6 +112,41 @@ std::string extractHost(const std::string& url) {
     }
     std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return host;
+}
+
+struct SanitizedStreamId {
+    std::string value;
+    bool changed{false};
+    bool generated{false};
+};
+
+SanitizedStreamId sanitizeStreamId(const std::string& raw) {
+    const std::string trimmed = trimCopy(raw);
+    SanitizedStreamId result;
+    if (trimmed.empty()) {
+        result.value = generateRandomStreamId();
+        result.changed = true;
+        result.generated = true;
+        return result;
+    }
+
+    result.value.reserve(trimmed.size());
+    for (char ch : trimmed) {
+        if (ch == '-') {
+            result.value.push_back('_');
+            result.changed = true;
+        } else {
+            result.value.push_back(ch);
+        }
+    }
+
+    if (result.value.empty()) {
+        result.value = generateRandomStreamId();
+        result.changed = true;
+        result.generated = true;
+    }
+
+    return result;
 }
 
 } // namespace
@@ -261,17 +297,74 @@ size_t WebRTCSession::LinearResampler::processBuffer(const float* source,
     return outputInterleaved.empty() ? 0 : outputInterleaved.size() / static_cast<size_t>(channels);
 }
 
-WebRTCSession::WebRTCSession(AudioRingBuffer& receiveBuffer, LogSink logSink)
-    : receiveBuffer_(receiveBuffer), logSink_(std::move(logSink)) {}
+WebRTCSession::WebRTCSession(AudioRingBuffer& receiveBuffer, LogSink logSink, ConfigSink configSink)
+    : receiveBuffer_(receiveBuffer),
+      logSink_(std::move(logSink)),
+      configUpdateSink_(std::move(configSink)) {}
 
 WebRTCSession::~WebRTCSession() {
     stop();
+}
+
+void WebRTCSession::setConfigUpdateSink(ConfigSink sink) {
+    configUpdateSink_ = std::move(sink);
+}
+
+void WebRTCSession::setLogSignalingMessages(bool enable) {
+    std::string message;
+    {
+        std::lock_guard<std::mutex> lock(signalingLogMutex_);
+        logSignalingMessages_ = enable;
+        lastSentSignalingJson_.clear();
+        lastReceivedSignalingJson_.clear();
+        suppressingSentDuplicate_ = false;
+        suppressingReceivedDuplicate_ = false;
+        message = std::string("Signaling message logging ") + (enable ? "enabled" : "disabled");
+    }
+    log(message);
 }
 
 void WebRTCSession::log(const std::string& line) const {
     if (logSink_) {
         logSink_(line);
     }
+}
+
+void WebRTCSession::sendSignalingMessage(const nlohmann::json& payload) {
+    if (!signalingClient_) {
+        return;
+    }
+
+    std::optional<std::string> logLine;
+    {
+        std::lock_guard<std::mutex> lock(signalingLogMutex_);
+        if (logSignalingMessages_) {
+            try {
+                const std::string dump = payload.dump();
+                if (dump == lastSentSignalingJson_) {
+                    if (!suppressingSentDuplicate_) {
+                        logLine = std::string("=> signaling: ") + dump +
+                                  " (duplicate; suppressing further identical messages)";
+                        suppressingSentDuplicate_ = true;
+                    }
+                } else {
+                    logLine = std::string("=> signaling: ") + dump;
+                    lastSentSignalingJson_ = dump;
+                    suppressingSentDuplicate_ = false;
+                }
+            } catch (...) {
+                logLine = "=> signaling: <unserializable payload>";
+                lastSentSignalingJson_.clear();
+                suppressingSentDuplicate_ = false;
+            }
+        }
+    }
+
+    if (logLine) {
+        log(*logLine);
+    }
+
+    signalingClient_->send(payload);
 }
 
 std::optional<std::string> WebRTCSession::effectivePassword() const {
@@ -656,6 +749,61 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
         it->second.remoteAudioTrack = track;
     });
 
+    // For play mode, handle incoming datachannel and send viewer preferences
+    if (!createLocalTracks && config_.mode == ConnectionMode::Play) {
+        session.connection->onDataChannel([this, keyCopy](std::shared_ptr<rtc::DataChannel> dc) {
+            log("Datachannel received from publisher");
+
+            // Store datachannel in peer session for sending responses
+            {
+                std::lock_guard<SpinLock> lock(mutex_);
+                auto it = peerSessions_.find(keyCopy);
+                if (it != peerSessions_.end()) {
+                    it->second.dataChannel = dc;
+                    log("Stored datachannel in peer session " + keyCopy);
+                }
+            }
+
+            dc->onOpen([this, keyCopy, dc]() {
+                log("Datachannel opened, sending viewer preferences");
+                try {
+                    nlohmann::json prefs = {
+                        {"audio", true},
+                        {"video", false}
+                    };
+                    std::string msg = prefs.dump();
+                    dc->send(msg);
+                    log("Sent viewer preferences: " + msg);
+                } catch (const std::exception& ex) {
+                    log(std::string("Failed to send viewer preferences: ") + ex.what());
+                }
+            });
+
+            dc->onMessage([this](auto data) {
+                // Handle incoming datachannel messages
+                std::visit([this](auto&& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        log("Datachannel message: " + arg);
+
+                        // Check if this is a new SDP offer from publisher
+                        try {
+                            auto msg = nlohmann::json::parse(arg);
+                            if (msg.contains("description") && msg["description"].contains("type") &&
+                                msg["description"]["type"] == "offer") {
+                                log("Received new SDP offer via datachannel, processing as signaling message");
+                                // Handle this as a regular signaling message (pass JSON, not string)
+                                handleSignalingMessage(msg);
+                            }
+                        } catch (const std::exception&) {
+                            // Not JSON or parse error, ignore
+                        }
+                    }
+                }, data);
+            });
+        });
+    }
+
     if (createLocalTracks && config_.mode == ConnectionMode::Seed) {
         rtc::Description::Audio audio("audio", rtc::Description::Direction::SendRecv);
         audio.addOpusCodec(kOpusPayloadType);
@@ -745,76 +893,98 @@ void WebRTCSession::processCandidateMessage(PeerSession& session, const nlohmann
 }
 
 void WebRTCSession::start(const PluginConfig& config, double sampleRate, int channels) {
-    std::lock_guard<SpinLock> lock(mutex_);
-    if (started_) {
-        return;
-    }
-
-    config_ = config;
-    sampleRate_ = sampleRate;
-   channelCount_ = channels;
-
-    salt_ = deriveSalt(config_.handshakeUrl);
-    cachedPassword_.reset();
-    hashedStreamId_ = buildHashedStreamId();
-    hashedRoomId_.clear();
-
-    outgoingResampler_.configure(sampleRate_, 48000.0, channelCount_);
-    incomingResampler_.configure(48000.0, sampleRate_, channelCount_);
-
-    if (!config_.roomName.empty()) {
-        if (const auto password = effectivePassword()) {
-            hashedRoomId_ = hashRoom(config_.roomName, *password);
-        } else {
-            hashedRoomId_ = config_.roomName;
+    ConfigSink callback;
+    std::optional<PluginConfig> sanitizedForCallback;
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (started_) {
+            return;
         }
-    }
 
-    if (sampleRate_ != 48000.0) {
-        log("Only 48 kHz sample rate is currently supported; audio will be resampled externally if needed.");
-    }
-
-    int opusError = 0;
-    opusEncoder_ = opus_encoder_create(static_cast<opus_int32>(48000), channelCount_, OPUS_APPLICATION_AUDIO, &opusError);
-    if (opusError != OPUS_OK) {
-        log("Failed to create Opus encoder");
-        opusEncoder_ = nullptr;
-    }
-
-    opusDecoder_ = opus_decoder_create(static_cast<opus_int32>(48000), channelCount_, &opusError);
-    if (opusError != OPUS_OK) {
-        log("Failed to create Opus decoder");
-        opusDecoder_ = nullptr;
-    }
-
-    outgoingFifo_.clear();
-    peerSessions_.clear();
-    sessionByUuid_.clear();
-    pendingGlobalIce_.clear();
-    roomJoined_ = false;
-    roleAnnounced_ = false;
-
-    signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
-    signalingClient_->setCallbacks({
-        [this]() {
-            log("Connected to VDO.Ninja signaling server");
-            postInitialRequests();
-        },
-        [this]() {
-            log("Signaling connection closed");
-            std::lock_guard<SpinLock> innerLock(mutex_);
-            resetAllPeerConnections();
-        },
-        [this](const nlohmann::json& message) {
-            handleSignalingMessage(message);
-        },
-        [this](const std::string& error) {
-            log("Signaling error: " + error);
+        config_ = config;
+        const auto sanitizedStream = sanitizeStreamId(config_.streamId);
+        if (sanitizedStream.generated) {
+            log("Stream ID missing or empty; generated fallback '" + sanitizedStream.value + "'");
+        } else if (sanitizedStream.changed) {
+            log("Sanitized stream ID to '" + sanitizedStream.value + "'");
         }
-    });
+        if (sanitizedStream.changed) {
+            config_.streamId = sanitizedStream.value;
+        }
 
-    signalingClient_->connectAsync();
-    started_ = true;
+        sampleRate_ = sampleRate;
+        channelCount_ = channels;
+
+        salt_ = deriveSalt(config_.handshakeUrl);
+        cachedPassword_.reset();
+        hashedStreamId_ = buildHashedStreamId();
+        hashedRoomId_.clear();
+
+        outgoingResampler_.configure(sampleRate_, 48000.0, channelCount_);
+        incomingResampler_.configure(48000.0, sampleRate_, channelCount_);
+
+        if (!config_.roomName.empty()) {
+            if (const auto password = effectivePassword()) {
+                hashedRoomId_ = hashRoom(config_.roomName, *password);
+            } else {
+                hashedRoomId_ = config_.roomName;
+            }
+        }
+
+        if (sampleRate_ != 48000.0) {
+            log("Only 48 kHz sample rate is currently supported; audio will be resampled externally if needed.");
+        }
+
+        int opusError = 0;
+        opusEncoder_ = opus_encoder_create(static_cast<opus_int32>(48000), channelCount_, OPUS_APPLICATION_AUDIO, &opusError);
+        if (opusError != OPUS_OK) {
+            log("Failed to create Opus encoder");
+            opusEncoder_ = nullptr;
+        }
+
+        opusDecoder_ = opus_decoder_create(static_cast<opus_int32>(48000), channelCount_, &opusError);
+        if (opusError != OPUS_OK) {
+            log("Failed to create Opus decoder");
+            opusDecoder_ = nullptr;
+        }
+
+        outgoingFifo_.clear();
+        peerSessions_.clear();
+        sessionByUuid_.clear();
+        pendingGlobalIce_.clear();
+        roomJoined_ = false;
+        roleAnnounced_ = false;
+
+        signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
+        signalingClient_->setCallbacks({
+            [this]() {
+                log("Connected to VDO.Ninja signaling server");
+                postInitialRequests();
+            },
+            [this]() {
+                log("Signaling connection closed");
+                std::lock_guard<SpinLock> innerLock(mutex_);
+                resetAllPeerConnections();
+            },
+            [this](const nlohmann::json& message) {
+                handleSignalingMessage(message);
+            },
+            [this](const std::string& error) {
+                log("Signaling error: " + error);
+            }
+        });
+
+        signalingClient_->connectAsync();
+        started_ = true;
+        if (sanitizedStream.changed && configUpdateSink_) {
+            sanitizedForCallback = config_;
+        }
+        callback = configUpdateSink_;
+    }
+
+    if (callback && sanitizedForCallback) {
+        callback(*sanitizedForCallback);
+    }
 }
 
 void WebRTCSession::stop() {
@@ -860,6 +1030,35 @@ bool WebRTCSession::isConnected() const {
 }
 
 void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage) {
+    std::optional<std::string> logLine;
+    {
+        std::lock_guard<std::mutex> lock(signalingLogMutex_);
+        if (logSignalingMessages_) {
+            try {
+                const std::string dump = originalMessage.dump();
+                if (dump == lastReceivedSignalingJson_) {
+                    if (!suppressingReceivedDuplicate_) {
+                        logLine = std::string("<= signaling: ") + dump +
+                                  " (duplicate; suppressing further identical messages)";
+                        suppressingReceivedDuplicate_ = true;
+                    }
+                } else {
+                    logLine = std::string("<= signaling: ") + dump;
+                    lastReceivedSignalingJson_ = dump;
+                    suppressingReceivedDuplicate_ = false;
+                }
+            } catch (...) {
+                logLine = "<= signaling: <unserializable message>";
+                lastReceivedSignalingJson_.clear();
+                suppressingReceivedDuplicate_ = false;
+            }
+        }
+    }
+
+    if (logLine) {
+        log(*logLine);
+    }
+
     nlohmann::json message = originalMessage;
 
     if (message.contains("vector")) {
@@ -1027,10 +1226,6 @@ void WebRTCSession::handleListingMessage(const nlohmann::json&) {
 void WebRTCSession::sendPeerDescription(PeerSession& session,
                                          const std::string& type,
                                          const std::string& sdp) {
-    if (!signalingClient_) {
-        return;
-    }
-
     nlohmann::json description = {
         {"type", type},
         {"sdp", sdp}
@@ -1059,16 +1254,23 @@ void WebRTCSession::sendPeerDescription(PeerSession& session,
         payload["description"] = description;
     }
 
-    signalingClient_->send(payload);
+    // Send via datachannel if available (play mode), otherwise via WebSocket
+    if (session.dataChannel && session.dataChannel->isOpen()) {
+        try {
+            std::string msg = payload.dump();
+            session.dataChannel->send(msg);
+            log("Sent SDP " + type + " via datachannel: " + msg.substr(0, 100) + "...");
+        } catch (const std::exception& ex) {
+            log(std::string("Failed to send via datachannel: ") + ex.what());
+        }
+    } else if (signalingClient_) {
+        sendSignalingMessage(payload);
+    }
 }
 
 void WebRTCSession::sendIceCandidate(PeerSession& session,
                                      const nlohmann::json& candidateJson,
                                      const std::string& type) {
-    if (!signalingClient_) {
-        return;
-    }
-
     nlohmann::json payload;
     payload["UUID"] = session.uuid;
     if (!session.sessionId.empty()) {
@@ -1094,7 +1296,17 @@ void WebRTCSession::sendIceCandidate(PeerSession& session,
         payload["candidates"] = candidates;
     }
 
-    signalingClient_->send(payload);
+    // Send via datachannel if available (play mode), otherwise via WebSocket
+    if (session.dataChannel && session.dataChannel->isOpen()) {
+        try {
+            std::string msg = payload.dump();
+            session.dataChannel->send(msg);
+        } catch (const std::exception& ex) {
+            log(std::string("Failed to send ICE via datachannel: ") + ex.what());
+        }
+    } else if (signalingClient_) {
+        sendSignalingMessage(payload);
+    }
 }
 
 void WebRTCSession::postInitialRequests() {
@@ -1107,23 +1319,29 @@ void WebRTCSession::postInitialRequests() {
             {"request", "joinroom"},
             {"roomid", hashedRoomId_.empty() ? config_.roomName : hashedRoomId_}
         };
-        signalingClient_->send(joinMessage);
+        sendSignalingMessage(joinMessage);
     } else {
         std::lock_guard<SpinLock> lock(mutex_);
+        log(std::string("postInitialRequests: mode=") + (config_.mode == ConnectionMode::Seed ? "Seed" : "Play") +
+            ", stream=" + config_.streamId);
         announceRoleIfReady();
     }
 }
 
 void WebRTCSession::announceRoleIfReady() {
+    log(std::string("announceRoleIfReady invoked; roleAnnounced=") + (roleAnnounced_ ? "true" : "false"));
     if (roleAnnounced_) {
+        log("announceRoleIfReady: role already announced");
         return;
     }
 
     if (!config_.roomName.empty() && !roomJoined_) {
+        log("announceRoleIfReady: waiting for room join");
         return;
     }
 
     if (!signalingClient_) {
+        log("announceRoleIfReady: signaling client unavailable");
         return;
     }
 
@@ -1133,18 +1351,20 @@ void WebRTCSession::announceRoleIfReady() {
     }
 
     if (config_.mode == ConnectionMode::Seed) {
+        log("announceRoleIfReady: sending seed request");
         nlohmann::json seedMessage = {
             {"request", "seed"},
             {"streamID", hashedStreamId_.empty() ? config_.streamId : hashedStreamId_}
         };
-        signalingClient_->send(seedMessage);
+        sendSignalingMessage(seedMessage);
         log("Sent seed request for stream " + config_.streamId);
     } else {
+        log("announceRoleIfReady: sending play request");
         nlohmann::json playMessage = {
             {"request", "play"},
             {"streamID", hashedStreamId_.empty() ? config_.streamId : hashedStreamId_}
         };
-        signalingClient_->send(playMessage);
+        sendSignalingMessage(playMessage);
         log("Sent play request for stream " + config_.streamId);
     }
 
@@ -1204,6 +1424,10 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
 }
 
 } // namespace webrtc_vst
+
+
+
+
 
 
 

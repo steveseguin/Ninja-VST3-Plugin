@@ -1,9 +1,11 @@
 #include "PluginController.h"
+#include "StreamIdGenerator.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 
 #include <base/source/fstring.h>
 #include <pluginterfaces/base/ibstream.h>
@@ -16,7 +18,7 @@
 namespace webrtc_vst {
 
 namespace {
-constexpr auto kDefaultStreamId = "vst-stream";
+
 constexpr auto kDefaultHandshakeUrl = "wss://wss0.vdo.ninja";
 
 std::string toAscii(const Steinberg::Vst::TChar* text) {
@@ -121,7 +123,9 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
 
     auto* streamIdParam = new StringParameter(STR16("Stream ID"), kParamStreamId);
     parameters.addParameter(streamIdParam);
-    streamIdParam->setDefaultString(kDefaultStreamId);
+    const auto initialStreamId = generateRandomStreamId();
+    streamIdParam->setDefaultString(initialStreamId);
+    streamIdParam->setString(initialStreamId);
 
     auto* roomNameParam = new StringParameter(STR16("Room Name"), kParamRoomName);
     parameters.addParameter(roomNameParam);
@@ -130,6 +134,13 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
     auto* handshakeUrlParam = new StringParameter(STR16("Handshake URL"), kParamHandshakeUrl);
     parameters.addParameter(handshakeUrlParam);
     handshakeUrlParam->setDefaultString(kDefaultHandshakeUrl);
+
+    auto* statusParam = new StringParameter(STR16("Status"), kParamStatus);
+    auto& statusInfo = const_cast<Steinberg::Vst::ParameterInfo&>(statusParam->getInfo());
+    statusInfo.flags |= Steinberg::Vst::ParameterInfo::kIsReadOnly;
+    statusInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
+    parameters.addParameter(statusParam);
+    statusParam->setDefaultString("Idle");
 
     auto* passwordParam = new StringParameter(STR16("Password"), kParamPassword);
     parameters.addParameter(passwordParam);
@@ -143,6 +154,9 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
                                                           0.0);
     disableEnc->setPrecision(0);
     parameters.addParameter(disableEnc);
+    auto& disableInfo = const_cast<Steinberg::Vst::ParameterInfo&>(disableEnc->getInfo());
+    disableInfo.flags |= Steinberg::Vst::ParameterInfo::kIsReadOnly;
+    disableInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
 
     return Steinberg::kResultOk;
 }
@@ -156,8 +170,10 @@ void WebRTCController::applyStateJson(const std::string& jsonString) {
         const auto json = nlohmann::json::parse(jsonString);
 
         if (auto it = json.find("streamId"); it != json.end()) {
+            const auto streamId = it->get<std::string>();
             if (auto* param = findStringParameter(kParamStreamId)) {
-                param->setString(it->get<std::string>());
+                param->setDefaultString(streamId);
+                param->setString(streamId);
             }
         }
 
@@ -179,12 +195,6 @@ void WebRTCController::applyStateJson(const std::string& jsonString) {
             }
         }
 
-        if (auto it = json.find("disableEncryption"); it != json.end()) {
-            if (auto* param = parameters.getParameter(kParamDisableEncryption)) {
-                param->setNormalized(it->get<bool>() ? 1.0 : 0.0);
-            }
-        }
-
         if (auto it = json.find("mode"); it != json.end()) {
             if (auto* param = parameters.getParameter(kParamMode)) {
                 const auto mode = it->get<std::string>();
@@ -202,9 +212,6 @@ void WebRTCController::applyStateJson(const std::string& jsonString) {
 std::string WebRTCController::exportStateJson() const {
     auto* modeParam = parameters.getParameter(kParamMode);
     const bool isSeed = modeParam && modeParam->getNormalized() >= 0.5;
-
-    auto* encParam = parameters.getParameter(kParamDisableEncryption);
-    bool disableEncryption = encParam && encParam->getNormalized() >= 0.5;
 
     const auto streamId = [this]() {
         if (auto* param = findStringParameter(kParamStreamId)) {
@@ -234,9 +241,7 @@ std::string WebRTCController::exportStateJson() const {
         return std::string{};
     }();
 
-    if (!disableEncryption && passwordImpliesDisableEncryption(password)) {
-        disableEncryption = true;
-    }
+    const bool disableEncryption = passwordImpliesDisableEncryption(password);
 
     nlohmann::json json = {
         {"streamId", streamId},
@@ -297,6 +302,8 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
     if (tag == kParamDisableEncryption) {
         if (suppressDisableEdit_) {
             suppressDisableEdit_ = false;
+        } else {
+            updateDisableEncryptionFromPassword();
         }
         return result;
     }
@@ -359,6 +366,45 @@ Steinberg::tresult PLUGIN_API WebRTCController::getState(Steinberg::IBStream* st
     auto* mutableData = const_cast<char*>(serialized.data());
     state->write(mutableData, static_cast<Steinberg::int32>(serialized.size()), &written);
     return Steinberg::kResultOk;
+}
+
+
+Steinberg::tresult PLUGIN_API WebRTCController::notify(Steinberg::Vst::IMessage* message) {
+    if (!message) {
+        return EditControllerEx1::notify(message);
+    }
+
+    if (std::strcmp(message->getMessageID(), "ConfigSync") == 0) {
+        const void* data = nullptr;
+        Steinberg::uint32 size = 0;
+        if (auto* attributes = message->getAttributes();
+            attributes && attributes->getBinary("config", data, size) == Steinberg::kResultTrue && data && size > 0) {
+            const char* charData = static_cast<const char*>(data);
+            std::string serialized(charData, (size > 0 && charData[size - 1] == '\0') ? size - 1 : size);
+            applyStateJson(serialized);
+        }
+        return Steinberg::kResultOk;
+    }
+    if (std::strcmp(message->getMessageID(), "StatusUpdate") == 0) {
+        const void* data = nullptr;
+        Steinberg::uint32 size = 0;
+        if (auto* attributes = message->getAttributes(); attributes && attributes->getBinary("status", data, size) == Steinberg::kResultTrue && data && size > 0) {
+            const char* charData = static_cast<const char*>(data);
+            std::string status(charData, (size > 0 && charData[size - 1] == '\0') ? size - 1 : size);
+            if (auto* statusParam = findStringParameter(kParamStatus)) {
+                statusParam->setString(status);
+                const auto normalized = statusParam->getNormalized();
+                if (componentHandler) {
+                    componentHandler->beginEdit(kParamStatus);
+                    componentHandler->performEdit(kParamStatus, normalized);
+                    componentHandler->endEdit(kParamStatus);
+                }
+            }
+        }
+        return Steinberg::kResultOk;
+    }
+
+    return EditControllerEx1::notify(message);
 }
 
 } // namespace webrtc_vst

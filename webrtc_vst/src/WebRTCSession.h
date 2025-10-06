@@ -23,6 +23,7 @@ namespace rtc {
 class PeerConnection;
 class Track;
 class RtpPacketizationConfig;
+class DataChannel;
 } // namespace rtc
 
 namespace webrtc_vst {
@@ -30,12 +31,17 @@ namespace webrtc_vst {
 class WebRTCSession {
 public:
     using LogSink = std::function<void(const std::string&)>;
+    using ConfigSink = std::function<void(const PluginConfig&)>;
 
-    WebRTCSession(AudioRingBuffer& receiveBuffer, LogSink logSink = {});
+    WebRTCSession(AudioRingBuffer& receiveBuffer,
+                  LogSink logSink = {},
+                  ConfigSink configSink = {});
     ~WebRTCSession();
 
     void start(const PluginConfig& config, double sampleRate, int channels);
     void stop();
+    void setConfigUpdateSink(ConfigSink sink);
+    void setLogSignalingMessages(bool enable);
 
     void pushOutgoingAudio(const float* const* inputs, size_t frames, int channels);
     size_t pullIncomingAudio(float* const* outputs, size_t frames, int channels);
@@ -76,6 +82,7 @@ private:
         std::shared_ptr<rtc::Track> localAudioTrack;
         std::shared_ptr<rtc::Track> remoteAudioTrack;
         std::shared_ptr<rtc::RtpPacketizationConfig> rtpConfig;
+        std::shared_ptr<rtc::DataChannel> dataChannel;  // For sending signaling messages in play mode
         std::string uuid;
         std::string sessionId;
         std::string streamId;
@@ -114,6 +121,7 @@ private:
     void processCandidateMessage(PeerSession& session, const nlohmann::json& candidateMessage);
     void queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject);
     void flushPendingIceLocked(PeerSession& session);
+    void sendSignalingMessage(const nlohmann::json& payload);
 
     void log(const std::string& line) const;
 
@@ -147,11 +155,18 @@ private:
     std::deque<float> outgoingFifo_;
 
     LogSink logSink_;
+    ConfigSink configUpdateSink_;
+    mutable std::mutex signalingLogMutex_;
 
     std::unordered_map<PeerKey, PeerSession> peerSessions_;
     std::unordered_map<std::string, PeerKey> sessionByUuid_;
     std::vector<PendingIce> pendingGlobalIce_;
     std::string salt_;
+    bool logSignalingMessages_{false};
+    std::string lastSentSignalingJson_;
+    std::string lastReceivedSignalingJson_;
+    bool suppressingSentDuplicate_{false};
+    bool suppressingReceivedDuplicate_{false};
     std::string hashedStreamId_;
     std::string hashedRoomId_;
     mutable std::optional<std::string> cachedPassword_;

@@ -129,6 +129,7 @@ set(PLUGIN_HEADERS
     src/AudioRingBuffer.h
     src/PluginConfig.h
     src/PluginController.h
+    src/StreamIdGenerator.h
     src/ParameterIDs.h
     src/ParameterStringRegistry.h
     src/Version.h

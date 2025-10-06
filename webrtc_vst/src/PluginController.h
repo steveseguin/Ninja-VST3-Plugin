@@ -6,6 +6,8 @@
 #include <public.sdk/source/vst/vsteditcontroller.h>
 #include <public.sdk/source/vst/vstparameters.h>
 
+namespace Steinberg { namespace Vst { class IMessage; } }
+
 namespace webrtc_vst {
 
 class StringParameter : public Steinberg::Vst::Parameter {
@@ -34,6 +36,7 @@ public:
     Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID tag,
                                                      Steinberg::Vst::ParamValue value) override;
     Steinberg::IPlugView* PLUGIN_API createView(const char* name) override;
+    Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) override;
 
 private:
     void applyStateJson(const std::string& jsonString);
