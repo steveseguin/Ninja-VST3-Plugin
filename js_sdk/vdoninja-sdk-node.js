@@ -119,6 +119,7 @@ const sdkContext = {
     RTCPeerConnection: webrtcAdapter.RTCPeerConnection,
     RTCSessionDescription: webrtcAdapter.RTCSessionDescription,
     RTCIceCandidate: webrtcAdapter.RTCIceCandidate,
+    MediaStream: webrtcAdapter.MediaStream,
     fetch: fetch
 };
 

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 
+#include "StreamIdGenerator.h"
 #include "ParameterIDs.h"
 #include "ParameterStringRegistry.h"
 
@@ -14,6 +15,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <vector>
+#include <iostream>
 
 #include <nlohmann/json.hpp>
 
@@ -52,14 +54,42 @@ bool passwordImpliesDisableEncryption(const std::string& value) {
     return lowered == "0" || lowered == "off" || lowered == "false";
 }
 }
+bool shouldLogToStdout() {
+    const char* env = std::getenv("WEBRTC_VST_LOG_STDOUT");
+    if (!env) {
+        return false;
+    }
+    if (env[0] == '0' && env[1] == '\0') {
+        return false;
+    }
+    return true;
+}
 
+bool shouldLogSignaling() {
+    const char* env = std::getenv("WEBRTC_VST_LOG_SIGNALING");
+    if (!env) {
+        return false;
+    }
+    if (env[0] == '0' && env[1] == '\0') {
+        return false;
+    }
+    return true;
+}
 
 WebRTCProcessor::WebRTCProcessor()
     : receiveBuffer_(kDefaultBufferFrames, 2),
-      session_(receiveBuffer_, [this](const std::string& line) {
-          SMTG_DBPRT1("[WebRTC] %s\n", line.c_str());
-      }) {
-    config_.streamId = "vst-stream";
+      session_(receiveBuffer_,
+               [logToStdout = shouldLogToStdout()](const std::string& line) {
+                   SMTG_DBPRT1("[WebRTC] %s\n", line.c_str());
+                   if (logToStdout) {
+                       std::cout << "[WebRTC] " << line << std::endl;
+                   }
+               },
+               [this](const PluginConfig& sanitized) {
+                   handleSanitizedConfig(sanitized);
+               }) {
+    session_.setLogSignalingMessages(shouldLogSignaling());
+    config_.streamId = generateRandomStreamId();
     config_.handshakeUrl = "wss://wss0.vdo.ninja";
     config_.mode = ConnectionMode::Play;
 }
@@ -78,6 +108,7 @@ tresult PLUGIN_API WebRTCProcessor::initialize(FUnknown* context) {
     addAudioOutput(STR16("Output"), SpeakerArr::kStereo);
 
     updateConfigFromEnvironment();
+    syncConfigToController();
     configDirty_ = true;
     return kResultOk;
 }
@@ -109,27 +140,11 @@ void WebRTCProcessor::updateConfigFromEnvironment() {
         config_.handshakeUrl = urlLegacy;
     }
 
-    bool autoDisable = passwordImpliesDisableEncryption(config_.password);
-    bool passwordBlank = trimCopy(config_.password).empty();
     if (const char* password = std::getenv("WEBRTC_VST_PASSWORD")) {
         config_.password = password;
-        autoDisable = passwordImpliesDisableEncryption(config_.password);
-        passwordBlank = trimCopy(config_.password).empty();
     }
 
-    bool disableExplicit = false;
-    if (const char* disableEnc = std::getenv("WEBRTC_VST_DISABLE_ENCRYPTION")) {
-        std::string value(disableEnc);
-        std::transform(value.begin(), value.end(), value.begin(), ::tolower);
-        config_.disableEncryption = (value == "1" || value == "true" || value == "yes");
-        disableExplicit = true;
-    }
-
-    if (autoDisable) {
-        config_.disableEncryption = true;
-    } else if (!disableExplicit && passwordBlank) {
-        config_.disableEncryption = false;
-    }
+    config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
 
     if (const char* modeEnv = std::getenv("WEBRTC_VST_MODE")) {
         std::string modeStr(modeEnv);
@@ -142,7 +157,7 @@ void WebRTCProcessor::updateConfigFromEnvironment() {
     }
 
     if (config_.streamId.empty()) {
-        config_.streamId = "vst-stream";
+        config_.streamId = generateRandomStreamId();
     }
 
     if (config_.handshakeUrl.empty()) {
@@ -191,8 +206,7 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
             configDirty_ = true;
             break;
         case kParamDisableEncryption:
-            config_.disableEncryption = value >= 0.5;
-            configDirty_ = true;
+            config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
             break;
         case kParamStreamId: {
             const auto idValue = normalizedToId(value);
@@ -221,12 +235,7 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
         case kParamPassword: {
             const auto idValue = normalizedToId(value);
             config_.password = ParameterStringRegistry::instance().lookup(idValue);
-            const bool autoDisable = passwordImpliesDisableEncryption(config_.password);
-            if (autoDisable && !config_.disableEncryption) {
-                config_.disableEncryption = true;
-            } else if (!autoDisable && config_.disableEncryption) {
-                config_.disableEncryption = false;
-            }
+            config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
             configDirty_ = true;
             break;
         }
@@ -251,9 +260,69 @@ void WebRTCProcessor::restartSessionIfNeeded() {
     startSession();
 }
 
+std::string WebRTCProcessor::serializeConfigToJson() const {
+    nlohmann::json json = {
+        {"streamId", config_.streamId},
+        {"roomName", config_.roomName},
+        {"handshakeUrl", config_.handshakeUrl},
+        {"mode", config_.mode == ConnectionMode::Seed ? "seed" : "play"},
+        {"password", config_.password},
+        {"disableEncryption", config_.disableEncryption}
+    };
+
+    json["roomId"] = config_.roomName;
+    json["signalingUrl"] = config_.handshakeUrl;
+
+    return json.dump();
+}
+
+void WebRTCProcessor::syncConfigToController() {
+    const auto serialized = serializeConfigToJson();
+    if (serialized.empty()) {
+        return;
+    }
+
+    if (auto* message = allocateMessage()) {
+        message->setMessageID("ConfigSync");
+        if (auto* attributes = message->getAttributes()) {
+            attributes->setBinary("config",
+                                  serialized.c_str(),
+                                  static_cast<Steinberg::uint32>(serialized.size() + 1));
+        }
+        sendMessage(message);
+    }
+}
+
+void WebRTCProcessor::handleSanitizedConfig(const PluginConfig& sanitizedConfig) {
+    bool updated = false;
+
+    if (config_.streamId != sanitizedConfig.streamId) {
+        config_.streamId = sanitizedConfig.streamId;
+        updated = true;
+    }
+
+    if (config_.roomName != sanitizedConfig.roomName) {
+        config_.roomName = sanitizedConfig.roomName;
+        updated = true;
+    }
+
+    if (config_.password != sanitizedConfig.password) {
+        config_.password = sanitizedConfig.password;
+        config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
+        updated = true;
+    }
+
+    if (!updated) {
+        return;
+    }
+
+    syncConfigToController();
+}
+
 tresult PLUGIN_API WebRTCProcessor::setActive(TBool state) {
     if (state) {
         configDirty_ = true;
+        restartSessionIfNeeded();
     } else {
         stopSession();
     }
@@ -375,23 +444,14 @@ tresult PLUGIN_API WebRTCProcessor::setState(IBStream* state) {
         if (auto it = json.find("password"); it != json.end()) {
             config_.password = it->get<std::string>();
         }
-        if (auto it = json.find("disableEncryption"); it != json.end()) {
-            config_.disableEncryption = it->get<bool>();
-        } else {
-            config_.disableEncryption = false;
-        }
-
-        if (passwordImpliesDisableEncryption(config_.password)) {
-            config_.disableEncryption = true;
-        } else if (trimCopy(config_.password).empty() && !json.contains("disableEncryption")) {
-            config_.disableEncryption = false;
-        }
+        config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
     } catch (...) {
         // ignore malformed state chunks
     }
 
     configDirty_ = true;
     restartSessionIfNeeded();
+    syncConfigToController();
 
     return kResultOk;
 }
@@ -402,19 +462,7 @@ tresult PLUGIN_API WebRTCProcessor::getState(IBStream* state) {
         return kInvalidArgument;
     }
 
-    nlohmann::json json = {
-        {"streamId", config_.streamId},
-        {"roomName", config_.roomName},
-        {"handshakeUrl", config_.handshakeUrl},
-        {"mode", config_.mode == ConnectionMode::Seed ? "seed" : "play"},
-        {"password", config_.password},
-        {"disableEncryption", config_.disableEncryption}
-    };
-
-    json["roomId"] = config_.roomName;
-    json["signalingUrl"] = config_.handshakeUrl;
-
-    const auto serialized = json.dump();
+    const auto serialized = serializeConfigToJson();
     Steinberg::int32 written = 0;
     auto* mutableData = const_cast<char*>(serialized.data());
     state->write(mutableData, static_cast<int32>(serialized.size()), &written);
@@ -432,6 +480,8 @@ Steinberg::tresult PLUGIN_API WebRTCProcessor::getControllerClassId(Steinberg::T
 }
 
 } // namespace webrtc_vst
+
+
 
 
 

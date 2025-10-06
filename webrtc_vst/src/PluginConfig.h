@@ -13,7 +13,7 @@ struct PluginConfig {
     ConnectionMode mode{ConnectionMode::Play};
     std::string streamId;
     std::string roomName;
-    std::string handshakeUrl{"wss://wss0.vdo.ninja"};
+    std::string handshakeUrl{"wss://wss.vdo.ninja"};
     bool enableAutoReconnect{true};
     bool enableAec{false};
     bool disableEncryption{false};

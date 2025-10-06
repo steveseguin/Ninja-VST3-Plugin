@@ -10,6 +10,7 @@ constexpr Steinberg::Vst::ParamID kParamRoomName = 2;
 constexpr Steinberg::Vst::ParamID kParamHandshakeUrl = 3;
 constexpr Steinberg::Vst::ParamID kParamPassword = 4;
 constexpr Steinberg::Vst::ParamID kParamDisableEncryption = 5;
+constexpr Steinberg::Vst::ParamID kParamStatus = 6;
 
 } // namespace webrtc_vst
 

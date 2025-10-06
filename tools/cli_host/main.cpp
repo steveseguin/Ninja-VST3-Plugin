@@ -6,7 +6,12 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <iomanip>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <cmath>
+
 #include <public.sdk/source/vst/hosting/hostclasses.h>
 #include <public.sdk/source/vst/hosting/module.h>
 #include <public.sdk/source/vst/hosting/plugprovider.h>
@@ -16,11 +21,16 @@
 #include <pluginterfaces/vst/ivstprocesscontext.h>
 #include <pluginterfaces/vst/vsttypes.h>
 
+#include "../../webrtc_vst/src/ParameterIDs.h"
+
 namespace {
 
 constexpr double kSampleRate = 48000.0;
 constexpr Steinberg::int32 kBlockSize = 256;
-constexpr int kProcessIterations = 200;
+constexpr int kDefaultProcessIterations = 200;
+constexpr double kDefaultToneFrequency = 1000.0;
+constexpr double kToneAmplitude = 0.25;
+constexpr double kTwoPi = 6.283185307179586476925286766559;
 
 struct BusBuffers {
     Steinberg::Vst::AudioBusBuffers buffers {};
@@ -40,6 +50,153 @@ std::string defaultPluginPath() {
     return candidate.string();
 }
 
+int parseIntEnv(const char* value, int fallback) {
+    if (!value) {
+        return fallback;
+    }
+    try {
+        int parsed = std::stoi(value);
+        return parsed > 0 ? parsed : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+double parseDoubleEnv(const char* value, double fallback) {
+    if (!value) {
+        return fallback;
+    }
+    try {
+        double parsed = std::stod(value);
+        return parsed > 0.0 ? parsed : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+int resolveIterationCount() {
+    const auto iterationsEnv = std::getenv("WEBRTC_CLI_HOST_ITERATIONS");
+    if (iterationsEnv) {
+        const int iterations = parseIntEnv(iterationsEnv, kDefaultProcessIterations);
+        std::cout << "[config] Using " << iterations << " iterations from WEBRTC_CLI_HOST_ITERATIONS" << std::endl;
+        return iterations;
+    }
+
+    const auto runtimeEnv = std::getenv("WEBRTC_CLI_HOST_RUNTIME_MS");
+    if (!runtimeEnv) {
+        std::cout << "[config] Using default " << kDefaultProcessIterations << " iterations" << std::endl;
+        return kDefaultProcessIterations;
+    }
+
+    const double runtimeMs = parseDoubleEnv(runtimeEnv, 0.0);
+    if (runtimeMs <= 0.0) {
+        std::cout << "[config] Using default " << kDefaultProcessIterations << " iterations" << std::endl;
+        return kDefaultProcessIterations;
+    }
+
+    const double blocksPerSecond = kSampleRate / static_cast<double>(kBlockSize);
+    const double totalBlocks = runtimeMs / 1000.0 * blocksPerSecond;
+    const int computed = static_cast<int>(std::ceil(totalBlocks));
+    std::cout << "[config] Using " << computed << " iterations from WEBRTC_CLI_HOST_RUNTIME_MS=" << runtimeMs << "ms" << std::endl;
+    return std::max(computed, 1);
+}
+
+double resolveToneFrequency() {
+    const auto freqEnv = std::getenv("WEBRTC_CLI_HOST_TONE_HZ");
+    return parseDoubleEnv(freqEnv, kDefaultToneFrequency);
+}
+
+int resolveTimeoutMs() {
+    const auto timeoutEnv = std::getenv("WEBRTC_CLI_HOST_TIMEOUT_MS");
+    if (!timeoutEnv) {
+        return 0;
+    }
+    return parseIntEnv(timeoutEnv, 0);
+}
+
+class ScopedTimeoutGuard {
+public:
+    explicit ScopedTimeoutGuard(int timeoutMs) {
+        if (timeoutMs <= 0) {
+            return;
+        }
+        timeoutMs_ = timeoutMs;
+        worker_ = std::thread([this]() {
+            std::unique_lock<std::mutex> lock(mutex_);
+            const auto completed = cv_.wait_for(lock,
+                                               std::chrono::milliseconds(timeoutMs_),
+                                               [this]() { return cancelled_; });
+            if (completed) {
+                return;
+            }
+            std::cerr << "[ERROR] CLI host timed out after " << timeoutMs_ << " ms" << std::endl;
+            std::exit(EXIT_FAILURE);
+        });
+    }
+
+    ~ScopedTimeoutGuard() {
+        if (!worker_.joinable()) {
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            cancelled_ = true;
+        }
+        cv_.notify_one();
+        worker_.join();
+    }
+
+    ScopedTimeoutGuard(const ScopedTimeoutGuard&) = delete;
+    ScopedTimeoutGuard& operator=(const ScopedTimeoutGuard&) = delete;
+
+private:
+    int timeoutMs_ = 0;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool cancelled_ = false;
+    std::thread worker_;
+};
+
+bool shouldMonitorOutput() {
+    const char* env = std::getenv("WEBRTC_CLI_HOST_MONITOR_OUTPUT");
+    if (!env) {
+        return false;
+    }
+    if (env[0] == '0' && env[1] == '\0') {
+        return false;
+    }
+    return true;
+}
+
+void accumulateOutputMetrics(const std::vector<BusBuffers>& outputBuses,
+                             double& energy,
+                             size_t& sampleCount) {
+    for (const auto& bus : outputBuses) {
+        const auto channelCount = bus.buffers.numChannels;
+        for (Steinberg::int32 channel = 0; channel < channelCount; ++channel) {
+            const auto index = static_cast<size_t>(channel);
+            if (index >= bus.storage.size()) {
+                continue;
+            }
+            const auto& storage = bus.storage[index];
+            for (float sample : storage) {
+                const double value = static_cast<double>(sample);
+                energy += value * value;
+                sampleCount += 1;
+            }
+        }
+    }
+}
+
+std::string string128ToAscii(const Steinberg::Vst::String128 text) {
+    std::string result;
+    for (int i = 0; i < 128 && text[i] != 0; ++i) {
+        const auto code = static_cast<uint32_t>(text[i]);
+        result.push_back(code <= 0x7F ? static_cast<char>(code) : '?');
+    }
+    return result;
+}
+
 bool prepareBuses(Steinberg::Vst::IComponent* component,
                   Steinberg::Vst::MediaType type,
                   Steinberg::Vst::BusDirection dir,
@@ -53,13 +210,11 @@ bool prepareBuses(Steinberg::Vst::IComponent* component,
             std::cerr << "Failed to activate bus " << busIndex << "\n";
             return false;
         }
-
         Steinberg::Vst::BusInfo info {};
         if (component->getBusInfo(type, dir, busIndex, info) != Steinberg::kResultOk) {
             std::cerr << "Failed to query bus info for index " << busIndex << "\n";
             return false;
         }
-
         auto& bus = outBuffers[static_cast<size_t>(busIndex)];
         bus.storage.resize(info.channelCount);
         bus.channelPtrs.resize(info.channelCount);
@@ -82,6 +237,16 @@ std::vector<Steinberg::Vst::SpeakerArrangement> stereoArrangements(Steinberg::in
     return arrangements;
 }
 
+void populateInputWithTone(std::vector<BusBuffers>& inputBuses,
+                           const std::vector<float>& toneBlock) {
+    for (auto& bus : inputBuses) {
+        for (Steinberg::int32 channel = 0; channel < bus.buffers.numChannels; ++channel) {
+            auto& storage = bus.storage[static_cast<size_t>(channel)];
+            std::copy(toneBlock.begin(), toneBlock.end(), storage.begin());
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -90,6 +255,13 @@ int main(int argc, char** argv) {
         std::cerr << "Plugin not found at: " << pluginPath << "\n";
         return 1;
     }
+
+    const int timeoutMs = resolveTimeoutMs();
+    ScopedTimeoutGuard timeoutGuard(timeoutMs);
+
+    const int iterationCount = resolveIterationCount();
+    const double toneFrequency = resolveToneFrequency();
+    const double tonePhaseIncrement = kTwoPi * toneFrequency / kSampleRate;
 
     static Steinberg::Vst::HostApplication hostApp;
     Steinberg::Vst::PluginContextFactory::instance().setPluginContext(&hostApp);
@@ -174,6 +346,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Allow time for WebRTC signaling handshake to complete
+    const int warmupMs = parseIntEnv(std::getenv("WEBRTC_CLI_HOST_WARMUP_MS"), 2000);
+    if (warmupMs > 0) {
+        std::cout << "[warmup] Waiting " << warmupMs << "ms for connection..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(warmupMs));
+    }
+
     const auto processingResult = processor->setProcessing(true);
     if (processingResult != Steinberg::kResultOk &&
         processingResult != Steinberg::kResultTrue &&
@@ -210,17 +389,55 @@ int main(int argc, char** argv) {
     data.outputs = outputBusViews.empty() ? nullptr : outputBusViews.data();
     data.processContext = &context;
 
-    if (!inputBuses.empty() && !inputBuses.front().storage.empty()) {
-        inputBuses.front().storage.front()[0] = 1.0f;
-    }
+    std::vector<float> toneBlock(kBlockSize, 0.0f);
+    double tonePhase = 0.0;
+    const bool monitorOutput = shouldMonitorOutput();
+    double outputEnergy = 0.0;
+    size_t outputSamples = 0;
 
-    for (int iteration = 0; iteration < kProcessIterations; ++iteration) {
-        if (processor->process(data) != Steinberg::kResultOk) {
+    for (int iteration = 0; iteration < iterationCount; ++iteration) {
+        if (!inputBuses.empty() && !toneBlock.empty()) {
+            for (int sample = 0; sample < kBlockSize; ++sample) {
+                toneBlock[static_cast<size_t>(sample)] =
+                    static_cast<float>(kToneAmplitude * std::sin(tonePhase));
+                tonePhase += tonePhaseIncrement;
+                if (tonePhase >= kTwoPi) {
+                    tonePhase -= kTwoPi;
+                }
+            }
+            populateInputWithTone(inputBuses, toneBlock);
+        }
+        const auto processResult = processor->process(data);
+        if (processResult != Steinberg::kResultOk) {
             std::cerr << "process call failed at iteration " << iteration << "\n";
             break;
         }
+        if (monitorOutput && !outputBuses.empty()) {
+            accumulateOutputMetrics(outputBuses, outputEnergy, outputSamples);
+        }
         context.projectTimeSamples += kBlockSize;
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    if (monitorOutput) {
+        if (outputSamples > 0) {
+            const double rms = std::sqrt(outputEnergy / static_cast<double>(outputSamples));
+            std::cout << "[monitor] output_rms="
+                      << std::fixed << std::setprecision(6) << rms << std::defaultfloat
+                      << " samples=" << outputSamples << std::endl;
+        } else {
+            std::cout << "[monitor] output_rms=0 samples=0" << std::endl;
+        }
+    }
+
+    if (controller) {
+        Steinberg::Vst::String128 status {};
+        const auto normalizedStatus = controller->getParamNormalized(webrtc_vst::kParamStatus);
+        if (controller->getParamStringByValue(webrtc_vst::kParamStatus, normalizedStatus, status) == Steinberg::kResultOk) {
+            const auto statusAscii = string128ToAscii(status);
+            if (!statusAscii.empty()) {
+                std::cout << "[status] " << statusAscii << std::endl;
+            }
+        }
     }
 
     processor->setProcessing(false);

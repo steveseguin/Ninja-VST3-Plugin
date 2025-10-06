@@ -28,6 +28,9 @@ private:
     void updateConfigFromEnvironment();
     void applyParameterChange(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value);
     void restartSessionIfNeeded();
+    void syncConfigToController();
+    std::string serializeConfigToJson() const;
+    void handleSanitizedConfig(const PluginConfig& sanitizedConfig);
 
     AudioRingBuffer receiveBuffer_;
     WebRTCSession session_;

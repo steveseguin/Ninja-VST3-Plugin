@@ -51,7 +51,7 @@ All runtime settings are exposed via the bundled VSTGUI editor and mirrored as V
 | Parameter | Description | Default |
 | --- | --- | --- |
 | `Connection Mode` | Choose `Play` to monitor a remote stream or `Seed` to publish the host input. | `Play` |
-| `Stream ID` | Stream identifier advertised to VDO.Ninja peers. | `vst-stream` |
+| `Stream ID` | Stream identifier advertised to VDO.Ninja peers. | *(random per load)* |
 | `Room Name` | Optional room namespace joined before seeding or playing. | *(empty)* |
 | `Handshake URL` | WebSocket endpoint used for the VDO.Ninja handshake. | `wss://wss0.vdo.ninja` |
 | `Password` | Optional room password / encryption key. Leave blank to use the default; entering `0`, `off` or `false` automatically disables encryption. | *(empty)* |
@@ -64,7 +64,7 @@ For backwards compatibility the plugin still honours the legacy environment vari
 | Variable | Description |
 | --- | --- |
 | `WEBRTC_VST_MODE` | Preferred mode (`seed` / `play`). |
-| `WEBRTC_VST_STREAM_ID` | Initial stream identifier. |
+| `WEBRTC_VST_STREAM_ID` | Initial stream identifier. Defaults to a random 8-character value when omitted. |
 | `WEBRTC_VST_ROOM_NAME` / `WEBRTC_VST_ROOM_ID` | Initial room name (legacy alias supported). |
 | `WEBRTC_VST_HANDSHAKE_URL` / `WEBRTC_VST_SIGNALING_URL` | Signaling WebSocket URL. |
 | `WEBRTC_VST_PASSWORD` | Initial password value. |
