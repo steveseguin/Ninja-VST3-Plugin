@@ -232,9 +232,16 @@ if(MSVC)
     endforeach()
 endif()
 
+# ---------------------------------------------------------------------------
+# Test Suite
+# ---------------------------------------------------------------------------
 
+option(WEBRTC_VST_BUILD_TESTS "Build test suite" ON)
 
-
+if(WEBRTC_VST_BUILD_TESTS)
+    message(STATUS "Building WebRTC VST test suite")
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../tests ${CMAKE_CURRENT_BINARY_DIR}/tests)
+endif()
 
 
 
