@@ -32,15 +32,18 @@ class WebRTCSession {
 public:
     using LogSink = std::function<void(const std::string&)>;
     using ConfigSink = std::function<void(const PluginConfig&)>;
+    using StatusSink = std::function<void(const std::string&)>;
 
     WebRTCSession(AudioRingBuffer& receiveBuffer,
                   LogSink logSink = {},
-                  ConfigSink configSink = {});
+                  ConfigSink configSink = {},
+                  StatusSink statusSink = {});
     ~WebRTCSession();
 
     void start(const PluginConfig& config, double sampleRate, int channels);
     void stop();
     void setConfigUpdateSink(ConfigSink sink);
+    void setStatusSink(StatusSink sink);
     void setLogSignalingMessages(bool enable);
 
     void pushOutgoingAudio(const float* const* inputs, size_t frames, int channels);
@@ -123,6 +126,7 @@ private:
     void flushPendingIceLocked(PeerSession& session);
     void sendSignalingMessage(const nlohmann::json& payload);
 
+    void emitStatus(const std::string& status) const;
     void log(const std::string& line) const;
 
     std::optional<std::string> effectivePassword() const;
@@ -148,6 +152,7 @@ private:
     std::string selfUuid_;
 
     mutable SpinLock mutex_;
+    std::atomic<bool> shuttingDown_{false};
     bool started_{false};
 
     ::OpusEncoder* opusEncoder_{nullptr};
@@ -156,6 +161,10 @@ private:
 
     LogSink logSink_;
     ConfigSink configUpdateSink_;
+    StatusSink statusSink_;
+    mutable SpinLock statusSinkMutex_;
+    std::atomic<bool> receivingAudio_{false};
+    std::atomic<bool> publishingAudio_{false};
     mutable std::mutex signalingLogMutex_;
 
     std::unordered_map<PeerKey, PeerSession> peerSessions_;
