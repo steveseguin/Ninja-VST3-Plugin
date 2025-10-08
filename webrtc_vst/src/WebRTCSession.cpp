@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace webrtc_vst {
 
@@ -297,17 +298,28 @@ size_t WebRTCSession::LinearResampler::processBuffer(const float* source,
     return outputInterleaved.empty() ? 0 : outputInterleaved.size() / static_cast<size_t>(channels);
 }
 
-WebRTCSession::WebRTCSession(AudioRingBuffer& receiveBuffer, LogSink logSink, ConfigSink configSink)
+WebRTCSession::WebRTCSession(AudioRingBuffer& receiveBuffer,
+                                     LogSink logSink,
+                                     ConfigSink configSink,
+                                     StatusSink statusSink)
     : receiveBuffer_(receiveBuffer),
       logSink_(std::move(logSink)),
-      configUpdateSink_(std::move(configSink)) {}
+      configUpdateSink_(std::move(configSink)),
+      statusSink_(std::move(statusSink)) {}
 
 WebRTCSession::~WebRTCSession() {
+    log("WebRTCSession::~WebRTCSession() destructor - enter");
     stop();
+    log("WebRTCSession::~WebRTCSession() destructor - complete");
 }
 
 void WebRTCSession::setConfigUpdateSink(ConfigSink sink) {
     configUpdateSink_ = std::move(sink);
+}
+
+void WebRTCSession::setStatusSink(StatusSink sink) {
+    std::lock_guard<SpinLock> lock(statusSinkMutex_);
+    statusSink_ = std::move(sink);
 }
 
 void WebRTCSession::setLogSignalingMessages(bool enable) {
@@ -323,6 +335,21 @@ void WebRTCSession::setLogSignalingMessages(bool enable) {
     }
     log(message);
 }
+
+void WebRTCSession::emitStatus(const std::string& status) const {
+    if (shuttingDown_.load(std::memory_order_acquire)) {
+        return;
+    }
+    StatusSink sink;
+    {
+        std::lock_guard<SpinLock> lock(statusSinkMutex_);
+        sink = statusSink_;
+    }
+    if (sink && !shuttingDown_.load(std::memory_order_acquire)) {
+        sink(status);
+    }
+}
+
 
 void WebRTCSession::log(const std::string& line) const {
     if (logSink_) {
@@ -591,14 +618,34 @@ WebRTCSession::PeerKey WebRTCSession::makePeerKey(const std::string& uuid, const
 }
 
 void WebRTCSession::resetAllPeerConnections() {
+    log("resetAllPeerConnections() - closing " + std::to_string(peerSessions_.size()) + " peer connections");
+
     for (auto& [key, session] : peerSessions_) {
         if (session.connection) {
-            session.connection->close();
+            try {
+                // Clear all callbacks before closing to prevent use-after-free
+                session.connection->onStateChange(nullptr);
+                session.connection->onGatheringStateChange(nullptr);
+                session.connection->onLocalDescription(nullptr);
+                session.connection->onLocalCandidate(nullptr);
+                session.connection->onTrack(nullptr);
+                session.connection->onDataChannel(nullptr);
+                session.connection->close();
+            } catch (...) {
+                // Ignore exceptions during cleanup
+            }
         }
+        // Clear track references
+        session.localAudioTrack.reset();
+        session.remoteAudioTrack.reset();
+        session.dataChannel.reset();
+        session.rtpConfig.reset();
     }
     peerSessions_.clear();
     sessionByUuid_.clear();
     pendingGlobalIce_.clear();
+
+    log("resetAllPeerConnections() - complete");
 }
 
 void WebRTCSession::closePeerSession(const PeerKey& key) {
@@ -645,28 +692,77 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
     auto keyCopy = key;
 
     session.connection->onStateChange([this, keyCopy](rtc::PeerConnection::State state) {
-        std::lock_guard<SpinLock> lock(mutex_);
-        auto it = peerSessions_.find(keyCopy);
-        if (it == peerSessions_.end()) {
-            return;
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;  // Prevent callback execution during/after shutdown
         }
-        if (state == rtc::PeerConnection::State::Connected) {
-            it->second.negotiationReady = true;
-            log("Peer connection connected: " + keyCopy);
-        } else if (state == rtc::PeerConnection::State::Closed || state == rtc::PeerConnection::State::Failed) {
-            log("Peer connection closed: " + keyCopy);
-            it->second.negotiationReady = false;
-            closePeerSession(keyCopy);
+        std::optional<std::string> statusMessage;
+        bool resetMediaFlags = false;
+        {
+            std::lock_guard<SpinLock> lock(mutex_);
+            auto it = peerSessions_.find(keyCopy);
+            if (it == peerSessions_.end()) {
+                return;
+            }
+
+            switch (state) {
+                case rtc::PeerConnection::State::Connecting:
+                    statusMessage = "Peer connecting...";
+                    break;
+                case rtc::PeerConnection::State::Connected:
+                    it->second.negotiationReady = true;
+                    log("Peer connection connected: " + keyCopy);
+                    statusMessage = (config_.mode == ConnectionMode::Seed)
+                                        ? std::string("Peer connected (publishing)")
+                                        : std::string("Peer connected");
+                    break;
+                case rtc::PeerConnection::State::Disconnected:
+                    log("Peer connection disconnected: " + keyCopy);
+                    it->second.negotiationReady = false;
+                    resetMediaFlags = true;
+                    statusMessage = "Peer disconnected";
+                    break;
+                case rtc::PeerConnection::State::Failed:
+                    log("Peer connection failed: " + keyCopy);
+                    it->second.negotiationReady = false;
+                    closePeerSession(keyCopy);
+                    resetMediaFlags = true;
+                    statusMessage = "Peer connection failed";
+                    break;
+                case rtc::PeerConnection::State::Closed:
+                    log("Peer connection closed: " + keyCopy);
+                    it->second.negotiationReady = false;
+                    closePeerSession(keyCopy);
+                    resetMediaFlags = true;
+                    statusMessage = "Peer connection closed";
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (resetMediaFlags) {
+            publishingAudio_.store(false, std::memory_order_relaxed);
+            receivingAudio_.store(false, std::memory_order_relaxed);
+        }
+
+        if (statusMessage) {
+            emitStatus(*statusMessage);
         }
     });
 
     session.connection->onGatheringStateChange([this, keyCopy](rtc::PeerConnection::GatheringState state) {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
         if (state == rtc::PeerConnection::GatheringState::Complete) {
             log("ICE gathering complete for " + keyCopy);
         }
     });
 
     session.connection->onLocalDescription([this, keyCopy](rtc::Description description) {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
         std::lock_guard<SpinLock> lock(mutex_);
         auto it = peerSessions_.find(keyCopy);
         if (it == peerSessions_.end()) {
@@ -677,6 +773,9 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
     });
 
     session.connection->onLocalCandidate([this, keyCopy](rtc::Candidate candidate) {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
         std::lock_guard<SpinLock> lock(mutex_);
         auto it = peerSessions_.find(keyCopy);
         if (it == peerSessions_.end()) {
@@ -695,6 +794,9 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
     });
 
     session.connection->onTrack([this, keyCopy](std::shared_ptr<rtc::Track> track) {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
         std::lock_guard<SpinLock> lock(mutex_);
         auto it = peerSessions_.find(keyCopy);
         if (it == peerSessions_.end()) {
@@ -708,12 +810,24 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
         auto depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
         track->setMediaHandler(depacketizer);
         track->onFrame([this](rtc::binary data, rtc::FrameInfo) {
-            if (!opusDecoder_) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
                 return;
             }
 
-            std::vector<float> decodeBuffer(kFrameSizeSamples * static_cast<size_t>(channelCount_));
-            int frameSamples = opus_decode_float(opusDecoder_,
+            // Double-check with mutex to prevent TOCTOU race
+            ::OpusDecoder* decoder = nullptr;
+            int channels = 0;
+            {
+                std::lock_guard<SpinLock> lock(mutex_);
+                if (!started_ || !opusDecoder_) {
+                    return;
+                }
+                decoder = opusDecoder_;
+                channels = channelCount_;
+            }
+
+            std::vector<float> decodeBuffer(kFrameSizeSamples * static_cast<size_t>(channels));
+            int frameSamples = opus_decode_float(decoder,
                                                  reinterpret_cast<const unsigned char*>(data.data()),
                                                  static_cast<opus_int32>(data.size()),
                                                  decodeBuffer.data(),
@@ -722,29 +836,32 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             if (frameSamples <= 0) {
                 return;
             }
+            if (!receivingAudio_.exchange(true, std::memory_order_acq_rel)) {
+                emitStatus("Receiving audio");
+            }
 
             std::vector<float> resampled;
             const size_t outFrames = incomingResampler_.processInterleaved(decodeBuffer.data(),
                                                                            static_cast<size_t>(frameSamples),
-                                                                           channelCount_,
+                                                                           channels,
                                                                            resampled);
             if (outFrames == 0 || resampled.empty()) {
                 return;
             }
 
-            std::vector<std::vector<float>> planar(channelCount_, std::vector<float>(outFrames));
+            std::vector<std::vector<float>> planar(channels, std::vector<float>(outFrames));
             for (size_t frame = 0; frame < outFrames; ++frame) {
-                for (int ch = 0; ch < channelCount_; ++ch) {
-                    planar[ch][frame] = resampled[frame * static_cast<size_t>(channelCount_) + ch];
+                for (int ch = 0; ch < channels; ++ch) {
+                    planar[ch][frame] = resampled[frame * static_cast<size_t>(channels) + ch];
                 }
             }
 
-            std::vector<const float*> channelPtrs(channelCount_);
-            for (int ch = 0; ch < channelCount_; ++ch) {
+            std::vector<const float*> channelPtrs(channels);
+            for (int ch = 0; ch < channels; ++ch) {
                 channelPtrs[ch] = planar[ch].data();
             }
 
-            receiveBuffer_.push(channelPtrs.data(), static_cast<size_t>(outFrames), channelCount_);
+            receiveBuffer_.push(channelPtrs.data(), static_cast<size_t>(outFrames), channels);
         });
         it->second.remoteAudioTrack = track;
     });
@@ -752,6 +869,9 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
     // For play mode, handle incoming datachannel and send viewer preferences
     if (!createLocalTracks && config_.mode == ConnectionMode::Play) {
         session.connection->onDataChannel([this, keyCopy](std::shared_ptr<rtc::DataChannel> dc) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
             log("Datachannel received from publisher");
 
             // Store datachannel in peer session for sending responses
@@ -765,6 +885,9 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             }
 
             dc->onOpen([this, keyCopy, dc]() {
+                if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
                 log("Datachannel opened, sending viewer preferences");
                 try {
                     nlohmann::json prefs = {
@@ -780,6 +903,9 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             });
 
             dc->onMessage([this](auto data) {
+                if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
                 // Handle incoming datachannel messages
                 std::visit([this](auto&& arg) {
                     using T = std::decay_t<decltype(arg)>;
@@ -893,8 +1019,12 @@ void WebRTCSession::processCandidateMessage(PeerSession& session, const nlohmann
 }
 
 void WebRTCSession::start(const PluginConfig& config, double sampleRate, int channels) {
+    // Clear shutdown flag when starting
+    shuttingDown_.store(false, std::memory_order_release);
+
     ConfigSink callback;
     std::optional<PluginConfig> sanitizedForCallback;
+    bool shouldEmitConnecting = false;
     {
         std::lock_guard<SpinLock> lock(mutex_);
         if (started_) {
@@ -938,14 +1068,22 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         int opusError = 0;
         opusEncoder_ = opus_encoder_create(static_cast<opus_int32>(48000), channelCount_, OPUS_APPLICATION_AUDIO, &opusError);
         if (opusError != OPUS_OK) {
-            log("Failed to create Opus encoder");
+            log("FATAL: Failed to create Opus encoder");
+            emitStatus("Error: Failed to create audio encoder");
             opusEncoder_ = nullptr;
+            return;  // Abort session start
         }
 
         opusDecoder_ = opus_decoder_create(static_cast<opus_int32>(48000), channelCount_, &opusError);
         if (opusError != OPUS_OK) {
-            log("Failed to create Opus decoder");
+            log("FATAL: Failed to create Opus decoder");
+            emitStatus("Error: Failed to create audio decoder");
+            if (opusEncoder_) {
+                opus_encoder_destroy(opusEncoder_);
+                opusEncoder_ = nullptr;
+            }
             opusDecoder_ = nullptr;
+            return;  // Abort session start
         }
 
         outgoingFifo_.clear();
@@ -955,31 +1093,61 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         roomJoined_ = false;
         roleAnnounced_ = false;
 
+        publishingAudio_.store(false, std::memory_order_relaxed);
+        receivingAudio_.store(false, std::memory_order_relaxed);
         signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
         signalingClient_->setCallbacks({
             [this]() {
+                if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
                 log("Connected to VDO.Ninja signaling server");
+                emitStatus("Signaling connected");
                 postInitialRequests();
             },
             [this]() {
+                if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
                 log("Signaling connection closed");
-                std::lock_guard<SpinLock> innerLock(mutex_);
-                resetAllPeerConnections();
+                bool notifyDisconnect = false;
+                {
+                    std::lock_guard<SpinLock> innerLock(mutex_);
+                    notifyDisconnect = started_;
+                    resetAllPeerConnections();
+                }
+                if (notifyDisconnect) {
+                    publishingAudio_.store(false, std::memory_order_relaxed);
+                    receivingAudio_.store(false, std::memory_order_relaxed);
+                    emitStatus("Signaling disconnected");
+                }
             },
             [this](const nlohmann::json& message) {
+                if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
                 handleSignalingMessage(message);
             },
             [this](const std::string& error) {
+                if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
                 log("Signaling error: " + error);
+                emitStatus(std::string("Error: ") + error);
             }
         });
 
         signalingClient_->connectAsync();
         started_ = true;
+        shouldEmitConnecting = true;
         if (sanitizedStream.changed && configUpdateSink_) {
             sanitizedForCallback = config_;
         }
         callback = configUpdateSink_;
+    }
+
+    if (shouldEmitConnecting) {
+        emitStatus("Connecting...");
     }
 
     if (callback && sanitizedForCallback) {
@@ -988,35 +1156,82 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
 }
 
 void WebRTCSession::stop() {
-    std::lock_guard<SpinLock> lock(mutex_);
-    if (!started_) {
-        return;
+    log("WebRTCSession::stop() - enter");
+
+    // Set shutdown flag FIRST to stop all callbacks immediately
+    shuttingDown_.store(true, std::memory_order_release);
+
+    // Mark as stopped to prevent new operations
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (!started_) {
+            log("WebRTCSession::stop() - already stopped");
+            shuttingDown_.store(false, std::memory_order_release);
+            return;
+        }
+        started_ = false;
     }
 
-    if (signalingClient_) {
-        signalingClient_->setCallbacks({});
-        signalingClient_->disconnect();
-        signalingClient_.reset();
+    log("WebRTCSession::stop() - clearing callbacks to prevent use-after-free");
+
+    // Clear all callbacks first to prevent any callbacks during destruction
+    {
+        std::lock_guard<SpinLock> lock(statusSinkMutex_);
+        statusSink_ = nullptr;
+    }
+    configUpdateSink_ = nullptr;
+
+    log("WebRTCSession::stop() - disconnecting signaling");
+
+    // Disconnect signaling without holding the main lock to avoid deadlocks
+    std::unique_ptr<VDONinjaSignalingClient> clientToDestroy;
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (signalingClient_) {
+            signalingClient_->setCallbacks({});
+            clientToDestroy = std::move(signalingClient_);
+        }
     }
 
-    resetAllPeerConnections();
-
-    if (opusEncoder_) {
-        opus_encoder_destroy(opusEncoder_);
-        opusEncoder_ = nullptr;
-    }
-    if (opusDecoder_) {
-        opus_decoder_destroy(opusDecoder_);
-        opusDecoder_ = nullptr;
+    if (clientToDestroy) {
+        clientToDestroy->disconnect();
+        clientToDestroy.reset();
     }
 
-    selfUuid_.clear();
-    hashedRoomId_.clear();
-    hashedStreamId_.clear();
-    started_ = false;
+    log("WebRTCSession::stop() - cleaning up resources");
 
-    outgoingResampler_.reset();
-    incomingResampler_.reset();
+    // Now cleanup everything else with the lock
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+
+        resetAllPeerConnections();
+
+        if (opusEncoder_) {
+            opus_encoder_destroy(opusEncoder_);
+            opusEncoder_ = nullptr;
+        }
+        if (opusDecoder_) {
+            opus_decoder_destroy(opusDecoder_);
+            opusDecoder_ = nullptr;
+        }
+
+        selfUuid_.clear();
+        hashedRoomId_.clear();
+        hashedStreamId_.clear();
+
+        outgoingResampler_.reset();
+        incomingResampler_.reset();
+        publishingAudio_.store(false, std::memory_order_relaxed);
+        receivingAudio_.store(false, std::memory_order_relaxed);
+    }
+
+    log("WebRTCSession::stop() - complete");
+
+    // Reset shutdown flag BEFORE emitting status so it can be sent
+    shuttingDown_.store(false, std::memory_order_release);
+
+    // Now emit "Idle" status (will succeed since shuttingDown_ is false)
+    emitStatus("Idle");
 }
 
 bool WebRTCSession::isConnected() const {
@@ -1073,7 +1288,7 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
         return;
     }
 
-    if (message.contains("request")) {
+    if (message.contains("request") && message["request"].is_string()) {
         const auto request = message["request"].get<std::string>();
         if (request == "offerSDP") {
             handleOfferRequest(message);
@@ -1210,6 +1425,12 @@ void WebRTCSession::handleRemoteCandidate(const nlohmann::json& message) {
 
     PeerSession* session = locateSession();
     if (!session) {
+        // Limit pending ICE queue to prevent unbounded memory growth
+        constexpr size_t kMaxPendingIce = 100;
+        if (pendingGlobalIce_.size() >= kMaxPendingIce) {
+            log("Warning: Pending ICE queue full, dropping oldest candidate");
+            pendingGlobalIce_.erase(pendingGlobalIce_.begin());
+        }
         pendingGlobalIce_.push_back({"candidate", message});
         return;
     }
@@ -1381,6 +1602,9 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
         return;
     }
 
+    if (!publishingAudio_.exchange(true, std::memory_order_acq_rel)) {
+        emitStatus("Publishing audio");
+    }
     std::vector<float> interleaved;
     const size_t producedFrames = outgoingResampler_.processPlanar(inputs, frames, channels, interleaved);
     if (producedFrames == 0 || interleaved.empty()) {
@@ -1424,10 +1648,4 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
 }
 
 } // namespace webrtc_vst
-
-
-
-
-
-
 

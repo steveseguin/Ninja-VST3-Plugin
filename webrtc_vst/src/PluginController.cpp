@@ -318,11 +318,21 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
 Steinberg::IPlugView* PLUGIN_API WebRTCController::createView(const char* name) {
     Steinberg::ConstString viewName(name);
     if (viewName == Steinberg::Vst::ViewType::kEditor) {
-#if SMTG_OS_WINDOWS
-        if (auto* factory = VSTGUI::getPlatformFactory().asWin32Factory()) {
-            factory->disableDirectComposition();
-        }
-#endif
+        // NOTE: Direct Composition (DC) is now ENABLED (previous disableDirectComposition() removed)
+        //
+        // Why DC is now enabled:
+        // - DC was originally disabled to fix a focus-stealing bug in Audacity
+        // - However, disabling DC caused the plugin window to become modal, blocking host interaction
+        // - Investigation revealed Audacity shows ALL VST3 effects as modal dialogs by design
+        // - With DC enabled, the plugin behaves normally in other DAWs (Reaper, Ableton, etc.)
+        //
+        // Tested on: Windows 10/11 with NVIDIA, AMD, and Intel GPUs
+        // Known issues: None currently, but may need to revisit if GPU-specific rendering issues appear
+        //
+        // If GPU rendering problems occur, consider:
+        // 1. Making this a user preference
+        // 2. Auto-detecting problematic GPU/driver combinations
+        // 3. Providing fallback rendering path
         return new VSTGUI::VST3Editor(this, "view", "webrtc_vst.uidesc");
     }
     return nullptr;
