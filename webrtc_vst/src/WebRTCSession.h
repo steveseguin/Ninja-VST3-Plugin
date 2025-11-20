@@ -5,16 +5,20 @@
 #include "VDONinjaSignalingClient.h"
 #include "SpinLock.h"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <deque>
 #include <functional>
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <cstring>
 
 #include <nlohmann/json.hpp>
 #include <opus.h>
@@ -172,8 +176,34 @@ private:
     std::vector<PendingIce> pendingGlobalIce_;
     std::string salt_;
     bool logSignalingMessages_{false};
-    std::string lastSentSignalingJson_;
-    std::string lastReceivedSignalingJson_;
+    struct SignalingJsonCache {
+        std::array<char, 1024> storage{};
+        size_t length{0};
+
+        void reset() {
+            length = 0;
+            storage[0] = '\0';
+        }
+
+        void assign(std::string_view text) {
+            const size_t maxCopy = storage.size() - 1;
+            length = std::min(text.size(), maxCopy);
+            std::memcpy(storage.data(), text.data(), length);
+            storage[length] = '\0';
+        }
+
+        bool equals(std::string_view text) const {
+            return length == text.size() &&
+                   std::memcmp(storage.data(), text.data(), length) == 0;
+        }
+
+        std::string_view view() const {
+            return std::string_view(storage.data(), length);
+        }
+    };
+
+    SignalingJsonCache lastSentSignalingJson_;
+    SignalingJsonCache lastReceivedSignalingJson_;
     bool suppressingSentDuplicate_{false};
     bool suppressingReceivedDuplicate_{false};
     std::string hashedStreamId_;

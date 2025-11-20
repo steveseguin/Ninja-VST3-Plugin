@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "vst",
   "version": "1.0.0",
   "description": "Integration tooling for WebRTC VST",
@@ -12,6 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@openai/codex": "^0.45.0",
     "@roamhq/wrtc": "^0.9.1",
     "ws": "^8.18.3"
   }

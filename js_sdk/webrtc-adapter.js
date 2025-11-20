@@ -18,6 +18,7 @@ class WebRTCAdapter {
         this.RTCSessionDescription = null;
         this.RTCIceCandidate = null;
         this.mediaDevices = null;
+        this.MediaStream = null;
         
         this._detectImplementation();
     }
@@ -34,6 +35,7 @@ class WebRTCAdapter {
             this.RTCSessionDescription = window.RTCSessionDescription;
             this.RTCIceCandidate = window.RTCIceCandidate;
             this.mediaDevices = navigator.mediaDevices;
+            this.MediaStream = window.MediaStream || this._getGlobalMediaStream() || this._createUnsupportedMediaStream();
             return;
         }
         
@@ -45,6 +47,8 @@ class WebRTCAdapter {
             this.RTCSessionDescription = wrtc.RTCSessionDescription;
             this.RTCIceCandidate = wrtc.RTCIceCandidate;
             this.mediaDevices = wrtc.mediaDevices || this._createMediaDevicesShim(wrtc);
+            const mediaStreamCtor = wrtc.MediaStream || (wrtc.default && wrtc.default.MediaStream);
+            this.MediaStream = mediaStreamCtor || this._getGlobalMediaStream() || this._createUnsupportedMediaStream();
             return;
         } catch (e) {
             // @roamhq/wrtc not available
@@ -58,6 +62,8 @@ class WebRTCAdapter {
             this.RTCSessionDescription = wrtc.RTCSessionDescription;
             this.RTCIceCandidate = wrtc.RTCIceCandidate;
             this.mediaDevices = wrtc.mediaDevices || this._createMediaDevicesShim(wrtc);
+            const mediaStreamCtor = wrtc.MediaStream || (wrtc.default && wrtc.default.MediaStream);
+            this.MediaStream = mediaStreamCtor || this._getGlobalMediaStream() || this._createUnsupportedMediaStream();
             return;
         } catch (e) {
             // wrtc not available
@@ -68,11 +74,12 @@ class WebRTCAdapter {
             const nodeDataChannel = require('node-datachannel');
             this.implementation = 'node-datachannel';
             this._setupNodeDataChannel(nodeDataChannel);
+            this.MediaStream = this._createUnsupportedMediaStream();
             return;
         } catch (e) {
             // node-datachannel not available
         }
-        
+
         // 5. No WebRTC implementation found
         throw new Error(
             'No WebRTC implementation found. Please install one of:\n' +
@@ -80,6 +87,30 @@ class WebRTCAdapter {
             '- node-datachannel\n' +
             'Or use this SDK in a browser environment.'
         );
+    }
+
+    /**
+     * Return global MediaStream constructor if available
+     * @private
+     */
+    _getGlobalMediaStream() {
+        if (typeof globalThis !== 'undefined' && globalThis.MediaStream) {
+            return globalThis.MediaStream;
+        }
+        return null;
+    }
+
+    /**
+     * Provide a placeholder that clearly signals missing media support
+     * @private
+     */
+    _createUnsupportedMediaStream() {
+        const message = 'Media streams are not supported by the current WebRTC implementation';
+        return class MediaStreamUnsupported {
+            constructor() {
+                throw new Error(message);
+            }
+        };
     }
     
     /**

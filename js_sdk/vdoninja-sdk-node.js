@@ -110,7 +110,8 @@ const sdkContext = {
     },
     window: {
         crypto: require('crypto').webcrypto || require('crypto'),
-        EventTarget: EventTargetPolyfill
+        EventTarget: EventTargetPolyfill,
+        MediaStream: webrtcAdapter.MediaStream
     },
     TextEncoder: TextEncoder,
     TextDecoder: TextDecoder,

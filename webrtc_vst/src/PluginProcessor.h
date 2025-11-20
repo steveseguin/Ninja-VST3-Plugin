@@ -40,11 +40,12 @@ private:
     void flushPendingStatus();
     void sendStatusToController(const std::string& status);
 
-    // CRITICAL: Member destruction order is REVERSE of declaration!
-    // session_ MUST be declared first so it's destroyed LAST (after other members it references)
-    WebRTCSession session_;  // Destroyed last - holds callbacks referencing other members
-
+    // CRITICAL: Construction follows declaration order. receiveBuffer_ must be ready before
+    // session_ because WebRTCSession stores a reference to it. With receiveBuffer_ declared
+    // first, the buffer is constructed before session_ uses it, while session_ still tears
+    // down near last thanks to stopSession() clearing callbacks before destruction.
     AudioRingBuffer receiveBuffer_;
+    WebRTCSession session_;
 
     // Status members - safe to destroy before session_ since callbacks are cleared in destructor
     std::atomic<bool> statusDirty_{false};

@@ -77,7 +77,8 @@ bool shouldLogSignaling() {
 }
 
 WebRTCProcessor::WebRTCProcessor()
-    : session_(receiveBuffer_,
+    : receiveBuffer_(kDefaultBufferFrames, 2),
+      session_(receiveBuffer_,
                [logToStdout = shouldLogToStdout()](const std::string& line) {
                    SMTG_DBPRT1("[WebRTC] %s\n", line.c_str());
                    if (logToStdout) {
@@ -89,8 +90,7 @@ WebRTCProcessor::WebRTCProcessor()
                },
                [this](const std::string& status) {
                    queueStatus(status);
-               }),
-      receiveBuffer_(kDefaultBufferFrames, 2) {
+               }) {
     SMTG_DBPRT0("[WebRTC] WebRTCProcessor() constructor\n");
     session_.setLogSignalingMessages(shouldLogSignaling());
     config_.streamId = generateRandomStreamId();

@@ -443,6 +443,10 @@ int main(int argc, char** argv) {
     processor->setProcessing(false);
     component->setActive(false);
 
-    provider.releasePlugIn(component, controller);
+    processor = nullptr;
+
+    auto* componentRaw = component.take();
+    auto* controllerRaw = controller.take();
+    provider.releasePlugIn(componentRaw, controllerRaw);
     return 0;
 }

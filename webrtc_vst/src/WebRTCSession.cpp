@@ -323,15 +323,15 @@ void WebRTCSession::setStatusSink(StatusSink sink) {
 }
 
 void WebRTCSession::setLogSignalingMessages(bool enable) {
-    std::string message;
+    const char* message = enable ? "Signaling message logging enabled"
+                                 : "Signaling message logging disabled";
     {
         std::lock_guard<std::mutex> lock(signalingLogMutex_);
         logSignalingMessages_ = enable;
-        lastSentSignalingJson_.clear();
-        lastReceivedSignalingJson_.clear();
+        lastSentSignalingJson_.reset();
+        lastReceivedSignalingJson_.reset();
         suppressingSentDuplicate_ = false;
         suppressingReceivedDuplicate_ = false;
-        message = std::string("Signaling message logging ") + (enable ? "enabled" : "disabled");
     }
     log(message);
 }
@@ -368,7 +368,7 @@ void WebRTCSession::sendSignalingMessage(const nlohmann::json& payload) {
         if (logSignalingMessages_) {
             try {
                 const std::string dump = payload.dump();
-                if (dump == lastSentSignalingJson_) {
+                if (lastSentSignalingJson_.equals(dump)) {
                     if (!suppressingSentDuplicate_) {
                         logLine = std::string("=> signaling: ") + dump +
                                   " (duplicate; suppressing further identical messages)";
@@ -376,12 +376,12 @@ void WebRTCSession::sendSignalingMessage(const nlohmann::json& payload) {
                     }
                 } else {
                     logLine = std::string("=> signaling: ") + dump;
-                    lastSentSignalingJson_ = dump;
+                    lastSentSignalingJson_.assign(dump);
                     suppressingSentDuplicate_ = false;
                 }
             } catch (...) {
                 logLine = "=> signaling: <unserializable payload>";
-                lastSentSignalingJson_.clear();
+                lastSentSignalingJson_.reset();
                 suppressingSentDuplicate_ = false;
             }
         }
@@ -1251,7 +1251,7 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
         if (logSignalingMessages_) {
             try {
                 const std::string dump = originalMessage.dump();
-                if (dump == lastReceivedSignalingJson_) {
+                if (lastReceivedSignalingJson_.equals(dump)) {
                     if (!suppressingReceivedDuplicate_) {
                         logLine = std::string("<= signaling: ") + dump +
                                   " (duplicate; suppressing further identical messages)";
@@ -1259,12 +1259,12 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
                     }
                 } else {
                     logLine = std::string("<= signaling: ") + dump;
-                    lastReceivedSignalingJson_ = dump;
+                    lastReceivedSignalingJson_.assign(dump);
                     suppressingReceivedDuplicate_ = false;
                 }
             } catch (...) {
                 logLine = "<= signaling: <unserializable message>";
-                lastReceivedSignalingJson_.clear();
+                lastReceivedSignalingJson_.reset();
                 suppressingReceivedDuplicate_ = false;
             }
         }

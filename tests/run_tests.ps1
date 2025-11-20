@@ -152,4 +152,8 @@ if ($allTestsPassed) {
 
 Write-Host "============================================================" -ForegroundColor Cyan
 
-exit ($allTestsPassed ? 0 : 1)
+if ($allTestsPassed) {
+    exit 0
+} else {
+    exit 1
+}
