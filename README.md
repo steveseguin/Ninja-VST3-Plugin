@@ -8,6 +8,12 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 - `tools/tests/integration/`: Integration tests, including audio-only play behavior checks.
 - `docs/`: Marketing/download page intended for GitHub Pages.
 
+## Build and test quick start
+
+- Build/test doc: [docs/developer/BUILD_AND_TEST.md](./docs/developer/BUILD_AND_TEST.md)
+- Primary automation tests: `npm run test:integration`
+- Live room smoke test: `npm run test:integration:live`
+
 ## Downloads
 
 - Releases: https://github.com/steveseguin/vst/releases

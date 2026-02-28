@@ -10,6 +10,7 @@ This folder is intended for GitHub Pages (`/docs` source) and contains:
 - `index.html`: Marketing + release download page.
 - `styles.css`: Site styling and layout.
 - `app.js`: Client-side release API integration.
+- `developer/BUILD_AND_TEST.md`: Consolidated engineering guide for local build and test.
 
 ## Publish
 

@@ -8,7 +8,6 @@ node_modules/
 vst3sdk/
 
 # Local agent and reference content
-.claude/
 _refs/
 
 # OS/editor metadata

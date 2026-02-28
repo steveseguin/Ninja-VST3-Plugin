@@ -9,6 +9,10 @@
     "test:play-request-audio-only": "node tools/tests/integration/play_request_audio_only.test.js",
     "test:play-ignore-video": "node tools/tests/integration/play_ignores_video_track.test.js",
     "test:play-room-live": "node tools/tests/integration/play_room_audio_live.test.js",
+    "test:integration:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
+    "test:integration:local": "npm run test:cli-loopback && npm run test:publish-audio",
+    "test:integration:live": "npm run test:play-room-live",
+    "test:integration": "npm run test:integration:audio-only && npm run test:integration:local",
     "test:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
     "test": "npm run test:audio-only"
   },

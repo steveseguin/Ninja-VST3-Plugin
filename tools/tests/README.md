@@ -86,6 +86,13 @@ WEBRTC_TEST_ROOM_NAME=your_room WEBRTC_TEST_STREAM_ID=your_stream WEBRTC_TEST_PA
 npm run test:audio-only
 ```
 
+## Integration Test Groups
+
+- `npm run test:integration:audio-only`: audio-only signaling and playback behavior.
+- `npm run test:integration:local`: local loopback + publish path checks.
+- `npm run test:integration:live`: live room playback verification.
+- `npm run test:integration`: audio-only + local integration gate.
+
 ## Existing Integration Tests
 
 - `npm run test:publish-audio`: CLI seed publishes to SDK viewer with audio-only view options.
