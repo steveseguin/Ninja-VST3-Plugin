@@ -19,7 +19,7 @@ namespace webrtc_vst {
 
 namespace {
 
-constexpr auto kDefaultHandshakeUrl = "wss://wss0.vdo.ninja";
+constexpr auto kDefaultHandshakeUrl = "wss://wss.vdo.ninja";
 
 std::string toAscii(const Steinberg::Vst::TChar* text) {
     if (!text) {

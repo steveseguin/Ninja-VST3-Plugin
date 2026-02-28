@@ -252,10 +252,17 @@ target_compile_features(webrtc_vst_cli_host PRIVATE cxx_std_20)
 target_sources(webrtc_vst_cli_host
     PRIVATE
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp
-        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/connectionproxy.cpp
 )
+
+if(WIN32)
+    target_sources(webrtc_vst_cli_host PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp)
+elseif(APPLE)
+    target_sources(webrtc_vst_cli_host PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_mac.mm)
+else()
+    target_sources(webrtc_vst_cli_host PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp)
+endif()
 
 if(MSVC)
     foreach(tgt ${PLUGIN_NAME} webrtc_vst_cli_host LibDataChannel::LibDataChannel ixwebsocket opus)

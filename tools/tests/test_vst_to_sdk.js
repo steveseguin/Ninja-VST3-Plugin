@@ -36,7 +36,8 @@ let audioDataFlowing = false;
 
 // Start VST plugin in seed mode
 console.log('[VST] Starting plugin in seed mode...');
-const cliPath = 'build/webrtc_vst_win/bin/Release/webrtc_vst_cli_host.exe';
+const isWin = process.platform === "win32";
+const cliPath = `build/${isWin ? "webrtc_vst_win" : "webrtc_vst_linux"}/bin/Release/webrtc_vst_cli_host${isWin ? ".exe" : ""}`;
 
 const vst = spawn('powershell.exe', [
     '-NoLogo',

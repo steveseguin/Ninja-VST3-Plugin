@@ -8,7 +8,10 @@ const { spawn } = require("child_process");
 const rootDir = path.resolve(__dirname, "../../..");
 process.chdir(rootDir);
 
-const cliExecutable = path.join(rootDir, "build", "webrtc_vst_win", "bin", "Release", "webrtc_vst_cli_host.exe");
+const isWin = process.platform === "win32";
+const buildDir = isWin ? "webrtc_vst_win" : "webrtc_vst_linux";
+const cliExeName = isWin ? "webrtc_vst_cli_host.exe" : "webrtc_vst_cli_host";
+const cliExecutable = path.join(rootDir, "build", buildDir, "bin", "Release", cliExeName);
 if (!fs.existsSync(cliExecutable)) {
     console.error("[ERROR] CLI host not found at " + cliExecutable + ". Build the project first.");
     process.exit(1);

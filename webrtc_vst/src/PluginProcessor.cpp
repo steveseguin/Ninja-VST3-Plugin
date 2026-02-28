@@ -95,7 +95,7 @@ WebRTCProcessor::WebRTCProcessor()
     session_.setLogSignalingMessages(shouldLogSignaling());
     std::lock_guard<std::mutex> lock(configMutex_);
     config_.streamId = generateRandomStreamId();
-    config_.handshakeUrl = "wss://wss0.vdo.ninja";
+    config_.handshakeUrl = "wss://wss.vdo.ninja";
     config_.mode = ConnectionMode::Play;
     modeAtomic_.store(config_.mode, std::memory_order_release);
 }
@@ -196,7 +196,7 @@ void WebRTCProcessor::updateConfigFromEnvironment() {
     }
 
     if (config_.handshakeUrl.empty()) {
-        config_.handshakeUrl = "wss://wss0.vdo.ninja";
+        config_.handshakeUrl = "wss://wss.vdo.ninja";
     }
     modeAtomic_.store(config_.mode, std::memory_order_release);
 }

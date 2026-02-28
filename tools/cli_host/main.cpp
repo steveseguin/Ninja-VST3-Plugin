@@ -39,6 +39,7 @@ struct BusBuffers {
 };
 
 std::string defaultPluginPath() {
+#if defined(_WIN32)
     const auto candidate = std::filesystem::path("build") /
                            "webrtc_vst_win" /
                            "VST3" /
@@ -47,6 +48,22 @@ std::string defaultPluginPath() {
                            "Contents" /
                            "x86_64-win" /
                            "webrtc_vst.vst3";
+#elif defined(__APPLE__)
+    const auto candidate = std::filesystem::path("build") /
+                           "webrtc_vst_mac" /
+                           "VST3" /
+                           "Release" /
+                           "webrtc_vst.vst3" /
+                           "Contents" /
+                           "MacOS" /
+                           "webrtc_vst";
+#else
+    const auto candidate = std::filesystem::path("build") /
+                           "webrtc_vst_linux" /
+                           "VST3" /
+                           "Release" /
+                           "webrtc_vst.vst3";
+#endif
     return candidate.string();
 }
 
