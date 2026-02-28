@@ -69,6 +69,31 @@ set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "Skip running the VST3 validator durin
 add_subdirectory(${vst3sdk_SOURCE_DIR} ${CMAKE_BINARY_DIR}/vst3sdk)
 smtg_enable_vst3_sdk()
 
+# OpenSSL is required by both this project and libdatachannel's libsrtp dependency.
+# Resolve it before FetchContent to avoid nested dependency configure failures.
+if(MSVC)
+    if(NOT DEFINED OPENSSL_ROOT_DIR OR OPENSSL_ROOT_DIR STREQUAL "")
+        set(_openssl_candidates "")
+        if(DEFINED ENV{VCPKG_ROOT} AND NOT "$ENV{VCPKG_ROOT}" STREQUAL "")
+            list(APPEND _openssl_candidates "$ENV{VCPKG_ROOT}/installed/x64-windows-static")
+        endif()
+        list(APPEND _openssl_candidates
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../deps/vcpkg/installed/x64-windows-static"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../deps/vcpkg/installed/x64-windows-static"
+        )
+
+        foreach(_cand IN LISTS _openssl_candidates)
+            if(EXISTS "${_cand}/include/openssl/ssl.h" AND EXISTS "${_cand}/lib/libcrypto.lib")
+                set(OPENSSL_ROOT_DIR "${_cand}" CACHE PATH "Path to OpenSSL root" FORCE)
+                break()
+            endif()
+        endforeach()
+    endif()
+    set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Prefer static OpenSSL" FORCE)
+endif()
+
+find_package(OpenSSL REQUIRED)
+
 FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
@@ -106,6 +131,8 @@ set(LIBDATACHANNEL_USE_ASIO OFF CACHE BOOL "" FORCE)
 set(NO_EXAMPLES ON CACHE BOOL "Disable libdatachannel examples" FORCE)
 set(NO_TESTS ON CACHE BOOL "Disable libdatachannel tests" FORCE)
 set(USE_TLS ON CACHE BOOL "Enable TLS support in IXWebSocket" FORCE)
+set(USE_OPEN_SSL ON CACHE BOOL "Enable OpenSSL backend in IXWebSocket" FORCE)
+set(USE_MBED_TLS OFF CACHE BOOL "Disable mbedTLS backend in IXWebSocket" FORCE)
 set(USE_ZLIB OFF CACHE BOOL "Disable zlib dependency in IXWebSocket" FORCE)
 
 set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -115,7 +142,6 @@ set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(nlohmann_json libdatachannel ixwebsocket opus)
 
 find_package(Threads REQUIRED)
-find_package(OpenSSL REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Plugin target
