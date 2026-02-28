@@ -6,8 +6,14 @@ This project targets a VST3 plugin build and integration validation flow.
 
 - Windows + Visual Studio 2022 C++ toolchain
 - CMake 3.24+
-- A local VST3 SDK checkout (recommended path: `./vst3sdk`, not committed)
+- A local VST3 SDK checkout at 3.8+ (MIT), recommended path: `./vst3sdk` (not committed)
 - Node.js (for integration tests in `tools/tests`)
+
+Recommended SDK checkout:
+
+```powershell
+git clone --branch v3.8.0_build_66 --recurse-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
+```
 
 ## Configure + build (Windows)
 

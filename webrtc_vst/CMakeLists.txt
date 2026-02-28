@@ -24,9 +24,21 @@ endif()
 
 set(VST3_SDK_ROOT "${VST3_SDK_ROOT}" CACHE PATH "Path to the VST3 SDK" FORCE)
 set(_VST3_MODULE_FILE "${VST3_SDK_ROOT}/cmake/modules/SMTG_VST3_SDK.cmake")
+set(_VST3_LICENSE_FILE "${VST3_SDK_ROOT}/LICENSE.txt")
 
 if(NOT EXISTS "${_VST3_MODULE_FILE}")
     message(FATAL_ERROR "Could not locate SMTG_VST3_SDK.cmake under ${VST3_SDK_ROOT}; ensure you cloned the VST3 SDK with submodules (git submodule update --init --recursive) and that VST3_SDK_ROOT points to the SDK root")
+endif()
+
+if(NOT EXISTS "${_VST3_LICENSE_FILE}")
+    message(FATAL_ERROR "Could not locate ${_VST3_LICENSE_FILE}; use Steinberg VST3 SDK 3.8+ with complete source checkout")
+endif()
+
+# Enforce VST3 SDK 3.8+ MIT licensing to avoid older GPL/proprietary dual-license variants.
+file(READ "${_VST3_LICENSE_FILE}" _vst3_license_text)
+string(FIND "${_vst3_license_text}" "MIT License" _vst3_mit_license_pos)
+if(_vst3_mit_license_pos EQUAL -1)
+    message(FATAL_ERROR "Detected non-MIT VST3 SDK license in ${_VST3_LICENSE_FILE}. Use VST3 SDK 3.8+ (MIT).")
 endif()
 
 if(NOT DEFINED CMAKE_CONFIGURATION_TYPES)

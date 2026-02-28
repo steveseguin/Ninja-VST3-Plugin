@@ -23,8 +23,7 @@ jobs:
       - name: Clone Steinberg VST3 SDK
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/steinbergmedia/vst3sdk.git vst3sdk
-          git -C vst3sdk submodule update --init --recursive
+          git clone --branch v3.8.0_build_66 --recurse-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
 
       - name: Configure CMake
         shell: pwsh
