@@ -98,6 +98,9 @@ private:
         bool negotiationReady{false};
         bool remoteDescriptionSet{false};
         bool localDescriptionSet{false};
+        bool loggedFirstOutgoingFrame{false};
+        uint64_t outgoingSendCount{0};
+        uint64_t outgoingDroppedNotOpenCount{0};
     };
 
     using PeerKey = std::string;
@@ -170,6 +173,12 @@ private:
     std::atomic<bool> receivingAudio_{false};
     std::atomic<bool> publishingAudio_{false};
     mutable std::mutex signalingLogMutex_;
+    uint64_t incomingFrameCount_{0};
+    uint64_t incomingDecodeErrorCount_{0};
+    bool loggedFirstIncomingFrame_{false};
+    uint64_t incomingRtpPacketCount_{0};
+    bool loggedFirstIncomingRtpPacket_{false};
+    bool onFrameDecodeSeen_{false};
 
     std::unordered_map<PeerKey, PeerSession> peerSessions_;
     std::unordered_map<std::string, PeerKey> sessionByUuid_;

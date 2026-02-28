@@ -1,0 +1,65 @@
+name: Build And Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Clone Steinberg VST3 SDK
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/steinbergmedia/vst3sdk.git vst3sdk
+          git -C vst3sdk submodule update --init --recursive
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S webrtc_vst -B build/webrtc_vst_win `
+            -G "Visual Studio 17 2022" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DVST3_SDK_ROOT="${{ github.workspace }}\\vst3sdk" `
+            -DWEBRTC_VST_BUILD_TESTS=OFF
+
+      - name: Build plugin
+        shell: pwsh
+        run: cmake --build build/webrtc_vst_win --config Release --target webrtc_vst
+
+      - name: Package VST3 artifact
+        id: package
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $sourceDir = "build/webrtc_vst_win/VST3/Release/webrtc_vst.vst3"
+          if (-not (Test-Path $sourceDir)) {
+            throw "Expected plugin bundle not found at $sourceDir"
+          }
+
+          $assetName = "webrtc_vst-$tag-windows-vst3.zip"
+          $assetPath = Join-Path "${{ github.workspace }}" $assetName
+          Compress-Archive -Path $sourceDir -DestinationPath $assetPath -Force
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.asset_path }}
+          generate_release_notes: true
+          append_body: true
+          body: |
+            Automated Windows VST3 build artifact.

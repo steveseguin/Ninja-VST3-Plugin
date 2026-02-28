@@ -7,7 +7,10 @@
 #include <public.sdk/source/vst/vstaudioeffect.h>
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <string>
+#include <thread>
 
 namespace webrtc_vst {
 
@@ -28,11 +31,12 @@ public:
     Steinberg::tresult PLUGIN_API getControllerClassId(Steinberg::TUID classId) override;
 
 private:
-    void startSession();
+    void startSession(const PluginConfig& config);
     void stopSession();
     void updateConfigFromEnvironment();
     void applyParameterChange(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value);
-    void restartSessionIfNeeded();
+    void requestConfigApply();
+    void configThreadMain();
     void syncConfigToController();
     std::string serializeConfigToJson() const;
     void handleSanitizedConfig(const PluginConfig& sanitizedConfig);
@@ -54,9 +58,23 @@ private:
     std::string lastSentStatus_{"Idle"};
 
     PluginConfig config_;
+    mutable std::mutex configMutex_;
+    std::condition_variable configCv_;
+    std::thread configThread_;
+    std::atomic<bool> configThreadExit_{false};
+    std::atomic<bool> configPending_{false};
+    std::atomic<bool> hostActive_{false};
+    std::atomic<ConnectionMode> modeAtomic_{ConnectionMode::Play};
+    std::atomic<bool> processingReady_{false};
+    std::atomic<bool> controllerSyncPending_{false};
+
     Steinberg::Vst::ProcessSetup processSetup_{};
-    bool sessionActive_{false};
-    bool configDirty_{false};
+    std::atomic<bool> sessionActive_{false};
+    std::atomic<bool> configDirty_{false};
+    std::atomic<bool> loggedSeedProcessState_{false};
+    std::atomic<bool> loggedPlayProcessState_{false};
+    std::atomic<bool> loggedSeedPushAttempt_{false};
+    std::atomic<int> lastLoggedMode_{-1};
 };
 
 extern const Steinberg::FUID kWebRTCProcessorUID;

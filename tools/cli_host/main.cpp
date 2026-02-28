@@ -114,6 +114,22 @@ int resolveTimeoutMs() {
     return parseIntEnv(timeoutEnv, 0);
 }
 
+int resolveBlockSleepMs() {
+    const auto sleepEnv = std::getenv("WEBRTC_CLI_HOST_BLOCK_SLEEP_MS");
+    if (!sleepEnv) {
+        return 0;
+    }
+    return parseIntEnv(sleepEnv, 0);
+}
+
+int resolveWallclockRuntimeMs() {
+    const auto runtimeEnv = std::getenv("WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS");
+    if (!runtimeEnv) {
+        return 0;
+    }
+    return parseIntEnv(runtimeEnv, 0);
+}
+
 class ScopedTimeoutGuard {
 public:
     explicit ScopedTimeoutGuard(int timeoutMs) {
@@ -259,9 +275,17 @@ int main(int argc, char** argv) {
     const int timeoutMs = resolveTimeoutMs();
     ScopedTimeoutGuard timeoutGuard(timeoutMs);
 
-    const int iterationCount = resolveIterationCount();
+    const int wallclockRuntimeMs = resolveWallclockRuntimeMs();
+    const int iterationCount = (wallclockRuntimeMs > 0) ? 0 : resolveIterationCount();
+    if (wallclockRuntimeMs > 0) {
+        std::cout << "[config] Using wallclock runtime "
+                  << wallclockRuntimeMs
+                  << "ms from WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS"
+                  << std::endl;
+    }
     const double toneFrequency = resolveToneFrequency();
     const double tonePhaseIncrement = kTwoPi * toneFrequency / kSampleRate;
+    const int blockSleepMs = resolveBlockSleepMs();
 
     static Steinberg::Vst::HostApplication hostApp;
     Steinberg::Vst::PluginContextFactory::instance().setPluginContext(&hostApp);
@@ -346,13 +370,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Allow time for WebRTC signaling handshake to complete
-    const int warmupMs = parseIntEnv(std::getenv("WEBRTC_CLI_HOST_WARMUP_MS"), 2000);
-    if (warmupMs > 0) {
-        std::cout << "[warmup] Waiting " << warmupMs << "ms for connection..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(warmupMs));
-    }
-
     const auto processingResult = processor->setProcessing(true);
     if (processingResult != Steinberg::kResultOk &&
         processingResult != Steinberg::kResultTrue &&
@@ -389,13 +406,37 @@ int main(int argc, char** argv) {
     data.outputs = outputBusViews.empty() ? nullptr : outputBusViews.data();
     data.processContext = &context;
 
+    // Prime one block to trigger startup, then warm up for signaling/ICE.
+    const int warmupMs = parseIntEnv(std::getenv("WEBRTC_CLI_HOST_WARMUP_MS"), 2000);
+    if (warmupMs > 0) {
+        if (processor->process(data) != Steinberg::kResultOk) {
+            std::cerr << "warmup process call failed." << std::endl;
+        } else {
+            context.projectTimeSamples += kBlockSize;
+        }
+        std::cout << "[warmup] Waiting " << warmupMs << "ms for connection..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(warmupMs));
+    }
+
     std::vector<float> toneBlock(kBlockSize, 0.0f);
     double tonePhase = 0.0;
     const bool monitorOutput = shouldMonitorOutput();
     double outputEnergy = 0.0;
     size_t outputSamples = 0;
 
-    for (int iteration = 0; iteration < iterationCount; ++iteration) {
+    int iteration = 0;
+    const auto processStart = std::chrono::steady_clock::now();
+    while (true) {
+        if (wallclockRuntimeMs > 0) {
+            const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - processStart).count();
+            if (elapsedMs >= wallclockRuntimeMs) {
+                break;
+            }
+        } else if (iteration >= iterationCount) {
+            break;
+        }
+
         if (!inputBuses.empty() && !toneBlock.empty()) {
             for (int sample = 0; sample < kBlockSize; ++sample) {
                 toneBlock[static_cast<size_t>(sample)] =
@@ -416,6 +457,10 @@ int main(int argc, char** argv) {
             accumulateOutputMetrics(outputBuses, outputEnergy, outputSamples);
         }
         context.projectTimeSamples += kBlockSize;
+        if (blockSleepMs > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(blockSleepMs));
+        }
+        ++iteration;
     }
 
     if (monitorOutput) {

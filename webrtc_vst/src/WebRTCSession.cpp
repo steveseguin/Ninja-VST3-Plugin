@@ -16,6 +16,7 @@
 #include <array>
 #include <chrono>
 #include <cctype>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -25,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <utility>
 
@@ -34,6 +36,17 @@ namespace {
 constexpr size_t kFrameSizeSamples = 960; // 20ms at 48kHz
 constexpr int kOpusPayloadType = 111;
 constexpr uint32_t kAudioSsrc = 0x11ECACA; // Arbitrary but stable
+
+bool truthyEnvEnabled(const char* name) {
+    const char* value = std::getenv(name);
+    if (!value || *value == '\0') {
+        return false;
+    }
+    std::string lowered(value);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return !(lowered == "0" || lowered == "false" || lowered == "off" || lowered == "no");
+}
 
 std::string generateSessionId() {
     static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -52,6 +65,91 @@ rtc::binary toBinary(const unsigned char* data, size_t size) {
     buffer.resize(size);
     std::memcpy(buffer.data(), data, size);
     return buffer;
+}
+
+struct RtpPayloadView {
+    size_t offset{0};
+    size_t size{0};
+    uint8_t payloadType{0};
+};
+
+std::optional<RtpPayloadView> parseRtpPayloadView(const rtc::binary& packet) {
+    const auto totalSize = packet.size();
+    if (totalSize < 12) {
+        return std::nullopt;
+    }
+
+    const auto* bytes = reinterpret_cast<const uint8_t*>(packet.data());
+    const uint8_t version = static_cast<uint8_t>((bytes[0] >> 6) & 0x03);
+    if (version != 2) {
+        return std::nullopt;
+    }
+
+    const bool hasPadding = (bytes[0] & 0x20) != 0;
+    const bool hasExtension = (bytes[0] & 0x10) != 0;
+    const size_t csrcCount = static_cast<size_t>(bytes[0] & 0x0F);
+    const uint8_t payloadType = static_cast<uint8_t>(bytes[1] & 0x7F);
+
+    size_t headerSize = 12 + (csrcCount * 4);
+    if (headerSize > totalSize) {
+        return std::nullopt;
+    }
+
+    if (hasExtension) {
+        if (headerSize + 4 > totalSize) {
+            return std::nullopt;
+        }
+        const auto extensionWords = static_cast<size_t>((static_cast<uint16_t>(bytes[headerSize + 2]) << 8) |
+                                                         static_cast<uint16_t>(bytes[headerSize + 3]));
+        const size_t extensionBytes = 4 + (extensionWords * 4);
+        headerSize += extensionBytes;
+        if (headerSize > totalSize) {
+            return std::nullopt;
+        }
+    }
+
+    size_t payloadSize = totalSize - headerSize;
+    if (hasPadding) {
+        const uint8_t paddingSize = bytes[totalSize - 1];
+        if (paddingSize == 0 || paddingSize > payloadSize) {
+            return std::nullopt;
+        }
+        payloadSize -= paddingSize;
+    }
+
+    if (payloadSize == 0) {
+        return std::nullopt;
+    }
+
+    return RtpPayloadView{headerSize, payloadSize, payloadType};
+}
+
+std::optional<rtc::binary> extractRedPrimaryPayload(const uint8_t* payload, size_t payloadSize) {
+    if (!payload || payloadSize < 2) {
+        return std::nullopt;
+    }
+
+    size_t index = 0;
+    while (index < payloadSize) {
+        const uint8_t blockHeader = payload[index];
+        if ((blockHeader & 0x80) == 0) {
+            ++index;
+            if (index >= payloadSize) {
+                return std::nullopt;
+            }
+            rtc::binary primary(payloadSize - index);
+            std::memcpy(primary.data(), payload + index, primary.size());
+            return primary;
+        }
+
+        // RFC2198 non-primary block header is 4 bytes.
+        if (index + 4 > payloadSize) {
+            return std::nullopt;
+        }
+        index += 4;
+    }
+
+    return std::nullopt;
 }
 
 std::string toHex(const uint8_t* data, size_t size) {
@@ -685,8 +783,12 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
     session.nextTimestamp = 0;
 
     rtc::Configuration configuration;
-    configuration.iceServers.emplace_back("stun:stun.l.google.com:19302");
-    configuration.iceServers.emplace_back("stun:stun1.l.google.com:19302");
+    if (!truthyEnvEnabled("WEBRTC_VST_DISABLE_STUN")) {
+        configuration.iceServers.emplace_back("stun:stun.l.google.com:19302");
+        configuration.iceServers.emplace_back("stun:stun1.l.google.com:19302");
+    } else {
+        log("STUN disabled via WEBRTC_VST_DISABLE_STUN");
+    }
 
     session.connection = std::make_shared<rtc::PeerConnection>(configuration);
     auto keyCopy = key;
@@ -803,38 +905,88 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             return;
         }
 
-        if (track->description().type() != "audio") {
+        const auto trackType = track->description().type();
+        if (trackType != "audio") {
+            log("Ignoring non-audio remote track: " + trackType);
             return;
         }
-
-        auto depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
-        track->setMediaHandler(depacketizer);
-        track->onFrame([this](rtc::binary data, rtc::FrameInfo) {
+        log("Remote audio track attached for peer " + keyCopy);
+        track->onOpen([this]() {
             if (shuttingDown_.load(std::memory_order_acquire)) {
                 return;
             }
+            log("Remote audio track opened");
+        });
+        track->onClosed([this]() {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Remote audio track closed");
+        });
+        track->onError([this](const std::string& error) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Remote audio track error: " + error);
+        });
 
-            // Double-check with mutex to prevent TOCTOU race
-            ::OpusDecoder* decoder = nullptr;
+        auto depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
+        track->chainMediaHandler(depacketizer);
+        auto decodeAndQueue = [this](const uint8_t* encoded,
+                                     size_t encodedSize,
+                                     bool fromFrame,
+                                     const char* sourceTag) -> bool {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return false;
+            }
+
             int channels = 0;
+            int frameSamples = 0;
+            std::vector<float> decodeBuffer;
+            std::optional<std::string> telemetryLog;
             {
                 std::lock_guard<SpinLock> lock(mutex_);
                 if (!started_ || !opusDecoder_) {
-                    return;
+                    return false;
                 }
-                decoder = opusDecoder_;
-                channels = channelCount_;
-            }
 
-            std::vector<float> decodeBuffer(kFrameSizeSamples * static_cast<size_t>(channels));
-            int frameSamples = opus_decode_float(decoder,
-                                                 reinterpret_cast<const unsigned char*>(data.data()),
-                                                 static_cast<opus_int32>(data.size()),
+                if (!fromFrame && onFrameDecodeSeen_) {
+                    // If proper frame callbacks are working, avoid duplicate decode via fallback path.
+                    return false;
+                }
+                channels = channelCount_;
+                decodeBuffer.resize(kFrameSizeSamples * static_cast<size_t>(channels));
+                frameSamples = opus_decode_float(opusDecoder_,
+                                                 encoded,
+                                                 static_cast<opus_int32>(encodedSize),
                                                  decodeBuffer.data(),
                                                  static_cast<int>(kFrameSizeSamples),
                                                  0);
+                if (frameSamples > 0) {
+                    ++incomingFrameCount_;
+                    if (fromFrame) {
+                        onFrameDecodeSeen_ = true;
+                    }
+                    if (!loggedFirstIncomingFrame_) {
+                        loggedFirstIncomingFrame_ = true;
+                        telemetryLog = std::string("First decoded audio frame received via ") + sourceTag;
+                    } else if ((incomingFrameCount_ % 1000) == 0) {
+                        telemetryLog = "Decoded audio frame count: " + std::to_string(incomingFrameCount_);
+                    }
+                } else {
+                    ++incomingDecodeErrorCount_;
+                    if (incomingDecodeErrorCount_ <= 3 || (incomingDecodeErrorCount_ % 100) == 0) {
+                        telemetryLog = std::string("Opus decode error ") + std::to_string(frameSamples) +
+                                       " via " + sourceTag +
+                                       ", total decode errors: " + std::to_string(incomingDecodeErrorCount_);
+                    }
+                }
+            }
+            if (telemetryLog) {
+                log(*telemetryLog);
+            }
             if (frameSamples <= 0) {
-                return;
+                return false;
             }
             if (!receivingAudio_.exchange(true, std::memory_order_acq_rel)) {
                 emitStatus("Receiving audio");
@@ -846,7 +998,7 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
                                                                            channels,
                                                                            resampled);
             if (outFrames == 0 || resampled.empty()) {
-                return;
+                return false;
             }
 
             std::vector<std::vector<float>> planar(channels, std::vector<float>(outFrames));
@@ -862,6 +1014,63 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             }
 
             receiveBuffer_.push(channelPtrs.data(), static_cast<size_t>(outFrames), channels);
+            return true;
+        };
+
+        track->onFrame([decodeAndQueue](rtc::binary data, rtc::FrameInfo) {
+            const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
+            decodeAndQueue(bytes, data.size(), true, "onFrame");
+        });
+
+        track->onMessage([this, decodeAndQueue](rtc::message_variant message) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+
+            std::visit([this, &decodeAndQueue](auto&& payload) {
+                using T = std::decay_t<decltype(payload)>;
+                if constexpr (!std::is_same_v<T, rtc::binary>) {
+                    return;
+                } else {
+                    const auto maybeView = parseRtpPayloadView(payload);
+                    if (!maybeView) {
+                        return;
+                    }
+
+                    bool shouldAttemptFallback = false;
+                    {
+                        std::lock_guard<SpinLock> lock(mutex_);
+                        ++incomingRtpPacketCount_;
+                        if (!loggedFirstIncomingRtpPacket_) {
+                            loggedFirstIncomingRtpPacket_ = true;
+                            log("First RTP packet received on remote track: pt=" +
+                                std::to_string(maybeView->payloadType) +
+                                ", bytes=" + std::to_string(maybeView->size));
+                        } else if ((incomingRtpPacketCount_ % 2000) == 0) {
+                            log("RTP packet count on remote track: " + std::to_string(incomingRtpPacketCount_));
+                        }
+
+                        shouldAttemptFallback = !onFrameDecodeSeen_ && incomingRtpPacketCount_ > 20;
+                    }
+
+                    if (!shouldAttemptFallback) {
+                        return;
+                    }
+
+                    const auto* packetBytes = reinterpret_cast<const uint8_t*>(payload.data());
+                    const auto* audioPayload = packetBytes + maybeView->offset;
+                    const size_t audioPayloadSize = maybeView->size;
+
+                    if (decodeAndQueue(audioPayload, audioPayloadSize, false, "rtp")) {
+                        return;
+                    }
+
+                    if (auto redPrimary = extractRedPrimaryPayload(audioPayload, audioPayloadSize)) {
+                        const auto* redBytes = reinterpret_cast<const uint8_t*>(redPrimary->data());
+                        decodeAndQueue(redBytes, redPrimary->size(), false, "rtp-red");
+                    }
+                }
+            }, message);
         });
         it->second.remoteAudioTrack = track;
     });
@@ -902,25 +1111,82 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
                 }
             });
 
-            dc->onMessage([this](auto data) {
+            dc->onMessage([this, keyCopy, dc](auto data) {
                 if (shuttingDown_.load(std::memory_order_acquire)) {
                     return;
                 }
                 // Handle incoming datachannel messages
-                std::visit([this](auto&& arg) {
+                std::visit([this, keyCopy, dc](auto&& arg) {
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, std::string>) {
-                        log("Datachannel message: " + arg);
+                        constexpr size_t kMaxLogChars = 512;
+                        if (arg.size() <= kMaxLogChars) {
+                            log("Datachannel message: " + arg);
+                        } else {
+                            log("Datachannel message: " + arg.substr(0, kMaxLogChars) + "...(truncated)");
+                        }
 
-                        // Check if this is a new SDP offer from publisher
                         try {
                             auto msg = nlohmann::json::parse(arg);
-                            if (msg.contains("description") && msg["description"].contains("type") &&
-                                msg["description"]["type"] == "offer") {
-                                log("Received new SDP offer via datachannel, processing as signaling message");
-                                // Handle this as a regular signaling message (pass JSON, not string)
-                                handleSignalingMessage(msg);
+
+                            const bool hasSignalingPayload =
+                                msg.contains("description") ||
+                                msg.contains("candidate") ||
+                                msg.contains("candidates") ||
+                                msg.contains("request");
+                            if (!hasSignalingPayload) {
+                                return;
                             }
+
+                            const std::string dcUuid = msg.value("UUID", msg.value("uuid", std::string{}));
+                            const std::string dcSession = msg.value("session", std::string{});
+                            std::string dcDescType;
+                            if (msg.contains("description") && msg["description"].is_object()) {
+                                dcDescType = msg["description"].value("type", std::string{});
+                            }
+                            log("Datachannel signaling payload: uuid=" + (dcUuid.empty() ? "<none>" : dcUuid) +
+                                ", session=" + (dcSession.empty() ? "<none>" : dcSession) +
+                                ", descType=" + (dcDescType.empty() ? "<none>" : dcDescType) +
+                                ", hasCandidates=" + (msg.contains("candidates") ? "true" : "false"));
+
+                            {
+                                std::lock_guard<SpinLock> lock(mutex_);
+                                auto sourceIt = peerSessions_.find(keyCopy);
+                                if (sourceIt == peerSessions_.end()) {
+                                    return;
+                                }
+
+                                // Preserve identifiers carried by publisher datachannel signaling;
+                                // only fill fields if absent.
+                                if (!msg.contains("UUID") && !msg.contains("uuid")) {
+                                    msg["UUID"] = sourceIt->second.uuid;
+                                }
+                                if (!msg.contains("session") && !sourceIt->second.sessionId.empty()) {
+                                    msg["session"] = sourceIt->second.sessionId;
+                                }
+                                if (!msg.contains("streamID") && !sourceIt->second.streamId.empty()) {
+                                    msg["streamID"] = sourceIt->second.streamId;
+                                }
+
+                                // Publisher signaling for additional peers often arrives over the initial
+                                // datachannel; bind this datachannel to the target peer so our answer/candidates
+                                // are sent back over the same path instead of bouncing through WebSocket.
+                                const std::string targetUuid = msg.value("UUID", msg.value("uuid", std::string{}));
+                                if (!targetUuid.empty()) {
+                                    std::string targetSession = msg.value("session", std::string{});
+                                    if (targetSession.empty()) {
+                                        targetSession = sourceIt->second.sessionId;
+                                    }
+                                    PeerSession& targetSessionState = ensurePeerSession(targetUuid, targetSession, false);
+                                    if (targetSessionState.dataChannel.get() != dc.get()) {
+                                        targetSessionState.dataChannel = dc;
+                                        log("Mapped publisher datachannel to peer session " +
+                                            makePeerKey(targetSessionState.uuid, targetSessionState.sessionId));
+                                    }
+                                }
+                            }
+
+                            handleSignalingMessage(msg);
                         } catch (const std::exception&) {
                             // Not JSON or parse error, ignore
                         }
@@ -1095,6 +1361,12 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
 
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
+        incomingFrameCount_ = 0;
+        incomingDecodeErrorCount_ = 0;
+        loggedFirstIncomingFrame_ = false;
+        incomingRtpPacketCount_ = 0;
+        loggedFirstIncomingRtpPacket_ = false;
+        onFrameDecodeSeen_ = false;
         signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
         signalingClient_->setCallbacks({
             [this]() {
@@ -1223,6 +1495,12 @@ void WebRTCSession::stop() {
         incomingResampler_.reset();
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
+        incomingFrameCount_ = 0;
+        incomingDecodeErrorCount_ = 0;
+        loggedFirstIncomingFrame_ = false;
+        incomingRtpPacketCount_ = 0;
+        loggedFirstIncomingRtpPacket_ = false;
+        onFrameDecodeSeen_ = false;
     }
 
     log("WebRTCSession::stop() - complete");
@@ -1341,47 +1619,99 @@ void WebRTCSession::handleRemoteDescription(const nlohmann::json& message) {
     const std::string uuid = message.value("UUID", message.value("uuid", std::string{}));
     const std::string sessionId = message.value("session", std::string{});
     const auto descJson = message["description"];
-    if (!descJson.contains("type") || !descJson.contains("sdp")) {
+    if (!descJson.is_object() || !descJson.contains("type") || !descJson.contains("sdp")) {
         return;
     }
 
     const std::string type = descJson["type"].get<std::string>();
     const std::string sdp = descJson["sdp"].get<std::string>();
 
-    std::lock_guard<SpinLock> lock(mutex_);
-
     if (type == "offer") {
-        PeerSession& session = ensurePeerSession(uuid, sessionId, false);
-        session.streamId = message.value("streamID", session.streamId);
-        session.negotiationReady = false;
-
-        if (session.connection) {
-            session.connection->setRemoteDescription(rtc::Description(sdp, type));
-            session.remoteDescriptionSet = true;
-            flushPendingIceLocked(session);
-            session.connection->setLocalDescription(rtc::Description::Type::Answer);
+        if (uuid.empty()) {
+            log("Ignoring remote offer without UUID");
+            return;
         }
-    } else if (type == "answer") {
-        const PeerKey key = makePeerKey(uuid, sessionId);
-        auto it = peerSessions_.find(key);
-        if (it == peerSessions_.end()) {
-            auto existing = sessionByUuid_.find(uuid);
-            if (existing == sessionByUuid_.end()) {
-                return;
-            }
-            it = peerSessions_.find(existing->second);
+
+        PeerKey key;
+        std::shared_ptr<rtc::PeerConnection> connection;
+        {
+            std::lock_guard<SpinLock> lock(mutex_);
+            PeerSession& session = ensurePeerSession(uuid, sessionId, false);
+            session.streamId = message.value("streamID", session.streamId);
+            session.negotiationReady = false;
+            key = makePeerKey(session.uuid, session.sessionId);
+            connection = session.connection;
+        }
+
+        if (!connection) {
+            return;
+        }
+
+        try {
+            connection->setRemoteDescription(rtc::Description(sdp, type));
+        } catch (const std::exception& ex) {
+            log(std::string("Failed to apply remote offer for ") + key + ": " + ex.what());
+            return;
+        }
+
+        {
+            std::lock_guard<SpinLock> lock(mutex_);
+            auto it = peerSessions_.find(key);
             if (it == peerSessions_.end()) {
                 return;
             }
-        }
 
-        it->second.streamId = message.value("streamID", it->second.streamId);
-        if (it->second.connection) {
-            it->second.connection->setRemoteDescription(rtc::Description(sdp, type));
             it->second.remoteDescriptionSet = true;
             flushPendingIceLocked(it->second);
-            it->second.negotiationReady = true;
         }
+    } else if (type == "answer") {
+        if (config_.mode == ConnectionMode::Play) {
+            log("Ignoring remote answer in play mode for " + makePeerKey(uuid, sessionId));
+            return;
+        }
+
+        PeerKey key;
+        std::shared_ptr<rtc::PeerConnection> connection;
+        {
+            std::lock_guard<SpinLock> lock(mutex_);
+            const PeerKey directKey = makePeerKey(uuid, sessionId);
+            auto it = peerSessions_.find(directKey);
+            if (it == peerSessions_.end()) {
+                auto existing = sessionByUuid_.find(uuid);
+                if (existing == sessionByUuid_.end()) {
+                    return;
+                }
+                it = peerSessions_.find(existing->second);
+                if (it == peerSessions_.end()) {
+                    return;
+                }
+            }
+
+            it->second.streamId = message.value("streamID", it->second.streamId);
+            key = makePeerKey(it->second.uuid, it->second.sessionId);
+            connection = it->second.connection;
+        }
+
+        if (!connection) {
+            return;
+        }
+
+        try {
+            connection->setRemoteDescription(rtc::Description(sdp, type));
+        } catch (const std::exception& ex) {
+            log(std::string("Failed to apply remote answer for ") + key + ": " + ex.what());
+            return;
+        }
+
+        std::lock_guard<SpinLock> lock(mutex_);
+        auto it = peerSessions_.find(key);
+        if (it == peerSessions_.end()) {
+            return;
+        }
+
+        it->second.remoteDescriptionSet = true;
+        flushPendingIceLocked(it->second);
+        it->second.negotiationReady = true;
     }
 }
 
@@ -1583,7 +1913,9 @@ void WebRTCSession::announceRoleIfReady() {
         log("announceRoleIfReady: sending play request");
         nlohmann::json playMessage = {
             {"request", "play"},
-            {"streamID", hashedStreamId_.empty() ? config_.streamId : hashedStreamId_}
+            {"streamID", hashedStreamId_.empty() ? config_.streamId : hashedStreamId_},
+            {"audio", true},
+            {"video", false}
         };
         sendSignalingMessage(playMessage);
         log("Sent play request for stream " + config_.streamId);
@@ -1593,12 +1925,8 @@ void WebRTCSession::announceRoleIfReady() {
 }
 
 void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames, int channels) {
-    if (config_.mode != ConnectionMode::Seed || !opusEncoder_) {
-        return;
-    }
-
     std::lock_guard<SpinLock> lock(mutex_);
-    if (peerSessions_.empty()) {
+    if (!started_ || config_.mode != ConnectionMode::Seed || !opusEncoder_ || peerSessions_.empty()) {
         return;
     }
 
@@ -1636,8 +1964,29 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
             if (!session.localAudioTrack || !session.rtpConfig || !session.negotiationReady) {
                 continue;
             }
+            if (!session.localAudioTrack->isOpen()) {
+                ++session.outgoingDroppedNotOpenCount;
+                if (session.outgoingDroppedNotOpenCount <= 3 ||
+                    (session.outgoingDroppedNotOpenCount % 500) == 0) {
+                    log("Outgoing audio drop: track not open for peer " + key +
+                        " (count=" + std::to_string(session.outgoingDroppedNotOpenCount) + ")");
+                }
+                continue;
+            }
             session.rtpConfig->timestamp = session.nextTimestamp;
-            session.localAudioTrack->send(toBinary(encoded.data(), static_cast<size_t>(encodedBytes)));
+            const bool sent = session.localAudioTrack->send(toBinary(encoded.data(), static_cast<size_t>(encodedBytes)));
+            if (!sent) {
+                log("Outgoing audio send returned false for peer " + key);
+                continue;
+            }
+            ++session.outgoingSendCount;
+            if (!session.loggedFirstOutgoingFrame) {
+                session.loggedFirstOutgoingFrame = true;
+                log("First encoded audio frame sent to peer " + key +
+                    ", bytes=" + std::to_string(encodedBytes));
+            } else if ((session.outgoingSendCount % 1000) == 0) {
+                log("Outgoing audio frame count for peer " + key + ": " + std::to_string(session.outgoingSendCount));
+            }
             session.nextTimestamp += static_cast<uint32_t>(kFrameSizeSamples);
         }
     }

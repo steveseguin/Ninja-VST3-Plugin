@@ -1,0 +1,48 @@
+# Build outputs
+build/
+cmake-build*/
+out/
+
+# Dependencies
+node_modules/
+vst3sdk/
+
+# Local agent and reference content
+.claude/
+_refs/
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Generated logs and local probes
+*.log
+validator*.log
+seed.log
+_room_live_probe*.txt
+_steve1234_live_probe*.txt
+temp_*.js
+disasm*.txt
+dump_symbols.txt
+publish_audio.test.js
+
+# Binary and object files
+*.exe
+*.obj
+*.o
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Visual Studio artifacts
+*.pdb
+*.ilk
+*.exp
+*.vcxproj.user
+
+# Misc
+archive/

@@ -1,113 +1,107 @@
 # VST WebRTC Plugin Tests
 
-Automated tests for the VST WebRTC plugin using VDO.Ninja signaling.
+Audio-focused integration tests for the VST WebRTC plugin using VDO.Ninja signaling.
 
 ## Prerequisites
 
 ```bash
-npm install ws @roamhq/wrtc
+npm install
 ```
 
-## Tests
+## Audio-Only Tests
 
-### 1. Handshake Test
-**File:** `test_seed_handshake.js`
+### 1) Play request includes audio-only flags
+File: `tools/tests/integration/play_request_audio_only.test.js`
 
-Tests WebSocket signaling handshake between VST plugin (seed) and a simple viewer.
+Validates that Play mode sends:
 
-**Verifies:**
-- VST connects to signaling server
-- VST sends seed request
-- VST receives offerSDP when viewer connects
-- SDP answer is sent back
-- ICE candidates are exchanged
+```json
+{
+  "request": "play",
+  "audio": true,
+  "video": false
+}
+```
 
-**Run:**
+Run:
+
 ```bash
-node tools/tests/test_seed_handshake.js
+npm run test:play-request-audio-only
 ```
 
----
+### 2) Live stream: verify video is not attached in Play mode
+File: `tools/tests/integration/play_ignores_video_track.test.js`
 
-### 2. VST → JS SDK Test
-**File:** `test_vst_to_sdk.js`
+Flow:
+1. VST plugin runs in Play mode against a real stream (default `steve1234`).
+2. Test verifies Play request carries `audio:true, video:false`.
+3. Test verifies datachannel viewer preferences are sent.
+4. Test fails if plugin reports receiving any non-audio track.
+5. Test reports output RMS as an informational metric.
+6. Test verifies publisher datachannel is mapped to the media peer to prevent answer-state regressions.
 
-Tests VST plugin in **seed mode** publishing audio to JS SDK viewer.
+Run:
 
-**Verifies:**
-- VST publishes a 1kHz test tone
-- JS SDK viewer connects and receives audio track
-- Audio track is properly received
-
-**Run:**
 ```bash
-node tools/tests/test_vst_to_sdk.js
+npm run test:play-ignore-video
 ```
 
-**Expected output:**
+You can override the stream ID:
+
+```bash
+WEBRTC_TEST_STREAM_ID=your_stream npm run test:play-ignore-video
 ```
-✓ TEST PASSED: VST plugin successfully published audio to JS SDK
+
+For room-based streams, set the plugin room env as well:
+
+```bash
+WEBRTC_TEST_STREAM_ID=your_stream WEBRTC_VST_ROOM_NAME=your_room npm run test:play-ignore-video
 ```
 
----
+### 3) Live room audio-only decode (strict)
+File: `tools/tests/integration/play_room_audio_live.test.js`
 
-### 3. VST → Web Browser (Manual)
-**File:** `test_vst_web_viewer.js`
+Flow:
+1. VST plugin runs in Play mode against a room + stream (defaults: room `steve123456`, stream `3TtDVfG`).
+2. Test verifies play request and viewer preferences remain audio-only.
+3. Test verifies publisher datachannel is mapped to the media peer.
+4. Test fails if remote-answer signaling-state errors appear.
+5. Test requires non-zero output RMS (`WEBRTC_TEST_MIN_RMS`, default `0.01`).
 
-Helper script to test VST plugin with actual VDO.Ninja web interface.
+Run:
 
-**Usage:**
-1. Run the script:
-   ```bash
-   node tools/tests/test_vst_web_viewer.js
-   ```
+```bash
+npm run test:play-room-live
+```
 
-2. Open the provided URL in your browser (e.g., Chrome, Firefox)
+Override room/stream/password:
 
-3. You should hear a 1kHz test tone
+```bash
+WEBRTC_TEST_ROOM_NAME=your_room WEBRTC_TEST_STREAM_ID=your_stream WEBRTC_TEST_PASSWORD=your_password npm run test:play-room-live
+```
 
-4. Press Ctrl+C to stop
+### Run both
 
-**This confirms the VST plugin works with the real VDO.Ninja web app!**
+```bash
+npm run test:audio-only
+```
 
----
+## Existing Integration Tests
 
-### 4. JS SDK → VST Test (Work in Progress)
-**File:** `test_sdk_to_vst.js`
+- `npm run test:publish-audio`: CLI seed publishes to SDK viewer with audio-only view options.
+- `npm run test:cli-loopback`: dual-CLI loopback smoke test.
 
-Tests JS SDK publishing audio to VST plugin in **play mode**.
+## Environment variables
 
-**Status:** Implementation in progress (MediaStream context issue)
+- `WEBRTC_TEST_WSS`: signaling URL (default `wss://wss.vdo.ninja`)
+- `WEBRTC_TEST_RUNTIME_MS`: runtime for CLI host in relevant tests
+- `WEBRTC_TEST_TIMEOUT_MS`: overall test timeout
+- `WEBRTC_TEST_MIN_RMS`: minimum RMS threshold for playback checks
+- `WEBRTC_VST_ROOM_NAME`: optional room to join before announcing play/seed
+- `WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS`: optional real-time runtime override for CLI host runs
+- `WEBRTC_TEST_DISABLE_STUN`: loopback helper (defaults to `1`) to force host-only ICE in local dual-CLI tests
 
----
+## Notes
 
-## Test Results Summary
-
-| Test | Status | Notes |
-|------|--------|-------|
-| Handshake | ✅ PASS | WebSocket signaling working |
-| VST → JS SDK | ✅ PASS | Audio publishing verified |
-| VST → Web Browser | ✅ MANUAL | Use test_vst_web_viewer.js |
-| JS SDK → VST | 🚧 WIP | Context isolation issue |
-
-## Environment Variables
-
-The tests use these environment variables to configure the VST plugin:
-
-- `WEBRTC_VST_MODE` - `seed` or `play`
-- `WEBRTC_VST_STREAM_ID` - Stream identifier
-- `WEBRTC_VST_PASSWORD` - Set to `false` to disable encryption
-- `WEBRTC_VST_HANDSHAKE_URL` - Signaling server (default: `wss://wss.vdo.ninja`)
-- `WEBRTC_VST_LOG_STDOUT` - Enable stdout logging (`1`)
-- `WEBRTC_VST_LOG_SIGNALING` - Enable signaling message logging (`1`)
-- `WEBRTC_CLI_HOST_RUNTIME_MS` - How long to run (milliseconds)
-- `WEBRTC_CLI_HOST_WARMUP_MS` - Warmup delay before processing (milliseconds)
-- `WEBRTC_CLI_HOST_TIMEOUT_MS` - Force exit after timeout
-- `WEBRTC_CLI_HOST_TONE_HZ` - Test tone frequency (Hz)
-- `WEBRTC_CLI_HOST_MONITOR_OUTPUT` - Monitor output audio level
-
-## Known Issues
-
-1. **JS SDK MediaStream context** - The SDK runs in an isolated VM context, making it difficult to pass MediaStream objects created outside. Need to use SDK's internal media generation.
-
-2. **CLI doesn't auto-exit** - The CLI host continues running after `RUNTIME_MS` completes. Tests use `TIMEOUT_MS` to force exit.
+- Tests use default encryption behavior (empty password), matching VDO.Ninja default key flow.
+- These are networked integration tests and require internet access.

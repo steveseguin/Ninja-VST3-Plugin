@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebRTC VST for VDO.Ninja</title>
+  <meta name="description" content="Audio-first VST3 bridge for VDO.Ninja. Download stable releases and collaborate in real time from your DAW.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-shape bg-shape-a" aria-hidden="true"></div>
+  <div class="bg-shape bg-shape-b" aria-hidden="true"></div>
+
+  <header class="hero">
+    <p class="eyebrow">Audio-only WebRTC VST3</p>
+    <h1>WebRTC VST for VDO.Ninja</h1>
+    <p class="hero-copy">
+      Stream or monitor live audio directly from your DAW with no local server setup.
+      The plugin is purpose-built for low-friction remote collaboration workflows.
+    </p>
+    <div class="hero-actions">
+      <a id="downloadLatest" class="btn btn-primary" href="https://github.com/steveseguin/vst/releases/latest">Download Latest Release</a>
+      <a class="btn btn-ghost" href="https://github.com/steveseguin/vst/releases">Browse All Releases</a>
+    </div>
+    <div class="hero-meta">
+      <p id="latestVersion">Latest release: loading...</p>
+      <p id="latestDate"></p>
+    </div>
+  </header>
+
+  <main class="content">
+    <section class="panel">
+      <h2>Why this plugin</h2>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Audio-first by design</h3>
+          <p>Play mode requests audio transport only, so video tracks are ignored inside the VST workflow.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Two practical modes</h3>
+          <p>Seed mode publishes your DAW audio. Play mode monitors remote audio inside the same session.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Production codec path</h3>
+          <p>Opus transport, stereo support, and DAW-friendly routing for real-time collaboration and review.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Quick start</h2>
+      <div class="steps">
+        <article class="step">
+          <p class="step-index">1</p>
+          <p>Install the latest `.vst3` package from the release assets below.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">2</p>
+          <p>Load the plugin in a real-time DAW host (Reaper/Studio One recommended for validation).</p>
+        </article>
+        <article class="step">
+          <p class="step-index">3</p>
+          <p>Set mode to <code>Seed</code> to publish or <code>Play</code> to receive a remote stream.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="release-header">
+        <h2>Release downloads</h2>
+        <p>CI builds are attached to GitHub Releases automatically on version tags.</p>
+      </div>
+      <div id="releaseList" class="release-list">
+        <p class="loading">Loading release assets...</p>
+      </div>
+    </section>
+
+    <section class="panel legal">
+      <h2>Project terms</h2>
+      <p>This project follows AGPLv3 licensing and a contributor assignment policy aligned with VDO.Ninja.</p>
+      <div class="legal-links">
+        <a href="https://github.com/steveseguin/vst/blob/main/LICENCE.md">License Notice</a>
+        <a href="https://github.com/steveseguin/vst/blob/main/AGPLv3.md">AGPLv3 Text</a>
+        <a href="https://github.com/steveseguin/vst/blob/main/CONTRIBUTING.md">Contributing + CLA</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Source: <a href="https://github.com/steveseguin/vst">github.com/steveseguin/vst</a></p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

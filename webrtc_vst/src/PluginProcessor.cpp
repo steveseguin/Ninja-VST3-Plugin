@@ -93,13 +93,20 @@ WebRTCProcessor::WebRTCProcessor()
                }) {
     SMTG_DBPRT0("[WebRTC] WebRTCProcessor() constructor\n");
     session_.setLogSignalingMessages(shouldLogSignaling());
+    std::lock_guard<std::mutex> lock(configMutex_);
     config_.streamId = generateRandomStreamId();
     config_.handshakeUrl = "wss://wss0.vdo.ninja";
     config_.mode = ConnectionMode::Play;
+    modeAtomic_.store(config_.mode, std::memory_order_release);
 }
 
 WebRTCProcessor::~WebRTCProcessor() {
     SMTG_DBPRT0("[WebRTC] ~WebRTCProcessor() destructor - stopping session\n");
+    configThreadExit_.store(true, std::memory_order_release);
+    configCv_.notify_one();
+    if (configThread_.joinable()) {
+        configThread_.join();
+    }
     // Stop the session BEFORE member destruction to prevent callbacks with dangling 'this'
     stopSession();
     SMTG_DBPRT0("[WebRTC] ~WebRTCProcessor() destructor - complete\n");
@@ -120,7 +127,9 @@ tresult PLUGIN_API WebRTCProcessor::initialize(FUnknown* context) {
 
     updateConfigFromEnvironment();
     syncConfigToController();
-    configDirty_ = true;
+    configDirty_.store(true, std::memory_order_release);
+    configThreadExit_.store(false, std::memory_order_release);
+    configThread_ = std::thread(&WebRTCProcessor::configThreadMain, this);
     return kResultOk;
 }
 
@@ -128,6 +137,11 @@ tresult PLUGIN_API WebRTCProcessor::terminate() {
     // Ensure plugin is deactivated before cleanup to stop audio processing
     SMTG_DBPRT0("[WebRTC] terminate() called - deactivating\n");
     setActive(false);
+    configThreadExit_.store(true, std::memory_order_release);
+    configCv_.notify_one();
+    if (configThread_.joinable()) {
+        configThread_.join();
+    }
     // Stop session to clean up WebRTC resources
     SMTG_DBPRT0("[WebRTC] terminate() - stopping session\n");
     stopSession();
@@ -139,10 +153,12 @@ tresult PLUGIN_API WebRTCProcessor::terminate() {
 
 tresult PLUGIN_API WebRTCProcessor::setupProcessing(ProcessSetup& setup) {
     processSetup_ = setup;
+    requestConfigApply();
     return AudioEffect::setupProcessing(setup);
 }
 
 void WebRTCProcessor::updateConfigFromEnvironment() {
+    std::lock_guard<std::mutex> lock(configMutex_);
     if (const char* stream = std::getenv("WEBRTC_VST_STREAM_ID")) {
         config_.streamId = stream;
     }
@@ -182,12 +198,19 @@ void WebRTCProcessor::updateConfigFromEnvironment() {
     if (config_.handshakeUrl.empty()) {
         config_.handshakeUrl = "wss://wss0.vdo.ninja";
     }
+    modeAtomic_.store(config_.mode, std::memory_order_release);
 }
 
 
-void WebRTCProcessor::startSession() {
-    if (sessionActive_) {
+void WebRTCProcessor::startSession(const PluginConfig& config) {
+    if (sessionActive_.load(std::memory_order_acquire)) {
         return;
+    }
+
+    if (shouldLogToStdout()) {
+        std::cout << "[WebRTC] startSession requested"
+                  << " mode=" << (config.mode == ConnectionMode::Seed ? "Seed" : "Play")
+                  << std::endl;
     }
 
     double sampleRate = processSetup_.sampleRate > 0.0 ? processSetup_.sampleRate : kDefaultSampleRate;
@@ -205,24 +228,31 @@ void WebRTCProcessor::startSession() {
     }
 
     receiveBuffer_.reset(static_cast<size_t>(kDefaultBufferFrames), channels);
-    session_.start(config_, sampleRate, channels);
-    sessionActive_ = true;
-    configDirty_ = false;
+    session_.start(config, sampleRate, channels);
+    sessionActive_.store(true, std::memory_order_release);
+    if (shouldLogToStdout()) {
+        std::cout << "[WebRTC] sessionActive=true" << std::endl;
+    }
+    configDirty_.store(false, std::memory_order_release);
 }
 
 void WebRTCProcessor::stopSession() {
-    if (!sessionActive_) {
+    if (!sessionActive_.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
+    if (shouldLogToStdout()) {
+        std::cout << "[WebRTC] sessionActive=false (stopSession)" << std::endl;
+    }
     session_.stop();
-    sessionActive_ = false;
 }
 
 void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value) {
+    std::lock_guard<std::mutex> lock(configMutex_);
     switch (id) {
         case kParamMode:
             config_.mode = (value >= 0.5) ? ConnectionMode::Seed : ConnectionMode::Play;
-            configDirty_ = true;
+            modeAtomic_.store(config_.mode, std::memory_order_release);
+            configDirty_.store(true, std::memory_order_release);
             break;
         case kParamDisableEncryption:
             config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
@@ -232,14 +262,14 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
             const auto text = ParameterStringRegistry::instance().lookup(idValue);
             if (!text.empty()) {
                 config_.streamId = text;
-                configDirty_ = true;
+                configDirty_.store(true, std::memory_order_release);
             }
             break;
         }
         case kParamRoomName: {
             const auto idValue = normalizedToId(value);
             config_.roomName = ParameterStringRegistry::instance().lookup(idValue);
-            configDirty_ = true;
+            configDirty_.store(true, std::memory_order_release);
             break;
         }
         case kParamHandshakeUrl: {
@@ -247,7 +277,7 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
             const auto url = ParameterStringRegistry::instance().lookup(idValue);
             if (!url.empty()) {
                 config_.handshakeUrl = url;
-                configDirty_ = true;
+                configDirty_.store(true, std::memory_order_release);
             }
             break;
         }
@@ -255,7 +285,7 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
             const auto idValue = normalizedToId(value);
             config_.password = ParameterStringRegistry::instance().lookup(idValue);
             config_.disableEncryption = passwordImpliesDisableEncryption(config_.password);
-            configDirty_ = true;
+            configDirty_.store(true, std::memory_order_release);
             break;
         }
         default:
@@ -263,34 +293,63 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
     }
 }
 
-void WebRTCProcessor::restartSessionIfNeeded() {
-    if (!configDirty_) {
-        return;
+void WebRTCProcessor::requestConfigApply() {
+    configPending_.store(true, std::memory_order_release);
+    configCv_.notify_one();
+}
+
+void WebRTCProcessor::configThreadMain() {
+    SMTG_DBPRT0("[WebRTC] config thread started\n");
+    while (true) {
+        std::unique_lock<std::mutex> lock(configMutex_);
+        configCv_.wait(lock, [this]() {
+            return configThreadExit_.load(std::memory_order_acquire) || configPending_.load(std::memory_order_acquire);
+        });
+
+        if (configThreadExit_.load(std::memory_order_acquire)) {
+            break;
+        }
+
+        configPending_.store(false, std::memory_order_release);
+        const bool shouldActivate = hostActive_.load(std::memory_order_acquire);
+        const bool ready = processingReady_.load(std::memory_order_acquire);
+        PluginConfig configCopy = config_;
+        lock.unlock();
+
+        if (!shouldActivate || !ready) {
+            stopSession();
+            continue;
+        }
+
+        stopSession();
+        try {
+            startSession(configCopy);
+        } catch (...) {
+            // Swallow exceptions to avoid crashing the host; emit status for visibility
+            queueStatus("Error: failed to start session");
+        }
     }
-
-    configDirty_ = false;
-
-    if (!sessionActive_) {
-        startSession();
-        return;
-    }
-
-    stopSession();
-    startSession();
+    SMTG_DBPRT0("[WebRTC] config thread exiting\n");
 }
 
 std::string WebRTCProcessor::serializeConfigToJson() const {
+    PluginConfig copy;
+    {
+        std::lock_guard<std::mutex> lock(configMutex_);
+        copy = config_;
+    }
+
     nlohmann::json json = {
-        {"streamId", config_.streamId},
-        {"roomName", config_.roomName},
-        {"handshakeUrl", config_.handshakeUrl},
-        {"mode", config_.mode == ConnectionMode::Seed ? "seed" : "play"},
-        {"password", config_.password},
-        {"disableEncryption", config_.disableEncryption}
+        {"streamId", copy.streamId},
+        {"roomName", copy.roomName},
+        {"handshakeUrl", copy.handshakeUrl},
+        {"mode", copy.mode == ConnectionMode::Seed ? "seed" : "play"},
+        {"password", copy.password},
+        {"disableEncryption", copy.disableEncryption}
     };
 
-    json["roomId"] = config_.roomName;
-    json["signalingUrl"] = config_.handshakeUrl;
+    json["roomId"] = copy.roomName;
+    json["signalingUrl"] = copy.handshakeUrl;
 
     return json.dump();
 }
@@ -313,6 +372,7 @@ void WebRTCProcessor::syncConfigToController() {
 }
 
 void WebRTCProcessor::handleSanitizedConfig(const PluginConfig& sanitizedConfig) {
+    std::lock_guard<std::mutex> lock(configMutex_);
     bool updated = false;
 
     if (config_.streamId != sanitizedConfig.streamId) {
@@ -335,7 +395,7 @@ void WebRTCProcessor::handleSanitizedConfig(const PluginConfig& sanitizedConfig)
         return;
     }
 
-    syncConfigToController();
+    controllerSyncPending_.store(true, std::memory_order_release);
 }
 
 void WebRTCProcessor::queueStatus(const std::string& status) {
@@ -390,10 +450,12 @@ void WebRTCProcessor::sendStatusToController(const std::string& status) {
 
 tresult PLUGIN_API WebRTCProcessor::setActive(TBool state) {
     if (state) {
-        configDirty_ = true;
-        restartSessionIfNeeded();
+        hostActive_.store(true, std::memory_order_release);
+        configDirty_.store(true, std::memory_order_release);
+        requestConfigApply();
     } else {
-        stopSession();
+        hostActive_.store(false, std::memory_order_release);
+        requestConfigApply();
         flushPendingStatus();
     }
     return AudioEffect::setActive(state);
@@ -401,8 +463,21 @@ tresult PLUGIN_API WebRTCProcessor::setActive(TBool state) {
 
 tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
     if (data.symbolicSampleSize == kSample64) {
+        if (data.numOutputs > 0 && data.outputs[0].channelBuffers64 != nullptr) {
+            const int channels = data.outputs[0].numChannels;
+            for (int ch = 0; ch < channels; ++ch) {
+                std::fill_n(data.outputs[0].channelBuffers64[ch], data.numSamples, 0.0);
+            }
+        }
         flushPendingStatus();
         return kResultOk; // 64-bit audio not handled in this prototype yet
+    }
+
+    if (!processingReady_.load(std::memory_order_acquire)) {
+        processingReady_.store(true, std::memory_order_release);
+        if (hostActive_.load(std::memory_order_acquire) && !sessionActive_.load(std::memory_order_acquire)) {
+            requestConfigApply();
+        }
     }
 
     if (auto* paramChanges = data.inputParameterChanges) {
@@ -419,7 +494,12 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
         }
     }
 
-    restartSessionIfNeeded();
+    if (configDirty_.exchange(false, std::memory_order_acq_rel)) {
+        requestConfigApply();
+    }
+    if (controllerSyncPending_.exchange(false, std::memory_order_acq_rel)) {
+        syncConfigToController();
+    }
 
     const int32 numSamples = data.numSamples;
     if (numSamples <= 0) {
@@ -433,26 +513,54 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
     const int inputChannels = hasInput ? data.inputs[0].numChannels : 0;
     const int outputChannels = hasOutput ? data.outputs[0].numChannels : 0;
 
-    // Validate channel counts - plugin only supports stereo (2 channels)
-    if (hasInput && inputChannels != 2) {
-        SMTG_DBPRT1("[WebRTC] Warning: Expected 2 input channels, got %d\n", inputChannels);
+    if (hasInput && (inputChannels < 1 || inputChannels > 2)) {
+        SMTG_DBPRT1("[WebRTC] Warning: Unexpected input channel count %d\n", inputChannels);
     }
-    if (hasOutput && outputChannels != 2) {
-        SMTG_DBPRT1("[WebRTC] Warning: Expected 2 output channels, got %d\n", outputChannels);
-        // Silence all outputs if channel count mismatch
-        for (int ch = 0; ch < outputChannels; ++ch) {
-            std::fill_n(data.outputs[0].channelBuffers32[ch], numSamples, 0.0f);
-        }
-        flushPendingStatus();
-        return kResultOk;
+    if (hasOutput && (outputChannels < 1 || outputChannels > 2)) {
+        SMTG_DBPRT1("[WebRTC] Warning: Unexpected output channel count %d\n", outputChannels);
     }
 
-    if (config_.mode == ConnectionMode::Seed && hasInput) {
+    const auto mode = modeAtomic_.load(std::memory_order_acquire);
+    const bool sessionRunning = sessionActive_.load(std::memory_order_acquire);
+    const int modeValue = (mode == ConnectionMode::Seed) ? 1 : 0;
+    const int previousMode = lastLoggedMode_.exchange(modeValue, std::memory_order_acq_rel);
+    if (previousMode != modeValue && shouldLogToStdout()) {
+        std::cout << "[WebRTC] Process mode now "
+                  << ((mode == ConnectionMode::Seed) ? "Seed" : "Play")
+                  << " sessionRunning=" << (sessionRunning ? "true" : "false")
+                  << std::endl;
+    }
+
+    if (mode == ConnectionMode::Seed && !loggedSeedProcessState_.exchange(true, std::memory_order_acq_rel)) {
+        if (shouldLogToStdout()) {
+            std::cout << "[WebRTC] Seed process path active"
+                      << " hasInput=" << (hasInput ? "true" : "false")
+                      << " inputChannels=" << inputChannels
+                      << " sessionRunning=" << (sessionRunning ? "true" : "false")
+                      << std::endl;
+        }
+    }
+    if (mode == ConnectionMode::Play && !loggedPlayProcessState_.exchange(true, std::memory_order_acq_rel)) {
+        if (shouldLogToStdout()) {
+            std::cout << "[WebRTC] Play process path active"
+                      << " hasOutput=" << (hasOutput ? "true" : "false")
+                      << " outputChannels=" << outputChannels
+                      << " sessionRunning=" << (sessionRunning ? "true" : "false")
+                      << std::endl;
+        }
+    }
+
+    if (mode == ConnectionMode::Seed && hasInput) {
         std::vector<const float*> inPtrs(inputChannels);
         for (int ch = 0; ch < inputChannels; ++ch) {
             inPtrs[ch] = data.inputs[0].channelBuffers32[ch];
         }
-        session_.pushOutgoingAudio(inPtrs.data(), static_cast<size_t>(numSamples), inputChannels);
+        if (sessionRunning) {
+            if (!loggedSeedPushAttempt_.exchange(true, std::memory_order_acq_rel) && shouldLogToStdout()) {
+                std::cout << "[WebRTC] Seed path calling pushOutgoingAudio for first time" << std::endl;
+            }
+            session_.pushOutgoingAudio(inPtrs.data(), static_cast<size_t>(numSamples), inputChannels);
+        }
 
         if (hasOutput) {
             for (int ch = 0; ch < std::min(inputChannels, outputChannels); ++ch) {
@@ -464,12 +572,18 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
         }
     }
 
-    if (config_.mode == ConnectionMode::Play && hasOutput) {
-        std::vector<float*> outPtrs(outputChannels);
-        for (int ch = 0; ch < outputChannels; ++ch) {
-            outPtrs[ch] = data.outputs[0].channelBuffers32[ch];
+    if (mode == ConnectionMode::Play && hasOutput) {
+        if (sessionRunning) {
+            std::vector<float*> outPtrs(outputChannels);
+            for (int ch = 0; ch < outputChannels; ++ch) {
+                outPtrs[ch] = data.outputs[0].channelBuffers32[ch];
+            }
+            session_.pullIncomingAudio(outPtrs.data(), static_cast<size_t>(numSamples), outputChannels);
+        } else {
+            for (int ch = 0; ch < outputChannels; ++ch) {
+                std::fill_n(data.outputs[0].channelBuffers32[ch], numSamples, 0.0f);
+            }
         }
-        session_.pullIncomingAudio(outPtrs.data(), static_cast<size_t>(numSamples), outputChannels);
     }
 
     if (!hasOutput) {
@@ -477,7 +591,7 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
         return kResultOk;
     }
 
-    if (config_.mode != ConnectionMode::Play) {
+    if (mode != ConnectionMode::Play) {
         // ensure outputs beyond mirrored input are zeroed
         for (int ch = 0; ch < outputChannels; ++ch) {
             if (!hasInput || ch >= inputChannels) {
@@ -516,6 +630,7 @@ tresult PLUGIN_API WebRTCProcessor::setState(IBStream* state) {
 
     try {
         const auto json = nlohmann::json::parse(serialized);
+        std::lock_guard<std::mutex> lock(configMutex_);
         if (auto it = json.find("streamId"); it != json.end()) {
             config_.streamId = it->get<std::string>();
         }
@@ -528,6 +643,7 @@ tresult PLUGIN_API WebRTCProcessor::setState(IBStream* state) {
         if (auto it = json.find("mode"); it != json.end()) {
             const auto mode = it->get<std::string>();
             config_.mode = (mode == "seed" ? ConnectionMode::Seed : ConnectionMode::Play);
+            modeAtomic_.store(config_.mode, std::memory_order_release);
         }
         if (auto it = json.find("password"); it != json.end()) {
             config_.password = it->get<std::string>();
@@ -537,8 +653,8 @@ tresult PLUGIN_API WebRTCProcessor::setState(IBStream* state) {
         // ignore malformed state chunks
     }
 
-    configDirty_ = true;
-    restartSessionIfNeeded();
+    configDirty_.store(true, std::memory_order_release);
+    requestConfigApply();
     syncConfigToController();
 
     return kResultOk;

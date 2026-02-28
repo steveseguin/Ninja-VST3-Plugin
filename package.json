@@ -6,11 +6,15 @@
   "scripts": {
     "test:cli-loopback": "node tools/tests/integration/cli_loopback.test.js",
     "test:publish-audio": "node tools/tests/integration/publish_audio.test.js",
-    "test": "npm run test:cli-loopback"
+    "test:play-request-audio-only": "node tools/tests/integration/play_request_audio_only.test.js",
+    "test:play-ignore-video": "node tools/tests/integration/play_ignores_video_track.test.js",
+    "test:play-room-live": "node tools/tests/integration/play_room_audio_live.test.js",
+    "test:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
+    "test": "npm run test:audio-only"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@openai/codex": "^0.45.0",
     "@roamhq/wrtc": "^0.9.1",

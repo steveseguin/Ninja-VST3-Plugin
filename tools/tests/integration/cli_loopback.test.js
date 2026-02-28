@@ -32,6 +32,8 @@ const overallTimeoutMs = parseInt(process.env.WEBRTC_TEST_TIMEOUT_MS || "90000",
 const cliTimeoutMs = parseInt(process.env.WEBRTC_TEST_CLI_TIMEOUT_MS || (Math.max(seedRuntimeMs, playRuntimeMs) + 5000).toString(), 10);
 const minRms = parseFloat(process.env.WEBRTC_TEST_MIN_RMS || "0.01");
 const toneHz = process.env.WEBRTC_TEST_TONE_HZ || "1000";
+const blockSleepMs = process.env.WEBRTC_TEST_BLOCK_SLEEP_MS || "5";
+const disableStun = process.env.WEBRTC_TEST_DISABLE_STUN ?? "1";
 const password = process.env.WEBRTC_TEST_PASSWORD ?? ""; // default disables encryption for loopback.
 
 const activeChildren = new Set();
@@ -82,9 +84,11 @@ function spawnCli(label, extraEnv) {
         WEBRTC_VST_STREAM_ID: streamId,
         WEBRTC_VST_HANDSHAKE_URL: handshakeUrl,
         WEBRTC_VST_PASSWORD: password,
+        WEBRTC_VST_DISABLE_STUN: disableStun,
         WEBRTC_VST_LOG_STDOUT: "1",
         WEBRTC_VST_LOG_SIGNALING: process.env.WEBRTC_VST_LOG_SIGNALING || "1",
         WEBRTC_CLI_HOST_TIMEOUT_MS: cliTimeoutMs.toString(),
+        WEBRTC_CLI_HOST_BLOCK_SLEEP_MS: blockSleepMs,
         ...extraEnv
     };
 
@@ -180,10 +184,12 @@ function delay(ms) {
     console.log("[INFO] CLI loopback test using stream '" + streamId + "'");
     console.log("[INFO] Handshake URL: " + handshakeUrl);
     console.log("[INFO] Encryption disabled: " + (password === "0" || password === "false" || password === "off"));
+    console.log("[INFO] STUN disabled: " + (disableStun !== "0" && disableStun !== "false" && disableStun !== "off"));
 
     const playEnv = {
         WEBRTC_VST_MODE: "play",
         WEBRTC_CLI_HOST_RUNTIME_MS: playRuntimeMs.toString(),
+        WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: playRuntimeMs.toString(),
         WEBRTC_CLI_HOST_MONITOR_OUTPUT: "1"
     };
     const play = spawnCli("play", playEnv);
@@ -194,6 +200,7 @@ function delay(ms) {
     const seedEnv = {
         WEBRTC_VST_MODE: "seed",
         WEBRTC_CLI_HOST_RUNTIME_MS: seedRuntimeMs.toString(),
+        WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: seedRuntimeMs.toString(),
         WEBRTC_CLI_HOST_TONE_HZ: toneHz
     };
     const seed = spawnCli("seed", seedEnv);
