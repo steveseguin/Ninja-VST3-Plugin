@@ -3,14 +3,13 @@
 This folder is intended for GitHub Pages (`/docs` source) and contains:
 
 - Marketing landing page for the audio-only VDO.Ninja VST plugin.
-- Live release download listing fetched from GitHub Releases API.
+- Direct links to latest installer and all GitHub releases.
 
 ## Files
 
 - `index.html`: Marketing + release download page.
 - `getting-started.html`: REAPER-first install/use walkthrough.
 - `styles.css`: Site styling and layout.
-- `app.js`: Client-side release API integration.
 - `developer/BUILD_AND_TEST.md`: Consolidated engineering guide for local build and test.
 
 ## Branding and SEO baseline
