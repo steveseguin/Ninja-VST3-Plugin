@@ -133,6 +133,9 @@ signtool verify /pa /v "build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Conten
 signtool verify /pa /v "build\release\webrtc_vst-windows-setup.exe"
 ```
 
+Note: with a self-signed/untrusted cert, trust-chain status may show as non-Valid on some machines.
+For this project, that is acceptable as long as the files are signed, signer info is present, and timestamp verification output is present.
+
 5. Package zip artifact:
 
 ```powershell
