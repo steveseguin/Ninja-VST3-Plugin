@@ -229,6 +229,13 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
     }
 
     receiveBuffer_.reset(static_cast<size_t>(kDefaultBufferFrames), channels);
+    // stop() clears these sinks defensively; rebind them on every start.
+    session_.setConfigUpdateSink([this](const PluginConfig& sanitized) {
+        handleSanitizedConfig(sanitized);
+    });
+    session_.setStatusSink([this](const std::string& status) {
+        queueStatus(status);
+    });
     session_.start(config, sampleRate, channels);
     sessionActive_.store(true, std::memory_order_release);
     if (shouldLogToStdout()) {

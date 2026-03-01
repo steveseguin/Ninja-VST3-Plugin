@@ -83,11 +83,26 @@ Optional GitHub repository variable:
 Release workflow policy:
 
 1. Build plugin.
-2. Sign release binaries (plugin binary and installer artifacts when present).
-3. Verify signatures are present and timestamped.
-4. Package artifacts.
-5. Submit packaged release assets to VirusTotal.
-6. Publish release.
+2. Run native integration + stress tests.
+3. Sign release binaries (plugin binary and installer artifacts when present).
+4. Verify signatures are present and timestamped.
+5. Package artifacts.
+6. Submit packaged release assets to VirusTotal.
+7. Publish release.
+
+## Local deployment (Windows)
+
+Default (no admin required):
+
+```powershell
+.\deploy_plugin.ps1 -Scope User
+```
+
+System-wide (admin required):
+
+```powershell
+.\deploy_plugin.ps1 -Scope System
+```
 
 ## Manual release flow (local, no CI wait)
 

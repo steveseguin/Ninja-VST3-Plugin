@@ -268,16 +268,23 @@ Recommended release-gate manual checks:
 
 ### 11.1 Local Windows deploy
 
-Use administrator PowerShell:
+User scope (no admin required):
 
 ```powershell
-.\deploy_plugin.ps1
+.\deploy_plugin.ps1 -Scope User
+```
+
+System scope (admin required):
+
+```powershell
+.\deploy_plugin.ps1 -Scope System
 ```
 
 Script copies:
 
 - Source: `build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3`
-- Destination: `C:\Program Files\Common Files\VST3\`
+- Destination (User): `%LOCALAPPDATA%\Programs\Common\VST3\`
+- Destination (System): `C:\Program Files\Common Files\VST3\`
 
 ### 11.2 GitHub release deploy
 
@@ -290,7 +297,8 @@ Trigger:
 Current workflow behavior:
 
 - Windows-only build (`windows-2022`)
-- Builds `webrtc_vst`
+- Builds `webrtc_vst` + native release test binaries
+- Runs native integration + stress tests before signing/publish
 - Enforces Authenticode signing before packaging
 - Fails if artifacts are unsigned; logs trust-chain warnings on runners with missing root trust
 - Zips the signed `.vst3` bundle
@@ -432,4 +440,4 @@ When in doubt for developer validation:
 2. Run native integration + stress tests.
 3. Run `npm run test:integration`.
 4. Run one manual Reaper seed/play smoke.
-5. Deploy with `deploy_plugin.ps1` for local host validation.
+5. Deploy with `deploy_plugin.ps1 -Scope User` for local host validation.

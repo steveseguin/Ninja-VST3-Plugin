@@ -2026,13 +2026,18 @@ void WebRTCSession::attemptReconnect() {
 
 void WebRTCSession::reconnectInternal() {
     // Tear down old signaling client
+    std::unique_ptr<VDONinjaSignalingClient> clientToDestroy;
     {
         std::lock_guard<SpinLock> lock(mutex_);
         if (signalingClient_) {
             signalingClient_->setCallbacks({});
-            auto old = std::move(signalingClient_);
+            clientToDestroy = std::move(signalingClient_);
             // Release lock before disconnect to avoid deadlock
         }
+    }
+    if (clientToDestroy) {
+        clientToDestroy->disconnect();
+        clientToDestroy.reset();
     }
 
     if (shuttingDown_.load(std::memory_order_acquire) ||

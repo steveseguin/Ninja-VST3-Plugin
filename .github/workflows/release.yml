@@ -50,11 +50,23 @@ jobs:
             -G "Visual Studio 17 2022" `
             -DCMAKE_BUILD_TYPE=Release `
             -DVST3_SDK_ROOT="${{ github.workspace }}\\vst3sdk" `
-            -DWEBRTC_VST_BUILD_TESTS=OFF
+            -DWEBRTC_VST_BUILD_TESTS=ON
 
       - name: Build plugin
         shell: pwsh
-        run: cmake --build build/webrtc_vst_win --config Release --target webrtc_vst
+        run: |
+          cmake --build build/webrtc_vst_win --config Release --target `
+            webrtc_vst `
+            webrtc_vst_integration_test `
+            webrtc_vst_stress_test
+
+      - name: Run native release tests
+        shell: pwsh
+        run: |
+          & "build/webrtc_vst_win/bin/Release/webrtc_vst_integration_test.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Integration tests failed" }
+          & "build/webrtc_vst_win/bin/Release/webrtc_vst_stress_test.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Stress tests failed" }
 
       - name: Prepare code-signing certificate
         id: signing-cert
