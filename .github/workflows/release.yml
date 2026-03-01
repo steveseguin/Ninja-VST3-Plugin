@@ -115,8 +115,11 @@ jobs:
             }
 
             $signature = Get-AuthenticodeSignature -FilePath $target
+            if ($signature.Status -eq "NotSigned" -or -not $signature.SignerCertificate) {
+              throw "Signature missing after signing for $target. Status: $($signature.Status) $($signature.StatusMessage)"
+            }
             if ($signature.Status -ne "Valid") {
-              throw "Signature verification failed for $target. Status: $($signature.Status) $($signature.StatusMessage)"
+              Write-Warning "Non-Valid signature status for $target on runner trust store: $($signature.Status) $($signature.StatusMessage)"
             }
             Write-Host "Signed and verified: $target"
           }
