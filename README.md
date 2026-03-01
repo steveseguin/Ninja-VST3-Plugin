@@ -32,6 +32,6 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 
 ## License and contributions
 
-- License notice: [LICENCE.md](./LICENCE.md)
+- License notice: [LICENSE](./LICENSE)
 - Full AGPLv3 text: [AGPLv3.md](./AGPLv3.md)
 - CLA / contribution policy: [CONTRIBUTING.md](./CONTRIBUTING.md)
