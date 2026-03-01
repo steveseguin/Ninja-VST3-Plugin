@@ -44,13 +44,12 @@ publish_audio.test.js
 *.exp
 *.vcxproj.user
 
-# Tools (portable REAPER install, etc.)
-tools/
+# Tools and archived local artifacts
+archive/binaries/
+archive/old_docs/
+tools/reaper/
 
 # Test artifacts
 tests/test_tone.wav
 tests/reaper_render_output.wav
 tests/reaper_render_test.rpp
-
-# Misc
-archive/
