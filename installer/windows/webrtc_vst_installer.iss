@@ -16,6 +16,10 @@
   #define OutputBaseFilename "webrtc_vst-windows-setup"
 #endif
 
+#ifndef GettingStartedUrl
+  #define GettingStartedUrl "https://steveseguin.github.io/Ninja-VST3-Plugin/getting-started.html"
+#endif
+
 [Setup]
 AppId={{A6DE2F66-0E6A-4C59-9FE8-2E7B0D7AA5BE}
 AppName={#MyAppName}
@@ -41,4 +45,4 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "{#SourceVstBundle}\*"; DestDir: "{app}\webrtc_vst.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Run]
-Filename: "{cmd}"; Parameters: "/c echo Installed to {app}\webrtc_vst.vst3"; Flags: runhidden
+Filename: "{#GettingStartedUrl}"; Description: "Open Getting Started guide"; Flags: postinstall shellexec skipifsilent

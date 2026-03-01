@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting Started - WebRTC VST for VDO.Ninja</title>
+  <meta name="description" content="Install and use WebRTC VST in REAPER and other DAWs.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-shape bg-shape-a" aria-hidden="true"></div>
+  <div class="bg-shape bg-shape-b" aria-hidden="true"></div>
+
+  <header class="hero">
+    <p class="eyebrow">Getting Started</p>
+    <h1>WebRTC VST Setup Guide</h1>
+    <p class="hero-copy">
+      REAPER-first setup steps plus generic VST3 host instructions.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/latest">Download Latest Release</a>
+      <a class="btn btn-ghost" href="./index.html">Back To Main Page</a>
+    </div>
+  </header>
+
+  <main class="content">
+    <section class="panel">
+      <h2>1) Install</h2>
+      <div class="steps">
+        <article class="step">
+          <p class="step-index">A</p>
+          <p>Preferred: run <code>webrtc_vst-vX.Y.Z-windows-setup.exe</code>.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">B</p>
+          <p>Manual: extract <code>webrtc_vst.vst3</code> from the zip.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">C</p>
+          <p>Install path: <code>%LOCALAPPDATA%\Programs\Common\VST3\</code>.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>2) REAPER Setup</h2>
+      <div class="steps">
+        <article class="step">
+          <p class="step-index">1</p>
+          <p>Open <code>Options &gt; Preferences &gt; Plug-ins &gt; VST</code>.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">2</p>
+          <p>Ensure path includes <code>%LOCALAPPDATA%\Programs\Common\VST3</code>.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">3</p>
+          <p>Click <code>Re-scan</code> (or <code>Clear cache/re-scan</code>).</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>3) Play Mode (Receive Audio)</h2>
+      <div class="steps">
+        <article class="step">
+          <p class="step-index">1</p>
+          <p>Add plugin to a track and set mode to <code>Play</code>.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">2</p>
+          <p>Enter Stream ID (example: <code>wBYPUKL</code>).</p>
+        </article>
+        <article class="step">
+          <p class="step-index">3</p>
+          <p>Enable track monitor, confirm REAPER meter activity.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>4) Seed Mode (Publish Audio)</h2>
+      <div class="steps">
+        <article class="step">
+          <p class="step-index">1</p>
+          <p>Set mode to <code>Seed</code>.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">2</p>
+          <p>Set a Stream ID and play audio on that track.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">3</p>
+          <p>Open your VDO.Ninja viewer URL and confirm audio arrives.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Troubleshooting</h2>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Plugin not visible</h3>
+          <p>Rescan VST3 in REAPER and confirm plugin path is correct.</p>
+        </article>
+        <article class="feature-card">
+          <h3>No audio in Play mode</h3>
+          <p>Confirm Stream ID and Password match publisher settings exactly.</p>
+        </article>
+        <article class="feature-card">
+          <h3>No audio in Seed mode</h3>
+          <p>Confirm track has signal and the stream is being viewed remotely.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Source: <a href="https://github.com/steveseguin/Ninja-VST3-Plugin">github.com/steveseguin/Ninja-VST3-Plugin</a></p>
+  </footer>
+</body>
+</html>

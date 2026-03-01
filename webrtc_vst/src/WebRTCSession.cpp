@@ -43,7 +43,7 @@ constexpr int kReconnectMaxDelayMs = 30000; // 30 second cap
 constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
 constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
 constexpr size_t kMaxPeerSessions = 16;
-constexpr auto kPlayRefreshCooldown = std::chrono::seconds(2);
+constexpr auto kPlayRefreshCooldown = std::chrono::seconds(30);
 
 bool truthyEnvEnabled(const char* name) {
     const char* value = std::getenv(name);
@@ -897,13 +897,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                 case rtc::PeerConnection::State::Disconnected:
                     log("Peer connection disconnected: " + keyCopy);
                     it->second.negotiationReady = false;
-                    resetMediaFlags = true;
                     statusMessage = "Peer disconnected";
-                    if (config_.mode == ConnectionMode::Play) {
-                        closePeerSession(keyCopy);
-                        refreshPlayRequest = true;
-                        refreshReason = "peer disconnected";
-                    }
                     break;
                 case rtc::PeerConnection::State::Failed:
                     log("Peer connection failed: " + keyCopy);
@@ -1683,7 +1677,22 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
             return;
         }
         if (request == "alert") {
-            log("Alert from server: " + message.value("message", std::string{}));
+            const std::string alertMessage = message.value("message", std::string{});
+            log("Alert from server: " + alertMessage);
+            if (!alertMessage.empty()) {
+                std::string lowered = alertMessage;
+                std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (config_.mode == ConnectionMode::Seed &&
+                    lowered.find("already in use") != std::string::npos) {
+                    publishingAudio_.store(false, std::memory_order_relaxed);
+                    emitStatus("Error: Stream ID already in use");
+                } else {
+                    emitStatus("Alert: " + alertMessage);
+                }
+            } else {
+                emitStatus("Alert from signaling server");
+            }
             return;
         }
     }
@@ -2189,6 +2198,10 @@ void WebRTCSession::announceRoleIfReady() {
 }
 
 void WebRTCSession::requestPlayRefresh(const std::string& reason) {
+    if (!truthyEnvEnabled("WEBRTC_VST_ENABLE_PLAY_REFRESH")) {
+        return;
+    }
+
     std::string streamIdToRequest;
     {
         std::lock_guard<SpinLock> lock(mutex_);
