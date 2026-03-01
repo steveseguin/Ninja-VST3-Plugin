@@ -37,6 +37,11 @@ constexpr size_t kFrameSizeSamples = 960; // 20ms at 48kHz
 constexpr int kOpusPayloadType = 111;
 constexpr uint32_t kAudioSsrc = 0x11ECACA; // Arbitrary but stable
 constexpr size_t kPeerBufferFrames = 2048; // ~42ms at 48kHz
+constexpr int kMaxReconnectAttempts = 5;
+constexpr int kReconnectBaseDelayMs = 1000; // 1 second initial delay
+constexpr int kReconnectMaxDelayMs = 30000; // 30 second cap
+constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
+constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
 
 bool truthyEnvEnabled(const char* name) {
     const char* value = std::getenv(name);
@@ -1067,6 +1072,13 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             }
 
             ctx->buffer->push(channelPtrs.data(), outFrames, peerChannels);
+
+            // Mark pre-fill ready once buffer has enough data for smooth playback
+            if (!ctx->preFillReady.load(std::memory_order_relaxed)) {
+                if (ctx->buffer->availableFrames(peerChannels) >= kJitterPreFillFrames) {
+                    ctx->preFillReady.store(true, std::memory_order_release);
+                }
+            }
             return true;
         };
 
@@ -1340,6 +1352,9 @@ void WebRTCSession::processCandidateMessage(PeerSession& session, const nlohmann
 void WebRTCSession::start(const PluginConfig& config, double sampleRate, int channels) {
     // Clear shutdown flag when starting
     shuttingDown_.store(false, std::memory_order_release);
+    intentionalDisconnect_ = false;
+    reconnectAttempts_ = 0;
+    isReconnecting_.store(false, std::memory_order_release);
 
     ConfigSink callback;
     std::optional<PluginConfig> sanitizedForCallback;
@@ -1419,14 +1434,21 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                 }
                 log("Signaling connection closed");
                 bool notifyDisconnect = false;
+                bool shouldReconnect = false;
                 {
                     std::lock_guard<SpinLock> innerLock(mutex_);
                     notifyDisconnect = started_;
                     resetAllPeerConnections();
+                    roomJoined_ = false;
+                    roleAnnounced_ = false;
+                    shouldReconnect = started_ && !intentionalDisconnect_ &&
+                                     config_.enableAutoReconnect;
                 }
-                if (notifyDisconnect) {
-                    publishingAudio_.store(false, std::memory_order_relaxed);
-                    receivingAudio_.store(false, std::memory_order_relaxed);
+                publishingAudio_.store(false, std::memory_order_relaxed);
+                receivingAudio_.store(false, std::memory_order_relaxed);
+                if (shouldReconnect) {
+                    attemptReconnect();
+                } else if (notifyDisconnect) {
                     emitStatus("Signaling disconnected");
                 }
             },
@@ -1466,8 +1488,19 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
 void WebRTCSession::stop() {
     log("WebRTCSession::stop() - enter");
 
+    // Set intentional disconnect to prevent auto-reconnect
+    intentionalDisconnect_ = true;
+
     // Set shutdown flag FIRST to stop all callbacks immediately
     shuttingDown_.store(true, std::memory_order_release);
+
+    // Wait for any in-flight reconnect thread
+    if (reconnectThread_ && reconnectThread_->joinable()) {
+        reconnectThread_->join();
+    }
+    reconnectThread_.reset();
+    reconnectAttempts_ = 0;
+    isReconnecting_.store(false, std::memory_order_release);
 
     // Mark as stopped to prevent new operations
     {
@@ -1885,6 +1918,141 @@ void WebRTCSession::sendIceCandidate(PeerSession& session,
     }
 }
 
+void WebRTCSession::attemptReconnect() {
+    if (isReconnecting_.exchange(true, std::memory_order_acq_rel)) {
+        return; // Already reconnecting
+    }
+
+    reconnectAttempts_++;
+    if (reconnectAttempts_ > kMaxReconnectAttempts) {
+        log("Reconnection failed: max attempts (" + std::to_string(kMaxReconnectAttempts) + ") exhausted");
+        emitStatus("Reconnection failed");
+        isReconnecting_.store(false, std::memory_order_release);
+        reconnectAttempts_ = 0;
+        return;
+    }
+
+    // Exponential backoff: delay * 2^(attempt-1), capped at 30s
+    const int delayMs = std::min(
+        kReconnectBaseDelayMs * (1 << (reconnectAttempts_ - 1)),
+        kReconnectMaxDelayMs);
+
+    log("Reconnecting (attempt " + std::to_string(reconnectAttempts_) + "/" +
+        std::to_string(kMaxReconnectAttempts) + ") in " + std::to_string(delayMs) + "ms");
+    emitStatus("Reconnecting (" + std::to_string(reconnectAttempts_) + "/" +
+               std::to_string(kMaxReconnectAttempts) + ")...");
+
+    // Join and detach previous reconnect thread if any
+    if (reconnectThread_ && reconnectThread_->joinable()) {
+        reconnectThread_->detach();
+    }
+
+    reconnectThread_ = std::make_unique<std::thread>([this, delayMs]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+
+        if (shuttingDown_.load(std::memory_order_acquire) || intentionalDisconnect_) {
+            isReconnecting_.store(false, std::memory_order_release);
+            return;
+        }
+
+        reconnectInternal();
+    });
+}
+
+void WebRTCSession::reconnectInternal() {
+    // Tear down old signaling client
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (signalingClient_) {
+            signalingClient_->setCallbacks({});
+            auto old = std::move(signalingClient_);
+            // Release lock before disconnect to avoid deadlock
+        }
+    }
+
+    if (shuttingDown_.load(std::memory_order_acquire) || intentionalDisconnect_) {
+        isReconnecting_.store(false, std::memory_order_release);
+        return;
+    }
+
+    // Generate new UUID (server assigns its own, but we need a fresh "from" field)
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        selfUuid_ = generateUUID();
+        outgoingFifo_.clear();
+        lastSentSignalingJson_.reset();
+        lastReceivedSignalingJson_.reset();
+        suppressingSentDuplicate_ = false;
+        suppressingReceivedDuplicate_ = false;
+    }
+
+    log("Reconnect: new UUID " + selfUuid_);
+
+    // Create new signaling client and connect
+    auto client = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
+    client->setCallbacks({
+        [this]() {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Reconnected to VDO.Ninja signaling server");
+            reconnectAttempts_ = 0;
+            isReconnecting_.store(false, std::memory_order_release);
+            emitStatus("Reconnected");
+
+            // Re-post initial requests (rejoin room + reseed/replay)
+            {
+                std::lock_guard<SpinLock> lock(mutex_);
+                roomJoined_ = false;
+                roleAnnounced_ = false;
+            }
+            postInitialRequests();
+        },
+        [this]() {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Signaling connection closed during reconnect");
+            bool shouldRetry = false;
+            {
+                std::lock_guard<SpinLock> innerLock(mutex_);
+                resetAllPeerConnections();
+                roomJoined_ = false;
+                roleAnnounced_ = false;
+                shouldRetry = started_ && !intentionalDisconnect_ &&
+                              config_.enableAutoReconnect;
+            }
+            publishingAudio_.store(false, std::memory_order_relaxed);
+            receivingAudio_.store(false, std::memory_order_relaxed);
+            isReconnecting_.store(false, std::memory_order_release);
+            if (shouldRetry) {
+                attemptReconnect();
+            } else {
+                emitStatus("Signaling disconnected");
+            }
+        },
+        [this](const nlohmann::json& message) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            handleSignalingMessage(message);
+        },
+        [this](const std::string& error) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Signaling error during reconnect: " + error);
+        }
+    });
+
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        signalingClient_ = std::move(client);
+    }
+
+    signalingClient_->connectAsync();
+}
+
 void WebRTCSession::postInitialRequests() {
     if (!signalingClient_) {
         return;
@@ -1968,6 +2136,12 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
         outgoingFifo_.push_back(sample);
     }
 
+    // Cap FIFO to prevent unbounded memory growth
+    const size_t maxSamples = kOutgoingFifoMaxSamples;
+    while (outgoingFifo_.size() > maxSamples) {
+        outgoingFifo_.pop_front();
+    }
+
     while (outgoingFifo_.size() >= kFrameSizeSamples * static_cast<size_t>(channels)) {
         std::vector<float> frame(kFrameSizeSamples * static_cast<size_t>(channels));
         for (size_t i = 0; i < frame.size(); ++i) {
@@ -2023,13 +2197,14 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
         std::fill_n(outputs[ch], frames, 0.0f);
     }
 
-    // Snapshot peer audio buffers under lock (just copy shared_ptrs)
+    // Snapshot peer audio buffers under lock (only peers that have pre-filled)
     std::vector<std::shared_ptr<AudioRingBuffer>> peerBuffers;
     {
         std::lock_guard<SpinLock> lock(mutex_);
         peerBuffers.reserve(peerSessions_.size());
         for (auto& [key, session] : peerSessions_) {
-            if (session.audioContext && session.audioContext->buffer) {
+            if (session.audioContext && session.audioContext->buffer &&
+                session.audioContext->preFillReady.load(std::memory_order_acquire)) {
                 peerBuffers.push_back(session.audioContext->buffer);
             }
         }

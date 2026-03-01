@@ -89,6 +89,7 @@ private:
         LinearResampler resampler;
         std::shared_ptr<AudioRingBuffer> buffer;
         std::atomic<bool> active{true};
+        std::atomic<bool> preFillReady{false}; // true once buffer has enough data
         uint64_t frameCount{0};
         uint64_t decodeErrorCount{0};
         bool loggedFirstFrame{false};
@@ -150,6 +151,8 @@ private:
 
     void postInitialRequests();
     void announceRoleIfReady();
+    void attemptReconnect();
+    void reconnectInternal();
     void processCandidateMessage(PeerSession& session, const nlohmann::json& candidateMessage);
     void queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject);
     void flushPendingIceLocked(PeerSession& session);
@@ -183,6 +186,10 @@ private:
     mutable SpinLock mutex_;
     std::atomic<bool> shuttingDown_{false};
     bool started_{false};
+    bool intentionalDisconnect_{false};
+    std::atomic<bool> isReconnecting_{false};
+    int reconnectAttempts_{0};
+    std::unique_ptr<std::thread> reconnectThread_;
 
     ::OpusEncoder* opusEncoder_{nullptr};
     std::deque<float> outgoingFifo_;
