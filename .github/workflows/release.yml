@@ -47,6 +47,7 @@ jobs:
           cmake -S webrtc_vst -B build/webrtc_vst_win `
             -G "Visual Studio 17 2022" `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 `
             -DVST3_SDK_ROOT="${{ github.workspace }}\\vst3sdk" `
             -DWEBRTC_VST_BUILD_TESTS=OFF
 
