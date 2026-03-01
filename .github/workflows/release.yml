@@ -227,5 +227,4 @@ jobs:
           body: |
             Automated Windows VST3 build artifact.
             - Code-signing: enforced in CI (Authenticode + timestamp)
-            - VirusTotal submissions:
-            ${{ steps.virustotal.outputs.analysis_urls }}
+            - VirusTotal submissions: completed in CI
