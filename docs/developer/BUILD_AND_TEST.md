@@ -84,10 +84,48 @@ Release workflow policy:
 
 1. Build plugin.
 2. Sign release binaries (plugin binary and installer artifacts when present).
-3. Verify signatures.
+3. Verify signatures are present and timestamped.
 4. Package artifacts.
 5. Submit packaged release assets to VirusTotal.
 6. Publish release.
+
+## Manual release flow (local, no CI wait)
+
+1. Build release plugin:
+
+```powershell
+cmake --build build/webrtc_vst_win --config Release --target webrtc_vst
+```
+
+2. Sign plugin binary (use cert material from `../code-signing/secrets/decrypted`):
+
+```powershell
+signtool sign /fd SHA256 /f "..\code-signing\secrets\decrypted\certs\socialstream.pfx" /p "<pfx_password>" /tr "http://timestamp.digicert.com" /td SHA256 "build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Contents\x86_64-win\webrtc_vst.vst3"
+```
+
+3. Verify signature/timestamp:
+
+```powershell
+signtool verify /pa /v "build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Contents\x86_64-win\webrtc_vst.vst3"
+```
+
+4. Package artifact:
+
+```powershell
+tar -a -cf build\release\webrtc_vst-v<version>-windows-vst3.zip -C build\webrtc_vst_win\VST3\Release webrtc_vst.vst3
+```
+
+5. Submit to VirusTotal:
+
+```powershell
+curl.exe --request POST --url https://www.virustotal.com/api/v3/files --header "x-apikey: <VT_API_KEY>" --form "file=@build\release\webrtc_vst-v<version>-windows-vst3.zip"
+```
+
+6. Publish release manually:
+
+```powershell
+gh release create v<version> build\release\webrtc_vst-v<version>-windows-vst3.zip --repo steveseguin/vst --title "v<version>" --notes "Manual local release"
+```
 
 If you source cert material from `../code-signing`, do not commit decrypted keys or passphrases to this repository.
 

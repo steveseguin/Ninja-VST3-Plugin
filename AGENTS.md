@@ -292,11 +292,22 @@ Current workflow behavior:
 - Windows-only build (`windows-2022`)
 - Builds `webrtc_vst`
 - Enforces Authenticode signing before packaging
-- Verifies signatures (`Get-AuthenticodeSignature`) before publish
+- Fails if artifacts are unsigned; logs trust-chain warnings on runners with missing root trust
 - Zips the signed `.vst3` bundle
 - Auto-detects installer artifacts (`*setup*.exe`, `*installer*.exe`, `*.msi`) and signs/attaches them
 - Submits release assets to VirusTotal before publish
 - Publishes assets to GitHub Releases via `softprops/action-gh-release`
+
+### 11.3 Manual local release (no CI wait)
+
+Use this path when you need immediate release output from local machine:
+
+1. Build `webrtc_vst` in Release.
+2. Sign `build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Contents\x86_64-win\webrtc_vst.vst3`.
+3. Verify with `signtool verify /pa /v`.
+4. Package zip to `build\release\`.
+5. Submit zip and/or binary to VirusTotal.
+6. Publish with `gh release create`.
 
 ## 12) Signing / Notarization Status
 
@@ -312,6 +323,7 @@ Current state:
 - No macOS notarization pipeline exists yet.
 
 For local/manual releases, apply the same policy: sign first, verify signature, then submit artifact(s) to VirusTotal before distribution.
+If `Get-AuthenticodeSignature` shows trust-chain `UnknownError` on a machine without your root cert, rely on `signtool sign` success + `signtool verify` output + signer identity/timestamp.
 
 Example path to sign on Windows:
 
@@ -384,6 +396,7 @@ Before publishing:
 6. Audacity smoke open/close cycle completed.
 7. Artifact packaging verified.
 8. Authenticode signing completed and signature validity verified.
+   If trust-chain is not available on host, verify signature presence + timestamp + signer subject instead.
 9. Release artifacts submitted to VirusTotal and analysis URLs captured in release notes.
 10. Release notes include known limitations.
 
@@ -400,6 +413,9 @@ Before publishing:
     export CODESIGN_BUNDLE_PASSPHRASE='<your passphrase>'
     bash scripts/unlock-bundle.sh
     ```
+- `Get-AuthenticodeSignature` returns `UnknownError`:
+  - Common when the local machine/runner does not trust the signing root.
+  - Confirm `signtool sign` succeeded and `signtool verify /pa /v` shows signer + timestamp.
 - Plugin appears silent in Play:
   - Confirm stream/room/password correctness.
   - Enable `WEBRTC_VST_LOG_STDOUT=1` and `WEBRTC_VST_LOG_SIGNALING=1`.
