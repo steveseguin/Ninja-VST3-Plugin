@@ -40,6 +40,7 @@ constexpr size_t kPeerBufferFrames = 2048; // ~42ms at 48kHz
 constexpr int kMaxReconnectAttempts = 5;
 constexpr int kReconnectBaseDelayMs = 1000; // 1 second initial delay
 constexpr int kReconnectMaxDelayMs = 30000; // 30 second cap
+constexpr int kIdlePlayReconnectDelayMs = 15 * 60 * 1000; // 15 minute idle retry cadence
 constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
 constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
 constexpr size_t kMaxPeerSessions = 16;
@@ -1475,12 +1476,15 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                 log("Signaling connection closed");
                 bool notifyDisconnect = false;
                 bool shouldReconnect = false;
+                bool idlePlayMode = false;
                 {
                     std::lock_guard<SpinLock> innerLock(mutex_);
                     notifyDisconnect = started_;
+                    const bool hadPeers = !peerSessions_.empty();
                     resetAllPeerConnections();
                     roomJoined_ = false;
                     roleAnnounced_ = false;
+                    idlePlayMode = (config_.mode == ConnectionMode::Play) && !hadPeers;
                     shouldReconnect = started_ &&
                                       !intentionalDisconnect_.load(std::memory_order_acquire) &&
                                       config_.enableAutoReconnect;
@@ -1488,7 +1492,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                 publishingAudio_.store(false, std::memory_order_relaxed);
                 receivingAudio_.store(false, std::memory_order_relaxed);
                 if (shouldReconnect) {
-                    attemptReconnect();
+                    attemptReconnect(idlePlayMode);
                 } else if (notifyDisconnect) {
                     emitStatus("Signaling disconnected");
                 }
@@ -1981,29 +1985,37 @@ void WebRTCSession::sendIceCandidate(PeerSession& session,
     }
 }
 
-void WebRTCSession::attemptReconnect() {
+void WebRTCSession::attemptReconnect(bool idlePlayMode) {
     if (isReconnecting_.exchange(true, std::memory_order_acq_rel)) {
         return; // Already reconnecting
     }
 
-    reconnectAttempts_++;
-    if (reconnectAttempts_ > kMaxReconnectAttempts) {
-        log("Reconnection failed: max attempts (" + std::to_string(kMaxReconnectAttempts) + ") exhausted");
-        emitStatus("Reconnection failed");
-        isReconnecting_.store(false, std::memory_order_release);
+    int delayMs = kReconnectBaseDelayMs;
+    if (idlePlayMode) {
         reconnectAttempts_ = 0;
-        return;
+        delayMs = kIdlePlayReconnectDelayMs;
+        log("Idle Play mode signaling disconnect; scheduling reconnect in 15 minutes");
+        emitStatus("Idle Play mode; retrying signaling in 15m");
+    } else {
+        reconnectAttempts_++;
+        if (reconnectAttempts_ > kMaxReconnectAttempts) {
+            log("Reconnection failed: max attempts (" + std::to_string(kMaxReconnectAttempts) + ") exhausted");
+            emitStatus("Reconnection failed");
+            isReconnecting_.store(false, std::memory_order_release);
+            reconnectAttempts_ = 0;
+            return;
+        }
+
+        // Exponential backoff: delay * 2^(attempt-1), capped at 30s
+        delayMs = std::min(
+            kReconnectBaseDelayMs * (1 << (reconnectAttempts_ - 1)),
+            kReconnectMaxDelayMs);
+
+        log("Reconnecting (attempt " + std::to_string(reconnectAttempts_) + "/" +
+            std::to_string(kMaxReconnectAttempts) + ") in " + std::to_string(delayMs) + "ms");
+        emitStatus("Reconnecting (" + std::to_string(reconnectAttempts_) + "/" +
+                   std::to_string(kMaxReconnectAttempts) + ")...");
     }
-
-    // Exponential backoff: delay * 2^(attempt-1), capped at 30s
-    const int delayMs = std::min(
-        kReconnectBaseDelayMs * (1 << (reconnectAttempts_ - 1)),
-        kReconnectMaxDelayMs);
-
-    log("Reconnecting (attempt " + std::to_string(reconnectAttempts_) + "/" +
-        std::to_string(kMaxReconnectAttempts) + ") in " + std::to_string(delayMs) + "ms");
-    emitStatus("Reconnecting (" + std::to_string(reconnectAttempts_) + "/" +
-               std::to_string(kMaxReconnectAttempts) + ")...");
 
     // Clean up any previous reconnect thread object before replacing it.
     if (reconnectThread_ && reconnectThread_->joinable()) {
@@ -2094,11 +2106,14 @@ void WebRTCSession::reconnectInternal() {
             }
             log("Signaling connection closed during reconnect");
             bool shouldRetry = false;
+            bool idlePlayMode = false;
             {
                 std::lock_guard<SpinLock> innerLock(mutex_);
+                const bool hadPeers = !peerSessions_.empty();
                 resetAllPeerConnections();
                 roomJoined_ = false;
                 roleAnnounced_ = false;
+                idlePlayMode = (config_.mode == ConnectionMode::Play) && !hadPeers;
                 shouldRetry = started_ &&
                               !intentionalDisconnect_.load(std::memory_order_acquire) &&
                               config_.enableAutoReconnect;
@@ -2107,7 +2122,7 @@ void WebRTCSession::reconnectInternal() {
             receivingAudio_.store(false, std::memory_order_relaxed);
             isReconnecting_.store(false, std::memory_order_release);
             if (shouldRetry) {
-                attemptReconnect();
+                attemptReconnect(idlePlayMode);
             } else {
                 emitStatus("Signaling disconnected");
             }

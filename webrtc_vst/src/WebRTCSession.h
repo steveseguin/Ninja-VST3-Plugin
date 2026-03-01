@@ -155,7 +155,7 @@ private:
 
     void postInitialRequests();
     void announceRoleIfReady();
-    void attemptReconnect();
+    void attemptReconnect(bool idlePlayMode);
     void reconnectInternal();
     void processCandidateMessage(PeerSession& session, const nlohmann::json& candidateMessage);
     void queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject);
