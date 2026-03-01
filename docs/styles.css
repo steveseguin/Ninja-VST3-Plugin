@@ -73,6 +73,37 @@ body {
   font-weight: 700;
 }
 
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0.32rem 0.68rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--accent-deep);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.brand-mark:hover {
+  text-decoration: underline;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.brand-mark img {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.brand-mark span {
+  font-size: 0.86rem;
+  letter-spacing: 0.01em;
+}
+
 h1 {
   margin: 0;
   font-size: clamp(2.1rem, 4.6vw, 3.8rem);
@@ -356,6 +387,10 @@ code {
   padding: 0.6rem 0 2.2rem;
   color: var(--ink-soft);
   font-size: 0.9rem;
+}
+
+.footer-brand {
+  margin-bottom: 0.2rem;
 }
 
 .footer a {

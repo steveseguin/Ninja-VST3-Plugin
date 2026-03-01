@@ -13,6 +13,13 @@ This folder is intended for GitHub Pages (`/docs` source) and contains:
 - `app.js`: Client-side release API integration.
 - `developer/BUILD_AND_TEST.md`: Consolidated engineering guide for local build and test.
 
+## Branding and SEO baseline
+
+- Keep visible VDO.Ninja attribution on docs pages (`Powered by VDO.Ninja`).
+- Keep favicon set to `https://vdo.ninja/media/favicon.png`.
+- Keep Open Graph and Twitter metadata aligned with VDO.Ninja branding.
+- Keep primary installer link fixed to `releases/latest/download/webrtc_vst-windows-setup.exe`.
+
 ## Publish
 
 If GitHub Pages is enabled for this repository, set source to:
