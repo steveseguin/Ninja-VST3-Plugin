@@ -42,7 +42,7 @@ Uninstallable=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#SourceVstBundle}\*"; DestDir: "{app}\webrtc_vst.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceVstBundle}\*"; DestDir: "{app}\webrtc_vst.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "desktop.ini"
 
 [Run]
 Filename: "{#GettingStartedUrl}"; Description: "Open Getting Started guide"; Flags: postinstall shellexec skipifsilent
