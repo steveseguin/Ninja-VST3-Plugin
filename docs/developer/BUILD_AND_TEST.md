@@ -139,7 +139,7 @@ curl.exe --request POST --url https://www.virustotal.com/api/v3/files --header "
 6. Publish release manually:
 
 ```powershell
-gh release create v<version> build\release\webrtc_vst-v<version>-windows-vst3.zip --repo steveseguin/vst --title "v<version>" --notes "Manual local release"
+gh release create v<version> build\release\webrtc_vst-v<version>-windows-vst3.zip --repo steveseguin/Ninja-VST3-Plugin --title "v<version>" --notes "Manual local release"
 ```
 
 If you source cert material from `../code-signing`, do not commit decrypted keys or passphrases to this repository.

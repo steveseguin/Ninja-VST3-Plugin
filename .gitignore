@@ -47,6 +47,7 @@ publish_audio.test.js
 # Tools and archived local artifacts
 archive/binaries/
 archive/old_docs/
+archive/old_test_scripts/
 tools/reaper/
 
 # Test artifacts

@@ -16,8 +16,9 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 - `webrtc_vst/`: VST3 plugin source.
 - `tools/cli_host/`: Headless CLI host for testing without a DAW.
 - `tests/`: Integration and stress tests.
+- `tools/tests/`: Node-based integration tests.
+- `js_sdk/`: Minimal vendored VDO.Ninja SDK runtime used by tests.
 - `docs/`: Marketing/download page intended for GitHub Pages.
-- `archive/old_test_scripts/`: Retained legacy ad-hoc test scripts.
 
 ## Build and test quick start
 
@@ -28,11 +29,10 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 
 ## Downloads
 
-- Releases: https://github.com/steveseguin/vst/releases
+- Releases: https://github.com/steveseguin/Ninja-VST3-Plugin/releases
 - Docs landing page (when GitHub Pages is enabled): `docs/index.html`
 
 ## License and contributions
 
-- License notice: [LICENSE](./LICENSE)
-- Full AGPLv3 text: [AGPLv3.md](./AGPLv3.md)
+- License: [LICENSE](./LICENSE)
 - CLA / contribution policy: [CONTRIBUTING.md](./CONTRIBUTING.md)
