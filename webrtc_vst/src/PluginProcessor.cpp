@@ -29,6 +29,7 @@ const Steinberg::FUID kWebRTCProcessorUID(0x63A34A7C, 0xBE214208, 0x9DB2E0D1, 0x
 namespace {
 constexpr double kDefaultSampleRate = 48000.0;
 constexpr int kDefaultBufferFrames = 2048;
+constexpr int kMaxProcessChannels = 8;
 
 std::string trimCopy(const std::string& text) {
     const auto first = text.find_first_not_of(" \t\n\r");
@@ -464,6 +465,10 @@ tresult PLUGIN_API WebRTCProcessor::setActive(TBool state) {
     return AudioEffect::setActive(state);
 }
 
+tresult PLUGIN_API WebRTCProcessor::canProcessSampleSize(int32 symbolicSampleSize) {
+    return symbolicSampleSize == kSample32 ? kResultTrue : kResultFalse;
+}
+
 tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
     if (data.symbolicSampleSize == kSample64) {
         if (data.numOutputs > 0 && data.outputs[0].channelBuffers64 != nullptr) {
@@ -473,7 +478,7 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
             }
         }
         flushPendingStatus();
-        return kResultOk; // 64-bit audio not handled in this prototype yet
+        return kResultFalse; // Explicitly unsupported; declared via canProcessSampleSize()
     }
 
     if (!processingReady_.load(std::memory_order_acquire)) {
@@ -554,15 +559,16 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
     }
 
     if (mode == ConnectionMode::Seed && hasInput) {
-        std::vector<const float*> inPtrs(inputChannels);
-        for (int ch = 0; ch < inputChannels; ++ch) {
-            inPtrs[ch] = data.inputs[0].channelBuffers32[ch];
+        const int pushChannels = std::min(inputChannels, kMaxProcessChannels);
+        std::array<const float*, static_cast<size_t>(kMaxProcessChannels)> inPtrs{};
+        for (int ch = 0; ch < pushChannels; ++ch) {
+            inPtrs[static_cast<size_t>(ch)] = data.inputs[0].channelBuffers32[ch];
         }
-        if (sessionRunning) {
+        if (sessionRunning && pushChannels > 0) {
             if (!loggedSeedPushAttempt_.exchange(true, std::memory_order_acq_rel) && shouldLogToStdout()) {
                 std::cout << "[WebRTC] Seed path calling pushOutgoingAudio for first time" << std::endl;
             }
-            session_.pushOutgoingAudio(inPtrs.data(), static_cast<size_t>(numSamples), inputChannels);
+            session_.pushOutgoingAudio(inPtrs.data(), static_cast<size_t>(numSamples), pushChannels);
         }
 
         if (hasOutput) {
@@ -576,12 +582,16 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
     }
 
     if (mode == ConnectionMode::Play && hasOutput) {
-        if (sessionRunning) {
-            std::vector<float*> outPtrs(outputChannels);
-            for (int ch = 0; ch < outputChannels; ++ch) {
-                outPtrs[ch] = data.outputs[0].channelBuffers32[ch];
+        const int pullChannels = std::min(outputChannels, kMaxProcessChannels);
+        if (sessionRunning && pullChannels > 0) {
+            std::array<float*, static_cast<size_t>(kMaxProcessChannels)> outPtrs{};
+            for (int ch = 0; ch < pullChannels; ++ch) {
+                outPtrs[static_cast<size_t>(ch)] = data.outputs[0].channelBuffers32[ch];
             }
-            session_.pullIncomingAudio(outPtrs.data(), static_cast<size_t>(numSamples), outputChannels);
+            session_.pullIncomingAudio(outPtrs.data(), static_cast<size_t>(numSamples), pullChannels);
+            for (int ch = pullChannels; ch < outputChannels; ++ch) {
+                std::fill_n(data.outputs[0].channelBuffers32[ch], numSamples, 0.0f);
+            }
         } else {
             for (int ch = 0; ch < outputChannels; ++ch) {
                 std::fill_n(data.outputs[0].channelBuffers32[ch], numSamples, 0.0f);

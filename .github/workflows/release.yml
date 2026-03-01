@@ -12,6 +12,11 @@ permissions:
 jobs:
   build-release:
     runs-on: windows-2022
+    env:
+      SIGNING_CERT_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+      VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY || secrets.VT_API_KEY }}
+      SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGN_TIMESTAMP_URL }}
 
     steps:
       - name: Checkout repository
@@ -19,6 +24,17 @@ jobs:
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
+
+      - name: Validate release secrets
+        shell: pwsh
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PFX_BASE64)) { $missing += "WINDOWS_SIGN_PFX_BASE64" }
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERT_PASSWORD)) { $missing += "WINDOWS_SIGN_PFX_PASSWORD" }
+          if ([string]::IsNullOrWhiteSpace($env:VIRUSTOTAL_API_KEY)) { $missing += "VIRUSTOTAL_API_KEY (or VT_API_KEY)" }
+          if ($missing.Count -gt 0) {
+            throw "Missing required release secret(s): $($missing -join ', ')"
+          }
 
       - name: Clone Steinberg VST3 SDK
         shell: pwsh
@@ -38,6 +54,73 @@ jobs:
         shell: pwsh
         run: cmake --build build/webrtc_vst_win --config Release --target webrtc_vst
 
+      - name: Prepare code-signing certificate
+        id: signing-cert
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "webrtc_vst_codesign.pfx"
+          [System.IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SIGNING_CERT_PFX_BASE64))
+          "cert_path=$certPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Sign and verify release binaries
+        id: sign
+        shell: pwsh
+        env:
+          CERT_PATH: ${{ steps.signing-cert.outputs.cert_path }}
+        run: |
+          $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:SIGNING_TIMESTAMP_URL)) {
+            "http://timestamp.digicert.com"
+          } else {
+            $env:SIGNING_TIMESTAMP_URL
+          }
+
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction Stop |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            throw "signtool.exe not found"
+          }
+
+          $targets = @()
+          $pluginBinary = "build/webrtc_vst_win/VST3/Release/webrtc_vst.vst3/Contents/x86_64-win/webrtc_vst.vst3"
+          if (-not (Test-Path $pluginBinary)) {
+            throw "Expected plugin binary not found at $pluginBinary"
+          }
+          $targets += (Resolve-Path $pluginBinary).Path
+
+          # Future-proofing: sign installer artifacts when present.
+          $installerCandidates = Get-ChildItem -Path build -Recurse -File -Include *.exe,*.msi |
+            Where-Object { $_.Name -match '(?i)(setup|installer)' }
+          foreach ($candidate in $installerCandidates) {
+            $targets += $candidate.FullName
+          }
+
+          $targets = $targets | Sort-Object -Unique
+          if ($targets.Count -eq 0) {
+            throw "No release binaries found to sign"
+          }
+
+          foreach ($target in $targets) {
+            & $signtool.FullName sign `
+              /fd SHA256 `
+              /f "$env:CERT_PATH" `
+              /p "$env:SIGNING_CERT_PASSWORD" `
+              /tr "$timestampUrl" `
+              /td SHA256 `
+              "$target"
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool failed for $target"
+            }
+
+            $signature = Get-AuthenticodeSignature -FilePath $target
+            if ($signature.Status -ne "Valid") {
+              throw "Signature verification failed for $target. Status: $($signature.Status) $($signature.StatusMessage)"
+            }
+            Write-Host "Signed and verified: $target"
+          }
+
+          "signed_count=$($targets.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Package VST3 artifact
         id: package
         shell: pwsh
@@ -54,11 +137,78 @@ jobs:
           "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+          # If installer artifacts are produced in future, attach them automatically.
+          $installerCandidates = Get-ChildItem -Path build -Recurse -File -Include *.exe,*.msi |
+            Where-Object { $_.Name -match '(?i)(setup|installer)' }
+          $installerAssets = @()
+          foreach ($candidate in $installerCandidates) {
+            $installerAssetPath = Join-Path "${{ github.workspace }}" $candidate.Name
+            Copy-Item -Path $candidate.FullName -Destination $installerAssetPath -Force
+            $installerAssets += $installerAssetPath
+          }
+
+          if ($installerAssets.Count -gt 0) {
+            "installer_assets<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            ($installerAssets -join "`n") | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: Submit release assets to VirusTotal
+        id: virustotal
+        shell: pwsh
+        env:
+          PRIMARY_ASSET_PATH: ${{ steps.package.outputs.asset_path }}
+          INSTALLER_ASSETS: ${{ steps.package.outputs.installer_assets }}
+        run: |
+          $uploadFiles = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:PRIMARY_ASSET_PATH)) {
+            $uploadFiles += $env:PRIMARY_ASSET_PATH
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:INSTALLER_ASSETS)) {
+            $uploadFiles += ($env:INSTALLER_ASSETS -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          }
+
+          $uploadFiles = $uploadFiles | Sort-Object -Unique
+          if ($uploadFiles.Count -eq 0) {
+            throw "No release assets found for VirusTotal submission"
+          }
+
+          $analysisUrls = @()
+          foreach ($file in $uploadFiles) {
+            if (-not (Test-Path $file)) {
+              throw "Missing release asset for VirusTotal upload: $file"
+            }
+
+            $response = Invoke-RestMethod `
+              -Uri "https://www.virustotal.com/api/v3/files" `
+              -Method Post `
+              -Headers @{ "x-apikey" = $env:VIRUSTOTAL_API_KEY } `
+              -Form @{ file = Get-Item -Path $file }
+
+            if (-not $response.data.id) {
+              throw "VirusTotal upload response missing analysis id for $file"
+            }
+
+            $analysisUrl = "https://www.virustotal.com/gui/file-analysis/$($response.data.id)"
+            $analysisUrls += $analysisUrl
+            Write-Host "VirusTotal submitted: $file"
+            Write-Host "Analysis URL: $analysisUrl"
+          }
+
+          "analysis_urls<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          ($analysisUrls -join "`n") | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.package.outputs.asset_path }}
+          files: |
+            ${{ steps.package.outputs.asset_path }}
+            ${{ steps.package.outputs.installer_assets }}
           generate_release_notes: true
           append_body: true
           body: |
             Automated Windows VST3 build artifact.
+            - Code-signing: enforced in CI (Authenticode + timestamp)
+            - VirusTotal submissions:
+            ${{ steps.virustotal.outputs.analysis_urls }}

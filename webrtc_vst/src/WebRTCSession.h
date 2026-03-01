@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -77,6 +78,7 @@ private:
         bool havePrev_{false};
         int channels_{0};
         std::vector<float> prevSamples_;
+        std::vector<float> sourceBuffer_;
     };
 
     struct PendingIce {
@@ -92,10 +94,12 @@ private:
         std::atomic<bool> preFillReady{false}; // true once buffer has enough data
         uint64_t frameCount{0};
         uint64_t decodeErrorCount{0};
+        uint64_t plcFrameCount{0};
         bool loggedFirstFrame{false};
         bool onFrameDecodeSeen{false};
         uint64_t rtpPacketCount{0};
         bool loggedFirstRtpPacket{false};
+        bool loggedFirstPlcFrame{false};
         SpinLock mutex;
 
         ~PeerAudioContext() {
@@ -130,7 +134,7 @@ private:
 
     void resetAllPeerConnections();
     PeerKey makePeerKey(const std::string& uuid, const std::string& session) const;
-    PeerSession& ensurePeerSession(const std::string& uuid,
+    PeerSession* ensurePeerSession(const std::string& uuid,
                                    const std::string& session,
                                    bool createLocalTracks);
     void closePeerSession(const PeerKey& key);
@@ -157,6 +161,7 @@ private:
     void queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject);
     void flushPendingIceLocked(PeerSession& session);
     void sendSignalingMessage(const nlohmann::json& payload);
+    void requestPlayRefresh(const std::string& reason);
 
     void emitStatus(const std::string& status) const;
     void log(const std::string& line) const;
@@ -186,7 +191,7 @@ private:
     mutable SpinLock mutex_;
     std::atomic<bool> shuttingDown_{false};
     bool started_{false};
-    bool intentionalDisconnect_{false};
+    std::atomic<bool> intentionalDisconnect_{false};
     std::atomic<bool> isReconnecting_{false};
     int reconnectAttempts_{0};
     std::unique_ptr<std::thread> reconnectThread_;
@@ -243,6 +248,19 @@ private:
     bool roomJoined_{false};
     bool roleAnnounced_{false};
     LinearResampler outgoingResampler_;
+    std::vector<float> outgoingInterleavedScratch_;
+    std::vector<float> outgoingFrameScratch_;
+    std::array<unsigned char, 4000> outgoingEncodedScratch_{};
+    struct PullPeerSource {
+        std::shared_ptr<AudioRingBuffer> buffer;
+        std::shared_ptr<PeerAudioContext> context;
+    };
+    std::vector<PullPeerSource> pullPeerSourcesScratch_;
+    std::vector<float> pullTempSamplesScratch_;
+    std::vector<float*> pullTempChannelPtrsScratch_;
+    std::vector<float> plcDecodeScratch_;
+    std::vector<float> plcResampledScratch_;
+    std::chrono::steady_clock::time_point lastPlayRefreshAt_{};
 };
 
 } // namespace webrtc_vst

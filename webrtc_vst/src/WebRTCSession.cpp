@@ -42,6 +42,8 @@ constexpr int kReconnectBaseDelayMs = 1000; // 1 second initial delay
 constexpr int kReconnectMaxDelayMs = 30000; // 30 second cap
 constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
 constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
+constexpr size_t kMaxPeerSessions = 16;
+constexpr auto kPlayRefreshCooldown = std::chrono::seconds(2);
 
 bool truthyEnvEnabled(const char* name) {
     const char* value = std::getenv(name);
@@ -335,15 +337,15 @@ size_t WebRTCSession::LinearResampler::processPlanar(const float* const* inputs,
     }
 
     const size_t effectiveFrames = frames - start;
-    std::vector<float> buffer((effectiveFrames + 1) * static_cast<size_t>(channels));
-    std::memcpy(buffer.data(), prevSamples_.data(), sizeof(float) * static_cast<size_t>(channels));
+    sourceBuffer_.resize((effectiveFrames + 1) * static_cast<size_t>(channels));
+    std::memcpy(sourceBuffer_.data(), prevSamples_.data(), sizeof(float) * static_cast<size_t>(channels));
     for (size_t frame = 0; frame < effectiveFrames; ++frame) {
         for (int ch = 0; ch < channels; ++ch) {
-            buffer[(frame + 1) * channels + ch] = inputs[ch][frame + start];
+            sourceBuffer_[(frame + 1) * channels + ch] = inputs[ch][frame + start];
         }
     }
 
-    return processBuffer(buffer.data(), effectiveFrames + 1, channels, outputInterleaved);
+    return processBuffer(sourceBuffer_.data(), effectiveFrames + 1, channels, outputInterleaved);
 }
 
 size_t WebRTCSession::LinearResampler::processInterleaved(const float* data,
@@ -368,16 +370,16 @@ size_t WebRTCSession::LinearResampler::processInterleaved(const float* data,
         return 0;
     }
 
-    std::vector<float> buffer((frames + 1) * static_cast<size_t>(channels));
+    sourceBuffer_.resize((frames + 1) * static_cast<size_t>(channels));
     if (!havePrev_) {
         std::memcpy(prevSamples_.data(), data, sizeof(float) * static_cast<size_t>(channels));
         havePrev_ = true;
     }
 
-    std::memcpy(buffer.data(), prevSamples_.data(), sizeof(float) * static_cast<size_t>(channels));
-    std::memcpy(buffer.data() + channels, data, sizeof(float) * frames * static_cast<size_t>(channels));
+    std::memcpy(sourceBuffer_.data(), prevSamples_.data(), sizeof(float) * static_cast<size_t>(channels));
+    std::memcpy(sourceBuffer_.data() + channels, data, sizeof(float) * frames * static_cast<size_t>(channels));
 
-    return processBuffer(buffer.data(), frames + 1, channels, outputInterleaved);
+    return processBuffer(sourceBuffer_.data(), frames + 1, channels, outputInterleaved);
 }
 
 size_t WebRTCSession::LinearResampler::processInterleaved(const std::vector<float>& data,
@@ -792,14 +794,29 @@ void WebRTCSession::closePeerSession(const PeerKey& key) {
     }
 
     if (it->second.connection) {
-        it->second.connection->close();
+        try {
+            // Prevent re-entrant callbacks while tearing down under session lock.
+            it->second.connection->onStateChange(nullptr);
+            it->second.connection->onGatheringStateChange(nullptr);
+            it->second.connection->onLocalDescription(nullptr);
+            it->second.connection->onLocalCandidate(nullptr);
+            it->second.connection->onTrack(nullptr);
+            it->second.connection->onDataChannel(nullptr);
+            it->second.connection->close();
+        } catch (...) {
+            // Ignore teardown exceptions.
+        }
     }
 
+    it->second.localAudioTrack.reset();
+    it->second.remoteAudioTrack.reset();
+    it->second.dataChannel.reset();
+    it->second.rtpConfig.reset();
     sessionByUuid_.erase(it->second.uuid);
     peerSessions_.erase(it);
 }
 
-WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& uuid,
+WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& uuid,
                                                              const std::string& sessionHint,
                                                              bool createLocalTracks) {
     const std::string resolvedSession = sessionHint.empty() ? generateSessionId() : sessionHint;
@@ -807,7 +824,7 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
 
     auto mapIt = peerSessions_.find(key);
     if (mapIt != peerSessions_.end()) {
-        return mapIt->second;
+        return &mapIt->second;
     }
 
     auto existing = sessionByUuid_.find(uuid);
@@ -815,7 +832,15 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
         closePeerSession(existing->second);
     }
 
-    PeerSession& session = peerSessions_[key];
+    if (peerSessions_.size() >= kMaxPeerSessions) {
+        log("Peer session cap reached (" + std::to_string(kMaxPeerSessions) +
+            "), rejecting new peer " + key);
+        emitStatus("Peer limit reached");
+        return nullptr;
+    }
+
+    auto insertResult = peerSessions_.try_emplace(key);
+    PeerSession& session = insertResult.first->second;
     session.uuid = uuid;
     session.sessionId = resolvedSession;
     session.streamId = hashedStreamId_.empty() ? config_.streamId : hashedStreamId_;
@@ -849,6 +874,8 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
         }
         std::optional<std::string> statusMessage;
         bool resetMediaFlags = false;
+        bool refreshPlayRequest = false;
+        std::string refreshReason;
         {
             std::lock_guard<SpinLock> lock(mutex_);
             auto it = peerSessions_.find(keyCopy);
@@ -872,6 +899,11 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
                     it->second.negotiationReady = false;
                     resetMediaFlags = true;
                     statusMessage = "Peer disconnected";
+                    if (config_.mode == ConnectionMode::Play) {
+                        closePeerSession(keyCopy);
+                        refreshPlayRequest = true;
+                        refreshReason = "peer disconnected";
+                    }
                     break;
                 case rtc::PeerConnection::State::Failed:
                     log("Peer connection failed: " + keyCopy);
@@ -879,6 +911,10 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection failed";
+                    if (config_.mode == ConnectionMode::Play) {
+                        refreshPlayRequest = true;
+                        refreshReason = "peer failed";
+                    }
                     break;
                 case rtc::PeerConnection::State::Closed:
                     log("Peer connection closed: " + keyCopy);
@@ -886,6 +922,10 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection closed";
+                    if (config_.mode == ConnectionMode::Play) {
+                        refreshPlayRequest = true;
+                        refreshReason = "peer closed";
+                    }
                     break;
                 default:
                     break;
@@ -899,6 +939,10 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
 
         if (statusMessage) {
             emitStatus(*statusMessage);
+        }
+
+        if (refreshPlayRequest) {
+            requestPlayRefresh(refreshReason);
         }
     });
 
@@ -1242,11 +1286,12 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
                                     if (targetSession.empty()) {
                                         targetSession = sourceIt->second.sessionId;
                                     }
-                                    PeerSession& targetSessionState = ensurePeerSession(targetUuid, targetSession, false);
-                                    if (targetSessionState.dataChannel.get() != dc.get()) {
-                                        targetSessionState.dataChannel = dc;
+                                    PeerSession* targetSessionState =
+                                        ensurePeerSession(targetUuid, targetSession, false);
+                                    if (targetSessionState && targetSessionState->dataChannel.get() != dc.get()) {
+                                        targetSessionState->dataChannel = dc;
                                         log("Mapped publisher datachannel to peer session " +
-                                            makePeerKey(targetSessionState.uuid, targetSessionState.sessionId));
+                                            makePeerKey(targetSessionState->uuid, targetSessionState->sessionId));
                                     }
                                 }
                             }
@@ -1297,7 +1342,7 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
         }
     }
 
-    return session;
+    return &session;
 }
 
 void WebRTCSession::flushPendingIceLocked(PeerSession& session) {
@@ -1352,7 +1397,7 @@ void WebRTCSession::processCandidateMessage(PeerSession& session, const nlohmann
 void WebRTCSession::start(const PluginConfig& config, double sampleRate, int channels) {
     // Clear shutdown flag when starting
     shuttingDown_.store(false, std::memory_order_release);
-    intentionalDisconnect_ = false;
+    intentionalDisconnect_.store(false, std::memory_order_release);
     reconnectAttempts_ = 0;
     isReconnecting_.store(false, std::memory_order_release);
 
@@ -1413,6 +1458,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         pendingGlobalIce_.clear();
         roomJoined_ = false;
         roleAnnounced_ = false;
+        lastPlayRefreshAt_ = {};
         selfUuid_ = generateUUID();
         log("Generated self UUID: " + selfUuid_);
 
@@ -1441,8 +1487,9 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                     resetAllPeerConnections();
                     roomJoined_ = false;
                     roleAnnounced_ = false;
-                    shouldReconnect = started_ && !intentionalDisconnect_ &&
-                                     config_.enableAutoReconnect;
+                    shouldReconnect = started_ &&
+                                      !intentionalDisconnect_.load(std::memory_order_acquire) &&
+                                      config_.enableAutoReconnect;
                 }
                 publishingAudio_.store(false, std::memory_order_relaxed);
                 receivingAudio_.store(false, std::memory_order_relaxed);
@@ -1489,7 +1536,7 @@ void WebRTCSession::stop() {
     log("WebRTCSession::stop() - enter");
 
     // Set intentional disconnect to prevent auto-reconnect
-    intentionalDisconnect_ = true;
+    intentionalDisconnect_.store(true, std::memory_order_release);
 
     // Set shutdown flag FIRST to stop all callbacks immediately
     shuttingDown_.store(true, std::memory_order_release);
@@ -1555,6 +1602,7 @@ void WebRTCSession::stop() {
         selfUuid_.clear();
         hashedRoomId_.clear();
         hashedStreamId_.clear();
+        lastPlayRefreshAt_ = {};
 
         outgoingResampler_.reset();
         publishingAudio_.store(false, std::memory_order_relaxed);
@@ -1661,11 +1709,14 @@ void WebRTCSession::handleOfferRequest(const nlohmann::json& message) {
     }
 
     std::lock_guard<SpinLock> lock(mutex_);
-    PeerSession& session = ensurePeerSession(uuid, std::string{}, true);
-    session.negotiationReady = false;
+    PeerSession* session = ensurePeerSession(uuid, std::string{}, true);
+    if (!session) {
+        return;
+    }
+    session->negotiationReady = false;
 
-    if (session.connection) {
-        session.connection->setLocalDescription();
+    if (session->connection) {
+        session->connection->setLocalDescription();
     }
 }
 
@@ -1694,11 +1745,14 @@ void WebRTCSession::handleRemoteDescription(const nlohmann::json& message) {
         std::shared_ptr<rtc::PeerConnection> connection;
         {
             std::lock_guard<SpinLock> lock(mutex_);
-            PeerSession& session = ensurePeerSession(uuid, sessionId, false);
-            session.streamId = message.value("streamID", session.streamId);
-            session.negotiationReady = false;
-            key = makePeerKey(session.uuid, session.sessionId);
-            connection = session.connection;
+            PeerSession* session = ensurePeerSession(uuid, sessionId, false);
+            if (!session) {
+                return;
+            }
+            session->streamId = message.value("streamID", session->streamId);
+            session->negotiationReady = false;
+            key = makePeerKey(session->uuid, session->sessionId);
+            connection = session->connection;
         }
 
         if (!connection) {
@@ -1942,15 +1996,26 @@ void WebRTCSession::attemptReconnect() {
     emitStatus("Reconnecting (" + std::to_string(reconnectAttempts_) + "/" +
                std::to_string(kMaxReconnectAttempts) + ")...");
 
-    // Join and detach previous reconnect thread if any
+    // Clean up any previous reconnect thread object before replacing it.
     if (reconnectThread_ && reconnectThread_->joinable()) {
-        reconnectThread_->detach();
+        reconnectThread_->join();
     }
+    reconnectThread_.reset();
 
     reconnectThread_ = std::make_unique<std::thread>([this, delayMs]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (shuttingDown_.load(std::memory_order_acquire) ||
+                intentionalDisconnect_.load(std::memory_order_acquire)) {
+                isReconnecting_.store(false, std::memory_order_release);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
 
-        if (shuttingDown_.load(std::memory_order_acquire) || intentionalDisconnect_) {
+        if (shuttingDown_.load(std::memory_order_acquire) ||
+            intentionalDisconnect_.load(std::memory_order_acquire)) {
             isReconnecting_.store(false, std::memory_order_release);
             return;
         }
@@ -1970,7 +2035,8 @@ void WebRTCSession::reconnectInternal() {
         }
     }
 
-    if (shuttingDown_.load(std::memory_order_acquire) || intentionalDisconnect_) {
+    if (shuttingDown_.load(std::memory_order_acquire) ||
+        intentionalDisconnect_.load(std::memory_order_acquire)) {
         isReconnecting_.store(false, std::memory_order_release);
         return;
     }
@@ -2019,7 +2085,8 @@ void WebRTCSession::reconnectInternal() {
                 resetAllPeerConnections();
                 roomJoined_ = false;
                 roleAnnounced_ = false;
-                shouldRetry = started_ && !intentionalDisconnect_ &&
+                shouldRetry = started_ &&
+                              !intentionalDisconnect_.load(std::memory_order_acquire) &&
                               config_.enableAutoReconnect;
             }
             publishingAudio_.store(false, std::memory_order_relaxed);
@@ -2065,7 +2132,6 @@ void WebRTCSession::postInitialRequests() {
         };
         sendSignalingMessage(joinMessage);
     } else {
-        std::lock_guard<SpinLock> lock(mutex_);
         log(std::string("postInitialRequests: mode=") + (config_.mode == ConnectionMode::Seed ? "Seed" : "Play") +
             ", stream=" + config_.streamId);
         announceRoleIfReady();
@@ -2117,6 +2183,45 @@ void WebRTCSession::announceRoleIfReady() {
     roleAnnounced_ = true;
 }
 
+void WebRTCSession::requestPlayRefresh(const std::string& reason) {
+    std::string streamIdToRequest;
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (shuttingDown_.load(std::memory_order_acquire) || !started_) {
+            return;
+        }
+        if (config_.mode != ConnectionMode::Play) {
+            return;
+        }
+        if (!signalingClient_) {
+            return;
+        }
+        if (!config_.roomName.empty() && !roomJoined_) {
+            return;
+        }
+        if (config_.streamId.empty()) {
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (lastPlayRefreshAt_.time_since_epoch().count() != 0 &&
+            (now - lastPlayRefreshAt_) < kPlayRefreshCooldown) {
+            return;
+        }
+        lastPlayRefreshAt_ = now;
+        streamIdToRequest = hashedStreamId_.empty() ? config_.streamId : hashedStreamId_;
+    }
+
+    nlohmann::json playMessage = {
+        {"request", "play"},
+        {"streamID", streamIdToRequest},
+        {"audio", true},
+        {"video", false}
+    };
+    sendSignalingMessage(playMessage);
+    log("Sent play refresh request (" + reason + ") for stream " + config_.streamId);
+}
+
 void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames, int channels) {
     std::lock_guard<SpinLock> lock(mutex_);
     if (!started_ || config_.mode != ConnectionMode::Seed || !opusEncoder_ || peerSessions_.empty()) {
@@ -2126,13 +2231,13 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
     if (!publishingAudio_.exchange(true, std::memory_order_acq_rel)) {
         emitStatus("Publishing audio");
     }
-    std::vector<float> interleaved;
-    const size_t producedFrames = outgoingResampler_.processPlanar(inputs, frames, channels, interleaved);
-    if (producedFrames == 0 || interleaved.empty()) {
+    const size_t producedFrames =
+        outgoingResampler_.processPlanar(inputs, frames, channels, outgoingInterleavedScratch_);
+    if (producedFrames == 0 || outgoingInterleavedScratch_.empty()) {
         return;
     }
 
-    for (float sample : interleaved) {
+    for (float sample : outgoingInterleavedScratch_) {
         outgoingFifo_.push_back(sample);
     }
 
@@ -2142,19 +2247,22 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
         outgoingFifo_.pop_front();
     }
 
-    while (outgoingFifo_.size() >= kFrameSizeSamples * static_cast<size_t>(channels)) {
-        std::vector<float> frame(kFrameSizeSamples * static_cast<size_t>(channels));
-        for (size_t i = 0; i < frame.size(); ++i) {
-            frame[i] = outgoingFifo_.front();
+    const size_t frameSamples = kFrameSizeSamples * static_cast<size_t>(channels);
+    if (outgoingFrameScratch_.size() < frameSamples) {
+        outgoingFrameScratch_.resize(frameSamples);
+    }
+
+    while (outgoingFifo_.size() >= frameSamples) {
+        for (size_t i = 0; i < frameSamples; ++i) {
+            outgoingFrameScratch_[i] = outgoingFifo_.front();
             outgoingFifo_.pop_front();
         }
 
-        std::vector<unsigned char> encoded(4000);
         const int encodedBytes = opus_encode_float(opusEncoder_,
-                                                   frame.data(),
+                                                   outgoingFrameScratch_.data(),
                                                    static_cast<int>(kFrameSizeSamples),
-                                                   encoded.data(),
-                                                   static_cast<opus_int32>(encoded.size()));
+                                                   outgoingEncodedScratch_.data(),
+                                                   static_cast<opus_int32>(outgoingEncodedScratch_.size()));
         if (encodedBytes <= 0) {
             continue;
         }
@@ -2173,7 +2281,8 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
                 continue;
             }
             session.rtpConfig->timestamp = session.nextTimestamp;
-            const bool sent = session.localAudioTrack->send(toBinary(encoded.data(), static_cast<size_t>(encodedBytes)));
+            const bool sent = session.localAudioTrack->send(
+                toBinary(outgoingEncodedScratch_.data(), static_cast<size_t>(encodedBytes)));
             if (!sent) {
                 log("Outgoing audio send returned false for peer " + key);
                 continue;
@@ -2197,49 +2306,116 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
         std::fill_n(outputs[ch], frames, 0.0f);
     }
 
-    // Snapshot peer audio buffers under lock (only peers that have pre-filled)
-    std::vector<std::shared_ptr<AudioRingBuffer>> peerBuffers;
+    // Snapshot peer audio buffers/contexts under lock (only peers that have pre-filled)
+    auto& peerSources = pullPeerSourcesScratch_;
+    peerSources.clear();
     {
         std::lock_guard<SpinLock> lock(mutex_);
-        peerBuffers.reserve(peerSessions_.size());
+        peerSources.reserve(peerSessions_.size());
         for (auto& [key, session] : peerSessions_) {
             if (session.audioContext && session.audioContext->buffer &&
                 session.audioContext->preFillReady.load(std::memory_order_acquire)) {
-                peerBuffers.push_back(session.audioContext->buffer);
+                peerSources.push_back({session.audioContext->buffer, session.audioContext});
             }
         }
     }
 
-    if (peerBuffers.empty()) {
+    if (peerSources.empty()) {
         return 0;
     }
 
-    // Temp buffer for each peer's pop
-    std::vector<std::vector<float>> tempChannels(static_cast<size_t>(channels),
-                                                  std::vector<float>(frames, 0.0f));
-    std::vector<float*> tempPtrs(static_cast<size_t>(channels));
+    const size_t tempSampleCount = static_cast<size_t>(channels) * frames;
+    if (pullTempSamplesScratch_.size() < tempSampleCount) {
+        pullTempSamplesScratch_.resize(tempSampleCount);
+    }
+    if (pullTempChannelPtrsScratch_.size() < static_cast<size_t>(channels)) {
+        pullTempChannelPtrsScratch_.resize(static_cast<size_t>(channels));
+    }
     for (int ch = 0; ch < channels; ++ch) {
-        tempPtrs[static_cast<size_t>(ch)] = tempChannels[static_cast<size_t>(ch)].data();
+        pullTempChannelPtrsScratch_[static_cast<size_t>(ch)] =
+            pullTempSamplesScratch_.data() + (static_cast<size_t>(ch) * frames);
     }
 
     size_t maxFramesRead = 0;
 
-    for (auto& buf : peerBuffers) {
-        // Zero temp buffers before each peer's pop
-        for (int ch = 0; ch < channels; ++ch) {
-            std::fill_n(tempPtrs[static_cast<size_t>(ch)], frames, 0.0f);
-        }
+    for (auto& source : peerSources) {
+        std::fill_n(pullTempSamplesScratch_.data(), tempSampleCount, 0.0f);
 
-        const size_t framesRead = buf->pop(tempPtrs.data(), frames, channels);
-        if (framesRead > maxFramesRead) {
-            maxFramesRead = framesRead;
-        }
+        size_t peerFramesMixed = source.buffer->pop(pullTempChannelPtrsScratch_.data(), frames, channels);
 
-        // Sum into output
+        // Sum buffered audio into output
         for (int ch = 0; ch < channels; ++ch) {
-            for (size_t i = 0; i < framesRead; ++i) {
-                outputs[ch][i] += tempPtrs[static_cast<size_t>(ch)][i];
+            for (size_t i = 0; i < peerFramesMixed; ++i) {
+                outputs[ch][i] += pullTempChannelPtrsScratch_[static_cast<size_t>(ch)][i];
             }
+        }
+
+        // Generate Opus PLC on underrun to avoid abrupt silence.
+        if (peerFramesMixed < frames && source.context) {
+            size_t framesNeeded = frames - peerFramesMixed;
+            size_t mixOffset = peerFramesMixed;
+
+            while (framesNeeded > 0) {
+                int plcSamples = 0;
+                size_t plcOutFrames = 0;
+                bool plcLogged = false;
+                {
+                    std::lock_guard<SpinLock> ctxLock(source.context->mutex);
+                    if (!source.context->decoder || !source.context->active.load(std::memory_order_acquire)) {
+                        break;
+                    }
+
+                    const size_t decodeSamples = kFrameSizeSamples * static_cast<size_t>(channelCount_);
+                    if (plcDecodeScratch_.size() < decodeSamples) {
+                        plcDecodeScratch_.resize(decodeSamples);
+                    }
+
+                    plcSamples = opus_decode_float(source.context->decoder,
+                                                   nullptr,
+                                                   0,
+                                                   plcDecodeScratch_.data(),
+                                                   static_cast<int>(kFrameSizeSamples),
+                                                   0);
+                    if (plcSamples <= 0) {
+                        break;
+                    }
+
+                    plcOutFrames = source.context->resampler.processInterleaved(plcDecodeScratch_.data(),
+                                                                                 static_cast<size_t>(plcSamples),
+                                                                                 channelCount_,
+                                                                                 plcResampledScratch_);
+                    if (plcOutFrames == 0 || plcResampledScratch_.empty()) {
+                        break;
+                    }
+
+                    ++source.context->plcFrameCount;
+                    if (!source.context->loggedFirstPlcFrame) {
+                        source.context->loggedFirstPlcFrame = true;
+                        plcLogged = true;
+                    }
+                }
+
+                if (plcLogged) {
+                    log("Generated first Opus PLC frame for underrun concealment");
+                }
+
+                const size_t channelsToMix = static_cast<size_t>(std::min(channels, channelCount_));
+                const size_t framesToMix = std::min(plcOutFrames, framesNeeded);
+                for (size_t i = 0; i < framesToMix; ++i) {
+                    const size_t srcBase = i * static_cast<size_t>(channelCount_);
+                    for (size_t ch = 0; ch < channelsToMix; ++ch) {
+                        outputs[static_cast<int>(ch)][mixOffset + i] += plcResampledScratch_[srcBase + ch];
+                    }
+                }
+
+                mixOffset += framesToMix;
+                framesNeeded -= framesToMix;
+                peerFramesMixed += framesToMix;
+            }
+        }
+
+        if (peerFramesMixed > maxFramesRead) {
+            maxFramesRead = peerFramesMixed;
         }
     }
 
@@ -2247,4 +2423,3 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
 }
 
 } // namespace webrtc_vst
-

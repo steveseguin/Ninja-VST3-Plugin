@@ -65,3 +65,35 @@ Notes:
 2. Launch Audacity and load the plugin.
 3. Set Play mode and a known live stream ID.
 4. Verify audio playback and host stability during repeated open/close cycles.
+
+## Release security gate (Windows)
+
+Do not publish unsigned installers/artifacts.
+
+Required GitHub repository secrets for `.github/workflows/release.yml`:
+
+- `WINDOWS_SIGN_PFX_BASE64` (base64-encoded `.pfx`)
+- `WINDOWS_SIGN_PFX_PASSWORD`
+- `VIRUSTOTAL_API_KEY` (preferred) or `VT_API_KEY` (fallback)
+
+Optional GitHub repository variable:
+
+- `WINDOWS_SIGN_TIMESTAMP_URL` (defaults to `http://timestamp.digicert.com`)
+
+Release workflow policy:
+
+1. Build plugin.
+2. Sign release binaries (plugin binary and installer artifacts when present).
+3. Verify signatures.
+4. Package artifacts.
+5. Submit packaged release assets to VirusTotal.
+6. Publish release.
+
+If you source cert material from `../code-signing`, do not commit decrypted keys or passphrases to this repository.
+
+If an environment still reports missing `VT_API_KEY`, it is usually using an older decrypted signing bundle. Refresh it:
+
+```bash
+export CODESIGN_BUNDLE_PASSPHRASE='<your passphrase>'
+bash scripts/unlock-bundle.sh
+```
