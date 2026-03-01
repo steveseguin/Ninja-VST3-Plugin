@@ -49,7 +49,7 @@ $normalizedVersion = if ($Version.StartsWith("v")) { $Version.Substring(1) } els
 $tagVersion = if ($Version.StartsWith("v")) { $Version } else { "v$Version" }
 
 if ([string]::IsNullOrWhiteSpace($OutputBaseName)) {
-    $OutputBaseName = "webrtc_vst-$tagVersion-windows-setup"
+    $OutputBaseName = "webrtc_vst-windows-setup"
 }
 
 $outputAbsolute = if ([System.IO.Path]::IsPathRooted($OutputDir)) {

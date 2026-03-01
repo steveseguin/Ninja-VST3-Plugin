@@ -2,7 +2,7 @@
 
 ## Option 1: Installer (recommended)
 
-1. Download `webrtc_vst-vX.Y.Z-windows-setup.exe` from Releases.
+1. Download `webrtc_vst-windows-setup.exe` from Releases.
 2. Run the installer.
 3. Restart your DAW.
 

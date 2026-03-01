@@ -1,7 +1,9 @@
 const owner = "steveseguin";
-const repo = "vst";
+const repo = "Ninja-VST3-Plugin";
+const fixedInstallerAssetName = "webrtc_vst-windows-setup.exe";
 const releasesApi = `https://api.github.com/repos/${owner}/${repo}/releases`;
 const latestReleaseUrl = `https://github.com/${owner}/${repo}/releases/latest`;
+const latestInstallerUrl = `https://github.com/${owner}/${repo}/releases/latest/download/${fixedInstallerAssetName}`;
 
 function formatDate(isoDate) {
   if (!isoDate) {
@@ -79,12 +81,12 @@ function setLatestReleaseUi(release) {
   latestVersion.textContent = `Latest release: ${releaseName}`;
   latestDate.textContent = `Published: ${formatDate(release.published_at || release.created_at)}`;
 
-  const firstAsset = (release.assets || [])[0];
-  if (firstAsset && firstAsset.browser_download_url) {
-    downloadLatest.href = firstAsset.browser_download_url;
-  } else {
-    downloadLatest.href = latestReleaseUrl;
+  const installerAsset = (release.assets || []).find((asset) => asset.name === fixedInstallerAssetName);
+  if (installerAsset && installerAsset.browser_download_url) {
+    downloadLatest.href = installerAsset.browser_download_url;
+    return;
   }
+  downloadLatest.href = latestInstallerUrl || latestReleaseUrl;
 }
 
 async function loadReleases() {
