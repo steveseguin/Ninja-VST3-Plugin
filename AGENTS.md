@@ -406,7 +406,7 @@ Before publishing:
 7. Artifact packaging verified.
 8. Authenticode signing completed and signature validity verified.
    If trust-chain is not available on host, verify signature presence + timestamp + signer subject instead.
-9. Release artifacts submitted to VirusTotal and analysis URLs captured in release notes.
+9. Release artifacts submitted to VirusTotal and analysis URLs captured in internal release logs only (not public release notes).
 10. Release notes include known limitations.
 
 ## 17) Troubleshooting Quick Notes

@@ -146,6 +146,8 @@ curl.exe --request POST --url https://www.virustotal.com/api/v3/files --header "
 curl.exe --request POST --url https://www.virustotal.com/api/v3/files --header "x-apikey: <VT_API_KEY>" --form "file=@build\release\webrtc_vst-v<version>-windows-setup.exe"
 ```
 
+Record VirusTotal analysis URLs in internal release logs only. Do not include raw VirusTotal links in public GitHub release notes.
+
 7. Publish release manually:
 
 ```powershell
