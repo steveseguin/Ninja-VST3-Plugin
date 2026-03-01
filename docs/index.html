@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WebRTC VST for VDO.Ninja</title>
-  <meta name="description" content="Audio-first VST3 bridge for VDO.Ninja. Download stable releases and collaborate in real time from your DAW.">
+  <meta name="description" content="Audio-first VST3 bridge for VDO.Ninja. Stream or monitor live audio directly from your DAW with no local server setup.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
     <h1>WebRTC VST for VDO.Ninja</h1>
     <p class="hero-copy">
       Stream or monitor live audio directly from your DAW with no local server setup.
-      The plugin is purpose-built for low-friction remote collaboration workflows.
+      Purpose-built for low-friction remote collaboration workflows.
     </p>
     <div class="hero-actions">
       <a id="downloadLatest" class="btn btn-primary" href="https://github.com/steveseguin/vst/releases/latest">Download Latest Release</a>
@@ -32,20 +32,39 @@
   </header>
 
   <main class="content">
+
+    <section class="panel screenshot-panel">
+      <div class="screenshot-wrapper">
+        <img src="plugin-screenshot.svg" alt="VDO.Ninja WebRTC Bridge plugin interface showing Connection Mode, Stream ID, Room Name, Password, and Status fields" class="plugin-screenshot" width="480" height="290">
+      </div>
+    </section>
+
     <section class="panel">
-      <h2>Why this plugin</h2>
+      <h2>Features</h2>
       <div class="feature-grid">
         <article class="feature-card">
           <h3>Audio-first by design</h3>
-          <p>Play mode requests audio transport only, so video tracks are ignored inside the VST workflow.</p>
+          <p>Requests audio transport only &mdash; video tracks are ignored inside the VST workflow for minimal overhead.</p>
         </article>
         <article class="feature-card">
-          <h3>Two practical modes</h3>
-          <p>Seed mode publishes your DAW audio. Play mode monitors remote audio inside the same session.</p>
+          <h3>Seed &amp; Play modes</h3>
+          <p><strong>Seed</strong> publishes your DAW audio to VDO.Ninja. <strong>Play</strong> monitors one or more remote streams inside your session.</p>
         </article>
         <article class="feature-card">
-          <h3>Production codec path</h3>
-          <p>Opus transport, stereo support, and DAW-friendly routing for real-time collaboration and review.</p>
+          <h3>Multi-peer mixing</h3>
+          <p>Receives and decodes audio from multiple peers in a room simultaneously, each with its own Opus decoder, then mixes into stereo output.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Opus codec transport</h3>
+          <p>High-quality Opus encoding and decoding at 48 kHz with stereo support and automatic sample rate conversion.</p>
+        </article>
+        <article class="feature-card">
+          <h3>End-to-end encryption</h3>
+          <p>Password-based AES encryption for signaling messages, compatible with VDO.Ninja's E2EE protocol.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Room support</h3>
+          <p>Join VDO.Ninja rooms with automatic peer discovery, hashed room IDs, and password-protected access.</p>
         </article>
       </div>
     </section>
@@ -55,16 +74,38 @@
       <div class="steps">
         <article class="step">
           <p class="step-index">1</p>
-          <p>Install the latest `.vst3` package from the release assets below.</p>
+          <p>Download and install the latest <code>.vst3</code> bundle from the release assets below.</p>
         </article>
         <article class="step">
           <p class="step-index">2</p>
-          <p>Load the plugin in a real-time DAW host (Reaper/Studio One recommended for validation).</p>
+          <p>Load the plugin on a track in your DAW (REAPER, Studio One, or any VST3 host).</p>
         </article>
         <article class="step">
           <p class="step-index">3</p>
-          <p>Set mode to <code>Seed</code> to publish or <code>Play</code> to receive a remote stream.</p>
+          <p>Set mode to <code>Seed</code> to publish audio, or <code>Play</code> to receive a remote stream. Enter a Stream ID and optionally a Room and Password.</p>
         </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Compatibility</h2>
+      <div class="compat-grid">
+        <div class="compat-item">
+          <strong>Platforms</strong>
+          <p>Windows (x64), Linux (x64)</p>
+        </div>
+        <div class="compat-item">
+          <strong>Plugin format</strong>
+          <p>VST3</p>
+        </div>
+        <div class="compat-item">
+          <strong>Tested DAWs</strong>
+          <p>REAPER, Studio One</p>
+        </div>
+        <div class="compat-item">
+          <strong>Sample rates</strong>
+          <p>44.1 / 48 / 88.2 / 96 kHz (auto resampled)</p>
+        </div>
       </div>
     </section>
 

@@ -15,6 +15,7 @@ _refs/
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 
 # Generated logs and local probes
 *.log
@@ -42,6 +43,13 @@ publish_audio.test.js
 *.ilk
 *.exp
 *.vcxproj.user
+
+# Tools (portable REAPER install, etc.)
+tools/
+
+# Test artifacts
+tests/test_tone.wav
+tests/reaper_render_output.wav
 
 # Misc
 archive/

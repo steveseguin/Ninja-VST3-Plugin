@@ -193,6 +193,9 @@ void VDONinjaSignalingClient::disconnect() {
 
 void VDONinjaSignalingClient::send(const nlohmann::json& message) {
     const auto payload = message.dump();
+    if (rawSignalingLoggingEnabled()) {
+        std::cout << "[raw signaling >>] " << payload << std::endl;
+    }
     std::lock_guard<SpinLock> lock(mutex_);
     if (!socket_) {
         connected_.store(false, std::memory_order_relaxed);

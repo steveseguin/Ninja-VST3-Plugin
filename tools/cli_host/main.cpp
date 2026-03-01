@@ -18,12 +18,48 @@
 #include <pluginterfaces/base/funknownimpl.h>
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstcomponent.h>
+#include <pluginterfaces/base/ibstream.h>
 #include <pluginterfaces/vst/ivstprocesscontext.h>
 #include <pluginterfaces/vst/vsttypes.h>
 
 #include "../../webrtc_vst/src/ParameterIDs.h"
 
 namespace {
+
+class StringStream : public Steinberg::IBStream {
+public:
+    explicit StringStream(const std::string& data) : data_(data) {}
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID, void**) override { return Steinberg::kNoInterface; }
+    Steinberg::uint32 PLUGIN_API addRef() override { return ++refCount_; }
+    Steinberg::uint32 PLUGIN_API release() override {
+        if (--refCount_ == 0) { delete this; return 0; }
+        return refCount_;
+    }
+    Steinberg::tresult PLUGIN_API read(void* buffer, Steinberg::int32 numBytes, Steinberg::int32* numBytesRead) override {
+        Steinberg::int32 avail = static_cast<Steinberg::int32>(data_.size()) - pos_;
+        Steinberg::int32 toRead = std::min(numBytes, avail);
+        if (toRead > 0) std::memcpy(buffer, data_.data() + pos_, static_cast<size_t>(toRead));
+        pos_ += toRead;
+        if (numBytesRead) *numBytesRead = toRead;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API write(void*, Steinberg::int32, Steinberg::int32*) override { return Steinberg::kNotImplemented; }
+    Steinberg::tresult PLUGIN_API seek(Steinberg::int64 pos, Steinberg::int32 mode, Steinberg::int64* result) override {
+        if (mode == kIBSeekSet) pos_ = static_cast<Steinberg::int32>(pos);
+        else if (mode == kIBSeekCur) pos_ += static_cast<Steinberg::int32>(pos);
+        else if (mode == kIBSeekEnd) pos_ = static_cast<Steinberg::int32>(data_.size()) + static_cast<Steinberg::int32>(pos);
+        if (result) *result = pos_;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API tell(Steinberg::int64* pos) override {
+        if (pos) *pos = pos_;
+        return Steinberg::kResultOk;
+    }
+private:
+    std::string data_;
+    Steinberg::int32 pos_{0};
+    std::atomic<Steinberg::uint32> refCount_{1};
+};
 
 constexpr double kSampleRate = 48000.0;
 constexpr Steinberg::int32 kBlockSize = 256;
@@ -280,6 +316,50 @@ void populateInputWithTone(std::vector<BusBuffers>& inputBuses,
     }
 }
 
+std::string buildPluginStateJson() {
+    std::string json = "{";
+    bool hasField = false;
+    if (const char* mode = std::getenv("WEBRTC_CLI_HOST_MODE")) {
+        json += "\"mode\":\"" + std::string(mode) + "\"";
+        hasField = true;
+    }
+    if (const char* sid = std::getenv("WEBRTC_CLI_HOST_STREAM_ID")) {
+        if (hasField) json += ",";
+        json += "\"streamId\":\"" + std::string(sid) + "\"";
+        hasField = true;
+    }
+    if (const char* room = std::getenv("WEBRTC_CLI_HOST_ROOM")) {
+        if (hasField) json += ",";
+        json += "\"roomName\":\"" + std::string(room) + "\"";
+        hasField = true;
+    }
+    if (const char* password = std::getenv("WEBRTC_CLI_HOST_PASSWORD")) {
+        if (hasField) json += ",";
+        json += "\"password\":\"" + std::string(password) + "\"";
+        hasField = true;
+    }
+    json += "}";
+    return hasField ? json : "";
+}
+
+bool injectPluginState(Steinberg::Vst::IComponent* component,
+                       Steinberg::Vst::IEditController* controller,
+                       const std::string& jsonState) {
+    if (jsonState.empty()) return true;
+    std::cout << "[config] Injecting plugin state: " << jsonState << std::endl;
+
+    auto* stream1 = new StringStream(jsonState);
+    component->setState(stream1);
+    stream1->release();
+
+    if (controller) {
+        auto* stream2 = new StringStream(jsonState);
+        controller->setComponentState(stream2);
+        stream2->release();
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -347,6 +427,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     Steinberg::IPtr<Steinberg::Vst::IAudioProcessor> processor(processorRaw, false);
+
+    // Inject plugin state from env vars before activation
+    const auto stateJson = buildPluginStateJson();
+    if (!stateJson.empty()) {
+        injectPluginState(component, controller, stateJson);
+    }
 
     std::vector<BusBuffers> inputBuses;
     std::vector<BusBuffers> outputBuses;

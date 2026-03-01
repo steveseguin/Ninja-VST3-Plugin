@@ -1,5 +1,6 @@
 // Integration Test for WebRTC VST Plugin
 // Simulates real VST3 host behavior (like Audacity) to catch real-world issues
+// Uses the same PlugProvider pattern as the CLI host for reliable hosting.
 
 #include <public.sdk/source/vst/hosting/hostclasses.h>
 #include <public.sdk/source/vst/hosting/module.h>
@@ -8,19 +9,16 @@
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstcomponent.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
-#include <pluginterfaces/vst/ivstmessage.h>
 #include <pluginterfaces/vst/ivstprocesscontext.h>
 #include <pluginterfaces/vst/vsttypes.h>
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
-#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -52,9 +50,9 @@ public:
     void addResult(TestResult result) {
         results_.push_back(result);
         if (result.passed) {
-            std::cout << "  ✓ " << result.name << " (" << result.duration_ms << "ms)" << std::endl;
+            std::cout << "  PASS " << result.name << " (" << result.duration_ms << "ms)" << std::endl;
         } else {
-            std::cout << "  ✗ " << result.name << ": " << result.error << std::endl;
+            std::cout << "  FAIL " << result.name << ": " << result.error << std::endl;
             failed_++;
         }
     }
@@ -86,7 +84,7 @@ private:
 };
 
 // ============================================================================
-// VST3 Host Simulator (mimics Audacity behavior)
+// VST3 Host Simulator using PlugProvider (same pattern as CLI host)
 // ============================================================================
 
 class VST3HostSimulator {
@@ -106,44 +104,34 @@ public:
             return false;
         }
 
-        auto factory = module_->getFactory();
-        if (!factory) {
-            lastError_ = "Failed to get plugin factory";
+        const VST3::Hosting::PluginFactory& factory = module_->getFactory();
+        auto classInfos = factory.classInfos();
+        if (classInfos.empty()) {
+            lastError_ = "No classes available in module";
             return false;
         }
 
-        for (auto& classInfo : factory.classInfos()) {
-            if (classInfo.category() == kVstAudioEffectClass) {
-                component_ = factory.createInstance<IComponent>(classInfo.ID());
-                break;
-            }
+        provider_ = std::make_unique<PlugProvider>(factory, classInfos.front(), true);
+        if (!provider_->initialize()) {
+            lastError_ = "Failed to initialize plug provider";
+            return false;
         }
 
+        component_ = provider_->getComponentPtr();
         if (!component_) {
-            lastError_ = "Failed to create plugin component";
+            lastError_ = "Component creation failed";
             return false;
         }
 
-        if (component_->initialize(&hostContext_) != kResultOk) {
-            lastError_ = "Failed to initialize component";
+        IAudioProcessor* processorRaw = nullptr;
+        if (component_->queryInterface(IAudioProcessor::iid,
+                                       reinterpret_cast<void**>(&processorRaw)) != kResultOk) {
+            lastError_ = "Component does not expose IAudioProcessor";
             return false;
         }
+        processor_ = IPtr<IAudioProcessor>(processorRaw, false);
 
-        // Get audio processor interface
-        if (component_->queryInterface(IAudioProcessor::iid, (void**)&processor_) != kResultOk) {
-            lastError_ = "Failed to get audio processor interface";
-            return false;
-        }
-
-        // Get controller (editor)
-        TUID controllerCID;
-        if (component_->getControllerClassId(controllerCID) == kResultOk) {
-            auto factory = module_->getFactory();
-            controller_ = factory.createInstance<IEditController>(controllerCID);
-            if (controller_) {
-                controller_->initialize(&hostContext_);
-            }
-        }
+        controller_ = provider_->getControllerPtr();
 
         return true;
     }
@@ -154,7 +142,7 @@ public:
             return false;
         }
 
-        ProcessSetup setup;
+        ProcessSetup setup{};
         setup.processMode = kRealtime;
         setup.symbolicSampleSize = kSample32;
         setup.maxSamplesPerBlock = kBlockSize;
@@ -214,19 +202,19 @@ public:
             return false;
         }
 
-        ProcessData data;
+        ProcessData data{};
         data.processMode = kRealtime;
         data.symbolicSampleSize = kSample32;
         data.numSamples = kBlockSize;
         data.numInputs = 1;
         data.numOutputs = 1;
 
-        AudioBusBuffers inputBus;
+        AudioBusBuffers inputBus{};
         inputBus.numChannels = kNumChannels;
         inputBus.channelBuffers32 = inputPtrs_.data();
         data.inputs = &inputBus;
 
-        AudioBusBuffers outputBus;
+        AudioBusBuffers outputBus{};
         outputBus.numChannels = kNumChannels;
         outputBus.channelBuffers32 = outputPtrs_.data();
         data.outputs = &outputBus;
@@ -239,7 +227,7 @@ public:
         for (int32 block = 0; block < numBlocks; ++block) {
             // Fill input with test tone
             for (int32 sample = 0; sample < kBlockSize; ++sample) {
-                float value = 0.25f * std::sin(phase);
+                float value = 0.25f * static_cast<float>(std::sin(phase));
                 for (int32 ch = 0; ch < kNumChannels; ++ch) {
                     inputBuffers_[ch][sample] = value;
                 }
@@ -270,21 +258,13 @@ public:
             deactivate();
         }
 
-        if (processor_) {
-            processor_->release();
-            processor_ = nullptr;
-        }
+        processor_ = nullptr;
 
-        if (controller_) {
-            controller_->terminate();
-            controller_->release();
-            controller_ = nullptr;
-        }
-
-        if (component_) {
-            component_->terminate();
-            component_->release();
-            component_ = nullptr;
+        if (provider_) {
+            auto* componentRaw = component_.take();
+            auto* controllerRaw = controller_.take();
+            provider_->releasePlugIn(componentRaw, controllerRaw);
+            provider_.reset();
         }
 
         module_.reset();
@@ -293,33 +273,13 @@ public:
     const std::string& getLastError() const { return lastError_; }
 
 private:
-    class HostApplication : public FUnknownImpl<IHostApplication> {
-    public:
-        HostApplication() {
-            FUNKNOWN_CTOR
-        }
-        ~HostApplication() {
-            FUNKNOWN_DTOR
-        }
-
-        tresult PLUGIN_API getName(String128 name) override {
-            String str("Integration Test Host");
-            str.copyTo(name, 0, 127);
-            return kResultOk;
-        }
-
-        tresult PLUGIN_API createInstance(TUID cid, TUID _iid, void** obj) override {
-            return kNotImplemented;
-        }
-    };
-
     std::string pluginPath_;
     std::string lastError_;
     std::shared_ptr<VST3::Hosting::Module> module_;
-    IComponent* component_{nullptr};
-    IAudioProcessor* processor_{nullptr};
-    IEditController* controller_{nullptr};
-    HostApplication hostContext_;
+    std::unique_ptr<PlugProvider> provider_;
+    IPtr<IComponent> component_;
+    IPtr<IAudioProcessor> processor_;
+    IPtr<IEditController> controller_;
     bool active_{false};
 
     std::vector<std::vector<float>> inputBuffers_;
@@ -512,6 +472,10 @@ int main(int argc, char** argv) {
     std::cout << "WebRTC VST3 Plugin - Integration Tests" << std::endl;
     std::cout << "Simulates real VST3 host behavior (Audacity-like)" << std::endl;
     std::cout << std::string(60, '=') << std::endl;
+
+    // Register host context (required for plugin initialization)
+    static HostApplication hostApp;
+    PluginContextFactory::instance().setPluginContext(&hostApp);
 
     // Find plugin path
     std::string pluginPath;

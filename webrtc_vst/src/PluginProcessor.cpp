@@ -302,12 +302,15 @@ void WebRTCProcessor::configThreadMain() {
     SMTG_DBPRT0("[WebRTC] config thread started\n");
     while (true) {
         std::unique_lock<std::mutex> lock(configMutex_);
-        configCv_.wait(lock, [this]() {
+        configCv_.wait_for(lock, std::chrono::milliseconds(100), [this]() {
             return configThreadExit_.load(std::memory_order_acquire) || configPending_.load(std::memory_order_acquire);
         });
 
         if (configThreadExit_.load(std::memory_order_acquire)) {
             break;
+        }
+        if (!configPending_.load(std::memory_order_acquire)) {
+            continue;  // Timeout, not a real wakeup
         }
 
         configPending_.store(false, std::memory_order_release);

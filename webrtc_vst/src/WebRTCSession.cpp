@@ -36,6 +36,7 @@ namespace {
 constexpr size_t kFrameSizeSamples = 960; // 20ms at 48kHz
 constexpr int kOpusPayloadType = 111;
 constexpr uint32_t kAudioSsrc = 0x11ECACA; // Arbitrary but stable
+constexpr size_t kPeerBufferFrames = 2048; // ~42ms at 48kHz
 
 bool truthyEnvEnabled(const char* name) {
     const char* value = std::getenv(name);
@@ -58,6 +59,25 @@ std::string generateSessionId() {
         session.push_back(alphabet[dist(rng)]);
     }
     return session;
+}
+
+std::string generateUUID() {
+    unsigned char bytes[16];
+    RAND_bytes(bytes, sizeof(bytes));
+    // Set version 4 (random) and variant bits per RFC 4122
+    bytes[6] = (bytes[6] & 0x0F) | 0x40;
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string uuid;
+    uuid.reserve(36);
+    for (int i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) {
+            uuid.push_back('-');
+        }
+        uuid.push_back(hex[bytes[i] >> 4]);
+        uuid.push_back(hex[bytes[i] & 0x0F]);
+    }
+    return uuid;
 }
 
 rtc::binary toBinary(const unsigned char* data, size_t size) {
@@ -460,12 +480,19 @@ void WebRTCSession::sendSignalingMessage(const nlohmann::json& payload) {
         return;
     }
 
+    // Inject "from" UUID into every outgoing message — VDO.Ninja's signaling
+    // server drops messages without this field.
+    nlohmann::json enriched = payload;
+    if (!selfUuid_.empty()) {
+        enriched["from"] = selfUuid_;
+    }
+
     std::optional<std::string> logLine;
     {
         std::lock_guard<std::mutex> lock(signalingLogMutex_);
         if (logSignalingMessages_) {
             try {
-                const std::string dump = payload.dump();
+                const std::string dump = enriched.dump();
                 if (lastSentSignalingJson_.equals(dump)) {
                     if (!suppressingSentDuplicate_) {
                         logLine = std::string("=> signaling: ") + dump +
@@ -489,7 +516,7 @@ void WebRTCSession::sendSignalingMessage(const nlohmann::json& payload) {
         log(*logLine);
     }
 
-    signalingClient_->send(payload);
+    signalingClient_->send(enriched);
 }
 
 std::optional<std::string> WebRTCSession::effectivePassword() const {
@@ -719,6 +746,9 @@ void WebRTCSession::resetAllPeerConnections() {
     log("resetAllPeerConnections() - closing " + std::to_string(peerSessions_.size()) + " peer connections");
 
     for (auto& [key, session] : peerSessions_) {
+        if (session.audioContext) {
+            session.audioContext->active.store(false, std::memory_order_release);
+        }
         if (session.connection) {
             try {
                 // Clear all callbacks before closing to prevent use-after-free
@@ -752,6 +782,10 @@ void WebRTCSession::closePeerSession(const PeerKey& key) {
         return;
     }
 
+    if (it->second.audioContext) {
+        it->second.audioContext->active.store(false, std::memory_order_release);
+    }
+
     if (it->second.connection) {
         it->second.connection->close();
     }
@@ -781,6 +815,17 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
     session.sessionId = resolvedSession;
     session.streamId = hashedStreamId_.empty() ? config_.streamId : hashedStreamId_;
     session.nextTimestamp = 0;
+
+    // Create per-peer audio decode context
+    session.audioContext = std::make_shared<PeerAudioContext>();
+    int peerOpusError = 0;
+    session.audioContext->decoder = opus_decoder_create(48000, channelCount_, &peerOpusError);
+    if (peerOpusError != OPUS_OK) {
+        log("Failed to create per-peer Opus decoder for " + key);
+        session.audioContext->decoder = nullptr;
+    }
+    session.audioContext->resampler.configure(48000.0, sampleRate_, channelCount_);
+    session.audioContext->buffer = std::make_shared<AudioRingBuffer>(kPeerBufferFrames, channelCount_);
 
     rtc::Configuration configuration;
     if (!truthyEnvEnabled("WEBRTC_VST_DISABLE_STUN")) {
@@ -932,53 +977,57 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
 
         auto depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
         track->chainMediaHandler(depacketizer);
-        auto decodeAndQueue = [this](const uint8_t* encoded,
+
+        auto ctx = it->second.audioContext;
+        int peerChannels = channelCount_;
+
+        auto decodeAndQueue = [this, ctx, peerChannels](const uint8_t* encoded,
                                      size_t encodedSize,
                                      bool fromFrame,
                                      const char* sourceTag) -> bool {
             if (shuttingDown_.load(std::memory_order_acquire)) {
                 return false;
             }
+            if (!ctx->active.load(std::memory_order_acquire)) {
+                return false;
+            }
 
-            int channels = 0;
             int frameSamples = 0;
             std::vector<float> decodeBuffer;
             std::optional<std::string> telemetryLog;
             {
-                std::lock_guard<SpinLock> lock(mutex_);
-                if (!started_ || !opusDecoder_) {
+                std::lock_guard<SpinLock> lock(ctx->mutex);
+                if (!ctx->decoder) {
                     return false;
                 }
 
-                if (!fromFrame && onFrameDecodeSeen_) {
-                    // If proper frame callbacks are working, avoid duplicate decode via fallback path.
+                if (!fromFrame && ctx->onFrameDecodeSeen) {
                     return false;
                 }
-                channels = channelCount_;
-                decodeBuffer.resize(kFrameSizeSamples * static_cast<size_t>(channels));
-                frameSamples = opus_decode_float(opusDecoder_,
+                decodeBuffer.resize(kFrameSizeSamples * static_cast<size_t>(peerChannels));
+                frameSamples = opus_decode_float(ctx->decoder,
                                                  encoded,
                                                  static_cast<opus_int32>(encodedSize),
                                                  decodeBuffer.data(),
                                                  static_cast<int>(kFrameSizeSamples),
                                                  0);
                 if (frameSamples > 0) {
-                    ++incomingFrameCount_;
+                    ++ctx->frameCount;
                     if (fromFrame) {
-                        onFrameDecodeSeen_ = true;
+                        ctx->onFrameDecodeSeen = true;
                     }
-                    if (!loggedFirstIncomingFrame_) {
-                        loggedFirstIncomingFrame_ = true;
+                    if (!ctx->loggedFirstFrame) {
+                        ctx->loggedFirstFrame = true;
                         telemetryLog = std::string("First decoded audio frame received via ") + sourceTag;
-                    } else if ((incomingFrameCount_ % 1000) == 0) {
-                        telemetryLog = "Decoded audio frame count: " + std::to_string(incomingFrameCount_);
+                    } else if ((ctx->frameCount % 1000) == 0) {
+                        telemetryLog = "Decoded audio frame count: " + std::to_string(ctx->frameCount);
                     }
                 } else {
-                    ++incomingDecodeErrorCount_;
-                    if (incomingDecodeErrorCount_ <= 3 || (incomingDecodeErrorCount_ % 100) == 0) {
+                    ++ctx->decodeErrorCount;
+                    if (ctx->decodeErrorCount <= 3 || (ctx->decodeErrorCount % 100) == 0) {
                         telemetryLog = std::string("Opus decode error ") + std::to_string(frameSamples) +
                                        " via " + sourceTag +
-                                       ", total decode errors: " + std::to_string(incomingDecodeErrorCount_);
+                                       ", total decode errors: " + std::to_string(ctx->decodeErrorCount);
                     }
                 }
             }
@@ -993,27 +1042,31 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             }
 
             std::vector<float> resampled;
-            const size_t outFrames = incomingResampler_.processInterleaved(decodeBuffer.data(),
-                                                                           static_cast<size_t>(frameSamples),
-                                                                           channels,
-                                                                           resampled);
+            size_t outFrames;
+            {
+                std::lock_guard<SpinLock> lock(ctx->mutex);
+                outFrames = ctx->resampler.processInterleaved(decodeBuffer.data(),
+                                                              static_cast<size_t>(frameSamples),
+                                                              peerChannels,
+                                                              resampled);
+            }
             if (outFrames == 0 || resampled.empty()) {
                 return false;
             }
 
-            std::vector<std::vector<float>> planar(channels, std::vector<float>(outFrames));
+            std::vector<std::vector<float>> planar(peerChannels, std::vector<float>(outFrames));
             for (size_t frame = 0; frame < outFrames; ++frame) {
-                for (int ch = 0; ch < channels; ++ch) {
-                    planar[ch][frame] = resampled[frame * static_cast<size_t>(channels) + ch];
+                for (int ch = 0; ch < peerChannels; ++ch) {
+                    planar[ch][frame] = resampled[frame * static_cast<size_t>(peerChannels) + ch];
                 }
             }
 
-            std::vector<const float*> channelPtrs(channels);
-            for (int ch = 0; ch < channels; ++ch) {
+            std::vector<const float*> channelPtrs(peerChannels);
+            for (int ch = 0; ch < peerChannels; ++ch) {
                 channelPtrs[ch] = planar[ch].data();
             }
 
-            receiveBuffer_.push(channelPtrs.data(), static_cast<size_t>(outFrames), channels);
+            ctx->buffer->push(channelPtrs.data(), outFrames, peerChannels);
             return true;
         };
 
@@ -1022,12 +1075,12 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
             decodeAndQueue(bytes, data.size(), true, "onFrame");
         });
 
-        track->onMessage([this, decodeAndQueue](rtc::message_variant message) {
+        track->onMessage([this, ctx, decodeAndQueue](rtc::message_variant message) {
             if (shuttingDown_.load(std::memory_order_acquire)) {
                 return;
             }
 
-            std::visit([this, &decodeAndQueue](auto&& payload) {
+            std::visit([this, &ctx, &decodeAndQueue](auto&& payload) {
                 using T = std::decay_t<decltype(payload)>;
                 if constexpr (!std::is_same_v<T, rtc::binary>) {
                     return;
@@ -1039,18 +1092,18 @@ WebRTCSession::PeerSession& WebRTCSession::ensurePeerSession(const std::string& 
 
                     bool shouldAttemptFallback = false;
                     {
-                        std::lock_guard<SpinLock> lock(mutex_);
-                        ++incomingRtpPacketCount_;
-                        if (!loggedFirstIncomingRtpPacket_) {
-                            loggedFirstIncomingRtpPacket_ = true;
+                        std::lock_guard<SpinLock> lock(ctx->mutex);
+                        ++ctx->rtpPacketCount;
+                        if (!ctx->loggedFirstRtpPacket) {
+                            ctx->loggedFirstRtpPacket = true;
                             log("First RTP packet received on remote track: pt=" +
                                 std::to_string(maybeView->payloadType) +
                                 ", bytes=" + std::to_string(maybeView->size));
-                        } else if ((incomingRtpPacketCount_ % 2000) == 0) {
-                            log("RTP packet count on remote track: " + std::to_string(incomingRtpPacketCount_));
+                        } else if ((ctx->rtpPacketCount % 2000) == 0) {
+                            log("RTP packet count on remote track: " + std::to_string(ctx->rtpPacketCount));
                         }
 
-                        shouldAttemptFallback = !onFrameDecodeSeen_ && incomingRtpPacketCount_ > 20;
+                        shouldAttemptFallback = !ctx->onFrameDecodeSeen && ctx->rtpPacketCount > 20;
                     }
 
                     if (!shouldAttemptFallback) {
@@ -1317,7 +1370,6 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         hashedRoomId_.clear();
 
         outgoingResampler_.configure(sampleRate_, 48000.0, channelCount_);
-        incomingResampler_.configure(48000.0, sampleRate_, channelCount_);
 
         if (!config_.roomName.empty()) {
             if (const auto password = effectivePassword()) {
@@ -1340,33 +1392,17 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
             return;  // Abort session start
         }
 
-        opusDecoder_ = opus_decoder_create(static_cast<opus_int32>(48000), channelCount_, &opusError);
-        if (opusError != OPUS_OK) {
-            log("FATAL: Failed to create Opus decoder");
-            emitStatus("Error: Failed to create audio decoder");
-            if (opusEncoder_) {
-                opus_encoder_destroy(opusEncoder_);
-                opusEncoder_ = nullptr;
-            }
-            opusDecoder_ = nullptr;
-            return;  // Abort session start
-        }
-
         outgoingFifo_.clear();
         peerSessions_.clear();
         sessionByUuid_.clear();
         pendingGlobalIce_.clear();
         roomJoined_ = false;
         roleAnnounced_ = false;
+        selfUuid_ = generateUUID();
+        log("Generated self UUID: " + selfUuid_);
 
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
-        incomingFrameCount_ = 0;
-        incomingDecodeErrorCount_ = 0;
-        loggedFirstIncomingFrame_ = false;
-        incomingRtpPacketCount_ = 0;
-        loggedFirstIncomingRtpPacket_ = false;
-        onFrameDecodeSeen_ = false;
         signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
         signalingClient_->setCallbacks({
             [this]() {
@@ -1482,25 +1518,14 @@ void WebRTCSession::stop() {
             opus_encoder_destroy(opusEncoder_);
             opusEncoder_ = nullptr;
         }
-        if (opusDecoder_) {
-            opus_decoder_destroy(opusDecoder_);
-            opusDecoder_ = nullptr;
-        }
 
         selfUuid_.clear();
         hashedRoomId_.clear();
         hashedStreamId_.clear();
 
         outgoingResampler_.reset();
-        incomingResampler_.reset();
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
-        incomingFrameCount_ = 0;
-        incomingDecodeErrorCount_ = 0;
-        loggedFirstIncomingFrame_ = false;
-        incomingRtpPacketCount_ = 0;
-        loggedFirstIncomingRtpPacket_ = false;
-        onFrameDecodeSeen_ = false;
     }
 
     log("WebRTCSession::stop() - complete");
@@ -1993,7 +2018,57 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
 }
 
 size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, int channels) {
-    return receiveBuffer_.pop(outputs, frames, channels);
+    // Zero output buffers
+    for (int ch = 0; ch < channels; ++ch) {
+        std::fill_n(outputs[ch], frames, 0.0f);
+    }
+
+    // Snapshot peer audio buffers under lock (just copy shared_ptrs)
+    std::vector<std::shared_ptr<AudioRingBuffer>> peerBuffers;
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        peerBuffers.reserve(peerSessions_.size());
+        for (auto& [key, session] : peerSessions_) {
+            if (session.audioContext && session.audioContext->buffer) {
+                peerBuffers.push_back(session.audioContext->buffer);
+            }
+        }
+    }
+
+    if (peerBuffers.empty()) {
+        return 0;
+    }
+
+    // Temp buffer for each peer's pop
+    std::vector<std::vector<float>> tempChannels(static_cast<size_t>(channels),
+                                                  std::vector<float>(frames, 0.0f));
+    std::vector<float*> tempPtrs(static_cast<size_t>(channels));
+    for (int ch = 0; ch < channels; ++ch) {
+        tempPtrs[static_cast<size_t>(ch)] = tempChannels[static_cast<size_t>(ch)].data();
+    }
+
+    size_t maxFramesRead = 0;
+
+    for (auto& buf : peerBuffers) {
+        // Zero temp buffers before each peer's pop
+        for (int ch = 0; ch < channels; ++ch) {
+            std::fill_n(tempPtrs[static_cast<size_t>(ch)], frames, 0.0f);
+        }
+
+        const size_t framesRead = buf->pop(tempPtrs.data(), frames, channels);
+        if (framesRead > maxFramesRead) {
+            maxFramesRead = framesRead;
+        }
+
+        // Sum into output
+        for (int ch = 0; ch < channels; ++ch) {
+            for (size_t i = 0; i < framesRead; ++i) {
+                outputs[ch][i] += tempPtrs[static_cast<size_t>(ch)][i];
+            }
+        }
+    }
+
+    return maxFramesRead;
 }
 
 } // namespace webrtc_vst

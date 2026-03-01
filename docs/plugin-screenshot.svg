@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 290" width="480" height="290">
+  <defs>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#18c460"/>
+      <stop offset="100%" stop-color="#20d870"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="480" height="290" rx="8" fill="#121417"/>
+
+  <!-- Window chrome dots -->
+  <circle cx="18" cy="10" r="4" fill="#ff5f57" opacity="0.7"/>
+  <circle cx="32" cy="10" r="4" fill="#febc2e" opacity="0.7"/>
+  <circle cx="46" cy="10" r="4" fill="#28c840" opacity="0.7"/>
+
+  <!-- Title bar -->
+  <rect x="20" y="22" width="440" height="30" rx="4" fill="#282c34" stroke="#3a3f4b" stroke-width="0.5"/>
+  <text x="240" y="42" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="url(#titleGrad)" filter="url(#glow)">VDO.Ninja WebRTC Bridge</text>
+
+  <!-- Connection Mode -->
+  <text x="30" y="78" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e2e8f0">Connection Mode</text>
+  <rect x="200" y="63" width="240" height="24" rx="3" fill="#1a1d22" stroke="#282c34" stroke-width="1"/>
+  <text x="212" y="79" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#18c460">Seed (Publish)</text>
+  <path d="M 424 73 L 430 78 L 436 73" fill="none" stroke="#18c460" stroke-width="1.2" stroke-linecap="round"/>
+
+  <!-- Stream ID -->
+  <text x="30" y="118" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e2e8f0">Stream ID</text>
+  <rect x="200" y="103" width="240" height="24" rx="3" fill="#1a1d22" stroke="#282c34" stroke-width="1"/>
+  <text x="212" y="119" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#18c460">myStream123</text>
+
+  <!-- Room Name -->
+  <text x="30" y="158" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e2e8f0">Room Name</text>
+  <rect x="200" y="143" width="240" height="24" rx="3" fill="#1a1d22" stroke="#282c34" stroke-width="1"/>
+  <text x="212" y="159" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#18c460">studio-session</text>
+
+  <!-- Password -->
+  <text x="30" y="198" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e2e8f0">Password</text>
+  <rect x="200" y="183" width="240" height="24" rx="3" fill="#1a1d22" stroke="#282c34" stroke-width="1"/>
+  <text x="212" y="199" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#18c460" letter-spacing="3">********</text>
+
+  <!-- Status -->
+  <text x="30" y="238" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#e2e8f0">Status</text>
+  <rect x="200" y="223" width="240" height="24" rx="3" fill="#1a1d22" stroke="#282c34" stroke-width="1"/>
+  <circle cx="212" cy="235" r="3.5" fill="#18c460" opacity="0.9"/>
+  <text x="222" y="239" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#18c460">Connected</text>
+
+  <!-- Footer -->
+  <text x="240" y="275" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="9" fill="#6b7280">Advanced: Handshake URL is customizable via VST host state if needed.</text>
+</svg>

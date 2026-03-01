@@ -130,10 +130,12 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
     auto* roomNameParam = new StringParameter(STR16("Room Name"), kParamRoomName);
     parameters.addParameter(roomNameParam);
     roomNameParam->setDefaultString("");
+    roomNameParam->setString("");
 
     auto* handshakeUrlParam = new StringParameter(STR16("Handshake URL"), kParamHandshakeUrl);
     parameters.addParameter(handshakeUrlParam);
     handshakeUrlParam->setDefaultString(kDefaultHandshakeUrl);
+    handshakeUrlParam->setString(kDefaultHandshakeUrl);
 
     auto* statusParam = new StringParameter(STR16("Status"), kParamStatus);
     auto& statusInfo = const_cast<Steinberg::Vst::ParameterInfo&>(statusParam->getInfo());
@@ -141,10 +143,12 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
     statusInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
     parameters.addParameter(statusParam);
     statusParam->setDefaultString("Idle");
+    statusParam->setString("Idle");
 
     auto* passwordParam = new StringParameter(STR16("Password"), kParamPassword);
     parameters.addParameter(passwordParam);
     passwordParam->setDefaultString("");
+    passwordParam->setString("");
 
     auto* disableEnc = new Steinberg::Vst::RangeParameter(STR16("Disable Encryption"),
                                                           kParamDisableEncryption,
@@ -318,21 +322,6 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
 Steinberg::IPlugView* PLUGIN_API WebRTCController::createView(const char* name) {
     Steinberg::ConstString viewName(name);
     if (viewName == Steinberg::Vst::ViewType::kEditor) {
-        // NOTE: Direct Composition (DC) is now ENABLED (previous disableDirectComposition() removed)
-        //
-        // Why DC is now enabled:
-        // - DC was originally disabled to fix a focus-stealing bug in Audacity
-        // - However, disabling DC caused the plugin window to become modal, blocking host interaction
-        // - Investigation revealed Audacity shows ALL VST3 effects as modal dialogs by design
-        // - With DC enabled, the plugin behaves normally in other DAWs (Reaper, Ableton, etc.)
-        //
-        // Tested on: Windows 10/11 with NVIDIA, AMD, and Intel GPUs
-        // Known issues: None currently, but may need to revisit if GPU-specific rendering issues appear
-        //
-        // If GPU rendering problems occur, consider:
-        // 1. Making this a user preference
-        // 2. Auto-detecting problematic GPU/driver combinations
-        // 3. Providing fallback rendering path
         return new VSTGUI::VST3Editor(this, "view", "webrtc_vst.uidesc");
     }
     return nullptr;

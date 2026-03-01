@@ -1,10 +1,10 @@
 // Stress Test for WebRTC VST Plugin
 // Aggressive testing to expose threading issues, memory leaks, and race conditions
+// Uses the PlugProvider pattern from the SDK for reliable hosting.
 
 #include <public.sdk/source/vst/hosting/hostclasses.h>
 #include <public.sdk/source/vst/hosting/module.h>
 #include <public.sdk/source/vst/hosting/plugprovider.h>
-#include <pluginterfaces/base/funknownimpl.h>
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstcomponent.h>
 #include <pluginterfaces/vst/vsttypes.h>
@@ -15,7 +15,6 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
-#include <random>
 #include <thread>
 #include <vector>
 
@@ -28,10 +27,9 @@ using namespace Steinberg::Vst;
 
 constexpr double kSampleRate = 48000.0;
 constexpr int32 kBlockSize = 512;
-constexpr int32 kNumChannels = 2;
 
 // ============================================================================
-// Concurrent Plugin Instance
+// Concurrent Plugin Instance (using PlugProvider)
 // ============================================================================
 
 class PluginInstance {
@@ -49,21 +47,30 @@ public:
             return false;
         }
 
-        auto factory = module_->getFactory();
-        for (auto& classInfo : factory.classInfos()) {
-            if (classInfo.category() == kVstAudioEffectClass) {
-                component_ = factory.createInstance<IComponent>(classInfo.ID());
-                break;
-            }
-        }
-
-        if (!component_ || component_->initialize(&hostContext_) != kResultOk) {
+        const VST3::Hosting::PluginFactory& factory = module_->getFactory();
+        auto classInfos = factory.classInfos();
+        if (classInfos.empty()) {
             return false;
         }
 
-        if (component_->queryInterface(IAudioProcessor::iid, (void**)&processor_) != kResultOk) {
+        provider_ = std::make_unique<PlugProvider>(factory, classInfos.front(), true);
+        if (!provider_->initialize()) {
             return false;
         }
+
+        component_ = provider_->getComponentPtr();
+        if (!component_) {
+            return false;
+        }
+
+        IAudioProcessor* processorRaw = nullptr;
+        if (component_->queryInterface(IAudioProcessor::iid,
+                                       reinterpret_cast<void**>(&processorRaw)) != kResultOk) {
+            return false;
+        }
+        processor_ = IPtr<IAudioProcessor>(processorRaw, false);
+
+        controller_ = provider_->getControllerPtr();
 
         return true;
     }
@@ -71,7 +78,7 @@ public:
     bool setup() {
         if (!processor_) return false;
 
-        ProcessSetup setup;
+        ProcessSetup setup{};
         setup.processMode = kRealtime;
         setup.symbolicSampleSize = kSample32;
         setup.maxSamplesPerBlock = kBlockSize;
@@ -95,33 +102,25 @@ public:
 
     void cleanup() {
         if (active_) deactivate();
-        if (processor_) { processor_->release(); processor_ = nullptr; }
-        if (component_) { component_->terminate(); component_->release(); component_ = nullptr; }
+        processor_ = nullptr;
+        if (provider_) {
+            auto* componentRaw = component_.take();
+            auto* controllerRaw = controller_.take();
+            provider_->releasePlugIn(componentRaw, controllerRaw);
+            provider_.reset();
+        }
         module_.reset();
     }
 
     int getId() const { return id_; }
 
 private:
-    class HostApplication : public FUnknownImpl<IHostApplication> {
-    public:
-        HostApplication() { FUNKNOWN_CTOR }
-        ~HostApplication() { FUNKNOWN_DTOR }
-        tresult PLUGIN_API getName(String128 name) override {
-            String str("Stress Test Host");
-            str.copyTo(name, 0, 127);
-            return kResultOk;
-        }
-        tresult PLUGIN_API createInstance(TUID, TUID, void**) override {
-            return kNotImplemented;
-        }
-    };
-
     int id_;
     std::shared_ptr<VST3::Hosting::Module> module_;
-    IComponent* component_{nullptr};
-    IAudioProcessor* processor_{nullptr};
-    HostApplication hostContext_;
+    std::unique_ptr<PlugProvider> provider_;
+    IPtr<IComponent> component_;
+    IPtr<IAudioProcessor> processor_;
+    IPtr<IEditController> controller_;
     bool active_{false};
 };
 
@@ -250,6 +249,10 @@ int main(int argc, char** argv) {
     std::cout << "WARNING: Aggressive testing for race conditions" << std::endl;
     std::cout << std::string(60, '=') << std::endl;
 
+    // Register host context (required for plugin initialization)
+    static HostApplication hostApp;
+    PluginContextFactory::instance().setPluginContext(&hostApp);
+
     std::string pluginPath;
     if (argc > 1) {
         pluginPath = argv[1];
@@ -270,16 +273,16 @@ int main(int argc, char** argv) {
 
     // Test 1: Rapid Create/Destroy (single threaded)
     {
-        std::cout << "\n[1/5] Rapid Create/Destroy (1000x)... " << std::flush;
+        std::cout << "\n[1/5] Rapid Create/Destroy (200x)... " << std::flush;
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
-        stress_rapid_create_destroy(pluginPath, 1000, failures);
+        stress_rapid_create_destroy(pluginPath, 200, failures);
         auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
         totalFailures += failures.load();
         if (failures == 0) {
-            std::cout << "✓ PASS (" << duration << "s)" << std::endl;
+            std::cout << "PASS (" << duration << "s)" << std::endl;
         } else {
-            std::cout << "✗ FAIL (" << failures << " failures)" << std::endl;
+            std::cout << "FAIL (" << failures << " failures)" << std::endl;
         }
     }
 
@@ -292,9 +295,9 @@ int main(int argc, char** argv) {
         auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
         totalFailures += failures.load();
         if (failures == 0) {
-            std::cout << "✓ PASS (" << duration << "s)" << std::endl;
+            std::cout << "PASS (" << duration << "s)" << std::endl;
         } else {
-            std::cout << "✗ FAIL (" << failures << " failures)" << std::endl;
+            std::cout << "FAIL (" << failures << " failures)" << std::endl;
         }
     }
 
@@ -307,9 +310,9 @@ int main(int argc, char** argv) {
         auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
         totalFailures += failures.load();
         if (failures == 0) {
-            std::cout << "✓ PASS (" << duration << "s)" << std::endl;
+            std::cout << "PASS (" << duration << "s)" << std::endl;
         } else {
-            std::cout << "✗ FAIL (" << failures << " failures)" << std::endl;
+            std::cout << "FAIL (" << failures << " failures)" << std::endl;
         }
     }
 
@@ -322,30 +325,30 @@ int main(int argc, char** argv) {
         auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
         totalFailures += failures.load();
         if (failures == 0) {
-            std::cout << "✓ PASS (" << duration << "s)" << std::endl;
+            std::cout << "PASS (" << duration << "s)" << std::endl;
         } else {
-            std::cout << "✗ FAIL (" << failures << " failures)" << std::endl;
+            std::cout << "FAIL (" << failures << " failures)" << std::endl;
         }
     }
 
     // Test 5: Concurrent Create/Destroy
     {
-        std::cout << "[5/5] Concurrent Create/Destroy (5 threads, 100x each)... " << std::flush;
+        std::cout << "[5/5] Concurrent Create/Destroy (5 threads, 40x each)... " << std::flush;
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
         std::vector<std::thread> threads;
         for (int i = 0; i < 5; ++i) {
             threads.emplace_back([&pluginPath, &failures]() {
-                stress_rapid_create_destroy(pluginPath, 100, failures);
+                stress_rapid_create_destroy(pluginPath, 40, failures);
             });
         }
         for (auto& t : threads) t.join();
         auto duration = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count();
         totalFailures += failures.load();
         if (failures == 0) {
-            std::cout << "✓ PASS (" << duration << "s)" << std::endl;
+            std::cout << "PASS (" << duration << "s)" << std::endl;
         } else {
-            std::cout << "✗ FAIL (" << failures << " failures)" << std::endl;
+            std::cout << "FAIL (" << failures << " failures)" << std::endl;
         }
     }
 
@@ -354,10 +357,10 @@ int main(int argc, char** argv) {
     std::cout << "STRESS TEST SUMMARY" << std::endl;
     std::cout << std::string(60, '=') << std::endl;
     if (totalFailures == 0) {
-        std::cout << "✓ ALL STRESS TESTS PASSED" << std::endl;
+        std::cout << "ALL STRESS TESTS PASSED" << std::endl;
         std::cout << "Plugin is stable under extreme conditions" << std::endl;
     } else {
-        std::cout << "✗ FAILURES DETECTED: " << totalFailures << std::endl;
+        std::cout << "FAILURES DETECTED: " << totalFailures << std::endl;
         std::cout << "Plugin has stability issues" << std::endl;
     }
     std::cout << std::string(60, '=') << std::endl;

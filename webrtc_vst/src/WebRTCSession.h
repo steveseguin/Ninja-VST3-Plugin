@@ -84,12 +84,34 @@ private:
         nlohmann::json payload;
     };
 
+    struct PeerAudioContext {
+        ::OpusDecoder* decoder{nullptr};
+        LinearResampler resampler;
+        std::shared_ptr<AudioRingBuffer> buffer;
+        std::atomic<bool> active{true};
+        uint64_t frameCount{0};
+        uint64_t decodeErrorCount{0};
+        bool loggedFirstFrame{false};
+        bool onFrameDecodeSeen{false};
+        uint64_t rtpPacketCount{0};
+        bool loggedFirstRtpPacket{false};
+        SpinLock mutex;
+
+        ~PeerAudioContext() {
+            if (decoder) {
+                opus_decoder_destroy(decoder);
+                decoder = nullptr;
+            }
+        }
+    };
+
     struct PeerSession {
         std::shared_ptr<rtc::PeerConnection> connection;
         std::shared_ptr<rtc::Track> localAudioTrack;
         std::shared_ptr<rtc::Track> remoteAudioTrack;
         std::shared_ptr<rtc::RtpPacketizationConfig> rtpConfig;
-        std::shared_ptr<rtc::DataChannel> dataChannel;  // For sending signaling messages in play mode
+        std::shared_ptr<rtc::DataChannel> dataChannel;
+        std::shared_ptr<PeerAudioContext> audioContext;
         std::string uuid;
         std::string sessionId;
         std::string streamId;
@@ -163,7 +185,6 @@ private:
     bool started_{false};
 
     ::OpusEncoder* opusEncoder_{nullptr};
-    ::OpusDecoder* opusDecoder_{nullptr};
     std::deque<float> outgoingFifo_;
 
     LogSink logSink_;
@@ -173,12 +194,6 @@ private:
     std::atomic<bool> receivingAudio_{false};
     std::atomic<bool> publishingAudio_{false};
     mutable std::mutex signalingLogMutex_;
-    uint64_t incomingFrameCount_{0};
-    uint64_t incomingDecodeErrorCount_{0};
-    bool loggedFirstIncomingFrame_{false};
-    uint64_t incomingRtpPacketCount_{0};
-    bool loggedFirstIncomingRtpPacket_{false};
-    bool onFrameDecodeSeen_{false};
 
     std::unordered_map<PeerKey, PeerSession> peerSessions_;
     std::unordered_map<std::string, PeerKey> sessionByUuid_;
@@ -221,7 +236,6 @@ private:
     bool roomJoined_{false};
     bool roleAnnounced_{false};
     LinearResampler outgoingResampler_;
-    LinearResampler incomingResampler_;
 };
 
 } // namespace webrtc_vst
