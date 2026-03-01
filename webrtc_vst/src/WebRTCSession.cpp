@@ -2213,7 +2213,7 @@ void WebRTCSession::announceRoleIfReady() {
 }
 
 void WebRTCSession::requestPlayRefresh(const std::string& reason) {
-    if (!truthyEnvEnabled("WEBRTC_VST_ENABLE_PLAY_REFRESH")) {
+    if (truthyEnvEnabled("WEBRTC_VST_DISABLE_PLAY_REFRESH")) {
         return;
     }
 
