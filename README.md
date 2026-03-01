@@ -31,6 +31,7 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 
 - Releases: https://github.com/steveseguin/Ninja-VST3-Plugin/releases
 - Docs landing page (when GitHub Pages is enabled): `docs/index.html`
+- Install instructions: [INSTALL.md](./INSTALL.md)
 
 ## License and contributions
 

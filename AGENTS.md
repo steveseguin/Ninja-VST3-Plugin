@@ -311,11 +311,12 @@ Current workflow behavior:
 Use this path when you need immediate release output from local machine:
 
 1. Build `webrtc_vst` in Release.
-2. Sign `build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Contents\x86_64-win\webrtc_vst.vst3`.
-3. Verify with `signtool verify /pa /v`.
-4. Package zip to `build\release\`.
-5. Submit zip and/or binary to VirusTotal.
-6. Publish with `gh release create`.
+2. Build installer via `.\scripts\build_windows_installer.ps1 -Version v<version>`.
+3. Sign plugin binary and installer.
+4. Verify with `signtool verify /pa /v`.
+5. Package zip to `build\release\`.
+6. Submit both zip and installer to VirusTotal.
+7. Publish with `gh release create`.
 
 ## 12) Signing / Notarization Status
 

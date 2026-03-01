@@ -112,34 +112,44 @@ System-wide (admin required):
 cmake --build build/webrtc_vst_win --config Release --target webrtc_vst
 ```
 
-2. Sign plugin binary (use cert material from `../code-signing/secrets/decrypted`):
+2. Build installer artifact (requires Inno Setup 6):
+
+```powershell
+choco install innosetup -y
+.\scripts\build_windows_installer.ps1 -Version v<version>
+```
+
+3. Sign plugin binary and installer (use cert material from `../code-signing/secrets/decrypted`):
 
 ```powershell
 signtool sign /fd SHA256 /f "..\code-signing\secrets\decrypted\certs\socialstream.pfx" /p "<pfx_password>" /tr "http://timestamp.digicert.com" /td SHA256 "build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Contents\x86_64-win\webrtc_vst.vst3"
+signtool sign /fd SHA256 /f "..\code-signing\secrets\decrypted\certs\socialstream.pfx" /p "<pfx_password>" /tr "http://timestamp.digicert.com" /td SHA256 "build\release\webrtc_vst-v<version>-windows-setup.exe"
 ```
 
-3. Verify signature/timestamp:
+4. Verify signatures/timestamps:
 
 ```powershell
 signtool verify /pa /v "build\webrtc_vst_win\VST3\Release\webrtc_vst.vst3\Contents\x86_64-win\webrtc_vst.vst3"
+signtool verify /pa /v "build\release\webrtc_vst-v<version>-windows-setup.exe"
 ```
 
-4. Package artifact:
+5. Package zip artifact:
 
 ```powershell
 tar -a -cf build\release\webrtc_vst-v<version>-windows-vst3.zip -C build\webrtc_vst_win\VST3\Release webrtc_vst.vst3
 ```
 
-5. Submit to VirusTotal:
+6. Submit both assets to VirusTotal:
 
 ```powershell
 curl.exe --request POST --url https://www.virustotal.com/api/v3/files --header "x-apikey: <VT_API_KEY>" --form "file=@build\release\webrtc_vst-v<version>-windows-vst3.zip"
+curl.exe --request POST --url https://www.virustotal.com/api/v3/files --header "x-apikey: <VT_API_KEY>" --form "file=@build\release\webrtc_vst-v<version>-windows-setup.exe"
 ```
 
-6. Publish release manually:
+7. Publish release manually:
 
 ```powershell
-gh release create v<version> build\release\webrtc_vst-v<version>-windows-vst3.zip --repo steveseguin/Ninja-VST3-Plugin --title "v<version>" --notes "Manual local release"
+gh release create v<version> build\release\webrtc_vst-v<version>-windows-vst3.zip build\release\webrtc_vst-v<version>-windows-setup.exe --repo steveseguin/Ninja-VST3-Plugin --title "v<version>" --notes "Manual local release"
 ```
 
 If you source cert material from `../code-signing`, do not commit decrypted keys or passphrases to this repository.

@@ -27,6 +27,11 @@ jobs:
         with:
           cmake-version: "3.31.6"
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
       - name: Validate release secrets
         shell: pwsh
         run: |
@@ -68,6 +73,11 @@ jobs:
           & "build/webrtc_vst_win/bin/Release/webrtc_vst_stress_test.exe"
           if ($LASTEXITCODE -ne 0) { throw "Stress tests failed" }
 
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          .\scripts\build_windows_installer.ps1 -Version "${{ github.ref_name }}"
+
       - name: Prepare code-signing certificate
         id: signing-cert
         shell: pwsh
@@ -102,7 +112,7 @@ jobs:
           }
           $targets += (Resolve-Path $pluginBinary).Path
 
-          # Future-proofing: sign installer artifacts when present.
+          # Sign installer artifacts as part of release outputs.
           $installerCandidates = Get-ChildItem -Path build -Recurse -File -Include *.exe,*.msi |
             Where-Object { $_.Name -match '(?i)(setup|installer)' }
           foreach ($candidate in $installerCandidates) {
@@ -154,7 +164,7 @@ jobs:
           "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-          # If installer artifacts are produced in future, attach them automatically.
+          # Attach installer artifacts automatically.
           $installerCandidates = Get-ChildItem -Path build -Recurse -File -Include *.exe,*.msi |
             Where-Object { $_.Name -match '(?i)(setup|installer)' }
           $installerAssets = @()
