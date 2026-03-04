@@ -72,10 +72,14 @@ private:
     Steinberg::Vst::ProcessSetup processSetup_{};
     std::atomic<bool> sessionActive_{false};
     std::atomic<bool> configDirty_{false};
-    std::atomic<bool> loggedSeedProcessState_{false};
+    std::atomic<bool> loggedPublishProcessState_{false};
     std::atomic<bool> loggedPlayProcessState_{false};
-    std::atomic<bool> loggedSeedPushAttempt_{false};
+    std::atomic<bool> loggedPublishPushAttempt_{false};
     std::atomic<int> lastLoggedMode_{-1};
+
+    PluginConfig activeConfig_;
+    double activeSampleRate_{0.0};
+    int activeChannels_{0};
 };
 
 extern const Steinberg::FUID kWebRTCProcessorUID;

@@ -154,7 +154,7 @@ void VDONinjaSignalingClient::connectAsync() {
     tlsOptions.disable_hostname_validation = false;
     socket->setTLSOptions(tlsOptions);
 
-    socket->setPingInterval(30);
+    socket->setPingInterval(10);
     socket->disableAutomaticReconnection();
     socket->start();
 }

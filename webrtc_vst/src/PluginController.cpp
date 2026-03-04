@@ -117,7 +117,7 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
 
     auto* mode = new Steinberg::Vst::StringListParameter(STR16("Connection Mode"), kParamMode);
     mode->appendString(STR16("Play"));
-    mode->appendString(STR16("Seed"));
+    mode->appendString(STR16("Publish"));
     mode->setNormalized(0.0);
     parameters.addParameter(mode);
 
@@ -202,7 +202,7 @@ void WebRTCController::applyStateJson(const std::string& jsonString) {
         if (auto it = json.find("mode"); it != json.end()) {
             if (auto* param = parameters.getParameter(kParamMode)) {
                 const auto mode = it->get<std::string>();
-                param->setNormalized((mode == "seed") ? 1.0 : 0.0);
+                param->setNormalized((mode == "seed" || mode == "publish") ? 1.0 : 0.0);
             }
         }
 
@@ -215,7 +215,7 @@ void WebRTCController::applyStateJson(const std::string& jsonString) {
 
 std::string WebRTCController::exportStateJson() const {
     auto* modeParam = parameters.getParameter(kParamMode);
-    const bool isSeed = modeParam && modeParam->getNormalized() >= 0.5;
+    const bool isPublish = modeParam && modeParam->getNormalized() >= 0.5;
 
     const auto streamId = [this]() {
         if (auto* param = findStringParameter(kParamStreamId)) {
@@ -252,7 +252,7 @@ std::string WebRTCController::exportStateJson() const {
         {"roomName", roomName},
         {"handshakeUrl", handshakeUrl},
         {"password", password},
-        {"mode", isSeed ? "seed" : "play"},
+        {"mode", isPublish ? "publish" : "play"},
         {"disableEncryption", disableEncryption}
     };
 

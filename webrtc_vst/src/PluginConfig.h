@@ -5,8 +5,8 @@
 namespace webrtc_vst {
 
 enum class ConnectionMode {
-    Seed,  // Publish host audio to VDO.Ninja
-    Play   // Receive remote audio into the host
+    Publish,  // Publish host audio to VDO.Ninja
+    Play      // Receive remote audio into the host
 };
 
 struct PluginConfig {

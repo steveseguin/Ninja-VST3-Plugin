@@ -891,7 +891,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                 case rtc::PeerConnection::State::Connected:
                     it->second.negotiationReady = true;
                     log("Peer connection connected: " + keyCopy);
-                    statusMessage = (config_.mode == ConnectionMode::Seed)
+                    statusMessage = (config_.mode == ConnectionMode::Publish)
                                         ? std::string("Peer connected (publishing)")
                                         : std::string("Peer connected");
                     break;
@@ -980,7 +980,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         }
         candidateJson["sdpMLineIndex"] = 0;
 
-        const bool isPublisher = config_.mode == ConnectionMode::Seed;
+        const bool isPublisher = config_.mode == ConnectionMode::Publish;
         sendIceCandidate(it->second, candidateJson, isPublisher ? "local" : "remote");
     });
 
@@ -1301,7 +1301,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         });
     }
 
-    if (createLocalTracks && config_.mode == ConnectionMode::Seed) {
+    if (createLocalTracks && config_.mode == ConnectionMode::Publish) {
         rtc::Description::Audio audio("audio", rtc::Description::Direction::SendRecv);
         audio.addOpusCodec(kOpusPayloadType);
         audio.addSSRC(kAudioSsrc, "audio-stream", "stream1", "audio-stream");
@@ -1320,6 +1320,25 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         auto nackResponder = std::make_shared<rtc::RtcpNackResponder>();
         packetizer->addToChain(nackResponder);
         session.localAudioTrack->setMediaHandler(packetizer);
+
+        session.localAudioTrack->onOpen([this, keyCopy]() {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Local audio track OPENED for peer " + keyCopy + " — sending is now possible");
+        });
+        session.localAudioTrack->onClosed([this, keyCopy]() {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Local audio track CLOSED for peer " + keyCopy);
+        });
+        session.localAudioTrack->onError([this, keyCopy](const std::string& error) {
+            if (shuttingDown_.load(std::memory_order_acquire)) {
+                return;
+            }
+            log("Local audio track ERROR for peer " + keyCopy + ": " + error);
+        });
     }
 
     sessionByUuid_[uuid] = key;
@@ -1687,10 +1706,11 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
                 std::string lowered = alertMessage;
                 std::transform(lowered.begin(), lowered.end(), lowered.begin(),
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (config_.mode == ConnectionMode::Seed &&
+                if (config_.mode == ConnectionMode::Publish &&
                     lowered.find("already in use") != std::string::npos) {
                     publishingAudio_.store(false, std::memory_order_relaxed);
                     emitStatus("Error: Stream ID already in use");
+                    log("Stream ID conflict — another publisher is already using this stream ID");
                 } else {
                     emitStatus("Alert: " + alertMessage);
                 }
@@ -1711,8 +1731,8 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
 }
 
 void WebRTCSession::handleOfferRequest(const nlohmann::json& message) {
-    if (config_.mode != ConnectionMode::Seed) {
-        log("Ignoring offer request because plugin is not in seeding mode");
+    if (config_.mode != ConnectionMode::Publish) {
+        log("Ignoring offer request because plugin is not in publishing mode");
         return;
     }
 
@@ -2161,7 +2181,7 @@ void WebRTCSession::postInitialRequests() {
         };
         sendSignalingMessage(joinMessage);
     } else {
-        log(std::string("postInitialRequests: mode=") + (config_.mode == ConnectionMode::Seed ? "Seed" : "Play") +
+        log(std::string("postInitialRequests: mode=") + (config_.mode == ConnectionMode::Publish ? "Publish" : "Play") +
             ", stream=" + config_.streamId);
         announceRoleIfReady();
     }
@@ -2189,7 +2209,7 @@ void WebRTCSession::announceRoleIfReady() {
         return;
     }
 
-    if (config_.mode == ConnectionMode::Seed) {
+    if (config_.mode == ConnectionMode::Publish) {
         log("announceRoleIfReady: sending seed request");
         nlohmann::json seedMessage = {
             {"request", "seed"},
@@ -2257,15 +2277,40 @@ void WebRTCSession::requestPlayRefresh(const std::string& reason) {
 
 void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames, int channels) {
     std::lock_guard<SpinLock> lock(mutex_);
-    if (!started_ || config_.mode != ConnectionMode::Seed || !opusEncoder_ || peerSessions_.empty()) {
+    if (!started_ || config_.mode != ConnectionMode::Publish || !opusEncoder_ || peerSessions_.empty()) {
         return;
     }
 
     if (!publishingAudio_.exchange(true, std::memory_order_acq_rel)) {
         emitStatus("Publishing audio");
     }
+
+    // The opus encoder was created with channelCount_ channels.
+    // If the host provides a different channel count, adapt the input
+    // so the resampler and FIFO always operate at channelCount_.
+    const int encChannels = channelCount_;
+    std::array<const float*, 2> adaptedPtrs{};
+    const float* const* resampleInput = inputs;
+    int resampleChannels = channels;
+
+    if (channels != encChannels) {
+        if (channels == 1 && encChannels == 2) {
+            // Mono input → duplicate to stereo
+            adaptedPtrs[0] = inputs[0];
+            adaptedPtrs[1] = inputs[0];
+            resampleInput = adaptedPtrs.data();
+        } else if (channels == 2 && encChannels == 1) {
+            // Stereo input → use left channel only
+            adaptedPtrs[0] = inputs[0];
+            resampleInput = adaptedPtrs.data();
+        } else {
+            return; // Unsupported channel layout
+        }
+        resampleChannels = encChannels;
+    }
+
     const size_t producedFrames =
-        outgoingResampler_.processPlanar(inputs, frames, channels, outgoingInterleavedScratch_);
+        outgoingResampler_.processPlanar(resampleInput, frames, resampleChannels, outgoingInterleavedScratch_);
     if (producedFrames == 0 || outgoingInterleavedScratch_.empty()) {
         return;
     }
@@ -2280,7 +2325,7 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
         outgoingFifo_.pop_front();
     }
 
-    const size_t frameSamples = kFrameSizeSamples * static_cast<size_t>(channels);
+    const size_t frameSamples = kFrameSizeSamples * static_cast<size_t>(encChannels);
     if (outgoingFrameScratch_.size() < frameSamples) {
         outgoingFrameScratch_.resize(frameSamples);
     }

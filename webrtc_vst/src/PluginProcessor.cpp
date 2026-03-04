@@ -153,8 +153,13 @@ tresult PLUGIN_API WebRTCProcessor::terminate() {
 }
 
 tresult PLUGIN_API WebRTCProcessor::setupProcessing(ProcessSetup& setup) {
+    bool changed = (setup.sampleRate != processSetup_.sampleRate) ||
+                   (setup.maxSamplesPerBlock != processSetup_.maxSamplesPerBlock) ||
+                   (setup.symbolicSampleSize != processSetup_.symbolicSampleSize);
     processSetup_ = setup;
-    requestConfigApply();
+    if (changed) {
+        requestConfigApply();
+    }
     return AudioEffect::setupProcessing(setup);
 }
 
@@ -186,7 +191,7 @@ void WebRTCProcessor::updateConfigFromEnvironment() {
         std::string modeStr(modeEnv);
         std::transform(modeStr.begin(), modeStr.end(), modeStr.begin(), ::tolower);
         if (modeStr == "seed" || modeStr == "publish" || modeStr == "send") {
-            config_.mode = ConnectionMode::Seed;
+            config_.mode = ConnectionMode::Publish;
         } else {
             config_.mode = ConnectionMode::Play;
         }
@@ -210,7 +215,7 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
 
     if (shouldLogToStdout()) {
         std::cout << "[WebRTC] startSession requested"
-                  << " mode=" << (config.mode == ConnectionMode::Seed ? "Seed" : "Play")
+                  << " mode=" << (config.mode == ConnectionMode::Publish ? "Publish" : "Play")
                   << std::endl;
     }
 
@@ -258,7 +263,7 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
     std::lock_guard<std::mutex> lock(configMutex_);
     switch (id) {
         case kParamMode:
-            config_.mode = (value >= 0.5) ? ConnectionMode::Seed : ConnectionMode::Play;
+            config_.mode = (value >= 0.5) ? ConnectionMode::Publish : ConnectionMode::Play;
             modeAtomic_.store(config_.mode, std::memory_order_release);
             configDirty_.store(true, std::memory_order_release);
             break;
@@ -325,6 +330,20 @@ void WebRTCProcessor::configThreadMain() {
         const bool shouldActivate = hostActive_.load(std::memory_order_acquire);
         const bool ready = processingReady_.load(std::memory_order_acquire);
         PluginConfig configCopy = config_;
+
+        double sampleRate = processSetup_.sampleRate > 0.0 ? processSetup_.sampleRate : kDefaultSampleRate;
+        int channels = 2;
+        if (!audioInputs.empty()) {
+            BusInfo info;
+            if (audioInputs[0]->getInfo(info)) {
+                channels = info.channelCount;
+            }
+        } else if (!audioOutputs.empty()) {
+            BusInfo info;
+            if (audioOutputs[0]->getInfo(info)) {
+                channels = info.channelCount;
+            }
+        }
         lock.unlock();
 
         if (!shouldActivate || !ready) {
@@ -332,7 +351,24 @@ void WebRTCProcessor::configThreadMain() {
             continue;
         }
 
+        bool configChanged = (configCopy.streamId != activeConfig_.streamId) ||
+                             (configCopy.roomName != activeConfig_.roomName) ||
+                             (configCopy.handshakeUrl != activeConfig_.handshakeUrl) ||
+                             (configCopy.mode != activeConfig_.mode) ||
+                             (configCopy.password != activeConfig_.password) ||
+                             (configCopy.disableEncryption != activeConfig_.disableEncryption);
+
+        bool audioParamsChanged = (sampleRate != activeSampleRate_) || (channels != activeChannels_);
+
+        if (sessionActive_.load(std::memory_order_acquire) && !configChanged && !audioParamsChanged) {
+            continue; // Nothing significant changed
+        }
+
         stopSession();
+        activeConfig_ = configCopy;
+        activeSampleRate_ = sampleRate;
+        activeChannels_ = channels;
+
         try {
             startSession(configCopy);
         } catch (...) {
@@ -354,7 +390,7 @@ std::string WebRTCProcessor::serializeConfigToJson() const {
         {"streamId", copy.streamId},
         {"roomName", copy.roomName},
         {"handshakeUrl", copy.handshakeUrl},
-        {"mode", copy.mode == ConnectionMode::Seed ? "seed" : "play"},
+        {"mode", copy.mode == ConnectionMode::Publish ? "seed" : "play"},
         {"password", copy.password},
         {"disableEncryption", copy.disableEncryption}
     };
@@ -537,18 +573,18 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
 
     const auto mode = modeAtomic_.load(std::memory_order_acquire);
     const bool sessionRunning = sessionActive_.load(std::memory_order_acquire);
-    const int modeValue = (mode == ConnectionMode::Seed) ? 1 : 0;
+    const int modeValue = (mode == ConnectionMode::Publish) ? 1 : 0;
     const int previousMode = lastLoggedMode_.exchange(modeValue, std::memory_order_acq_rel);
     if (previousMode != modeValue && shouldLogToStdout()) {
         std::cout << "[WebRTC] Process mode now "
-                  << ((mode == ConnectionMode::Seed) ? "Seed" : "Play")
+                  << ((mode == ConnectionMode::Publish) ? "Publish" : "Play")
                   << " sessionRunning=" << (sessionRunning ? "true" : "false")
                   << std::endl;
     }
 
-    if (mode == ConnectionMode::Seed && !loggedSeedProcessState_.exchange(true, std::memory_order_acq_rel)) {
+    if (mode == ConnectionMode::Publish && !loggedPublishProcessState_.exchange(true, std::memory_order_acq_rel)) {
         if (shouldLogToStdout()) {
-            std::cout << "[WebRTC] Seed process path active"
+            std::cout << "[WebRTC] Publish process path active"
                       << " hasInput=" << (hasInput ? "true" : "false")
                       << " inputChannels=" << inputChannels
                       << " sessionRunning=" << (sessionRunning ? "true" : "false")
@@ -565,15 +601,15 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
         }
     }
 
-    if (mode == ConnectionMode::Seed && hasInput) {
+    if (mode == ConnectionMode::Publish && hasInput) {
         const int pushChannels = std::min(inputChannels, kMaxProcessChannels);
         std::array<const float*, static_cast<size_t>(kMaxProcessChannels)> inPtrs{};
         for (int ch = 0; ch < pushChannels; ++ch) {
             inPtrs[static_cast<size_t>(ch)] = data.inputs[0].channelBuffers32[ch];
         }
         if (sessionRunning && pushChannels > 0) {
-            if (!loggedSeedPushAttempt_.exchange(true, std::memory_order_acq_rel) && shouldLogToStdout()) {
-                std::cout << "[WebRTC] Seed path calling pushOutgoingAudio for first time" << std::endl;
+            if (!loggedPublishPushAttempt_.exchange(true, std::memory_order_acq_rel) && shouldLogToStdout()) {
+                std::cout << "[WebRTC] Publish path calling pushOutgoingAudio for first time" << std::endl;
             }
             session_.pushOutgoingAudio(inPtrs.data(), static_cast<size_t>(numSamples), pushChannels);
         }
@@ -662,7 +698,7 @@ tresult PLUGIN_API WebRTCProcessor::setState(IBStream* state) {
         }
         if (auto it = json.find("mode"); it != json.end()) {
             const auto mode = it->get<std::string>();
-            config_.mode = (mode == "seed" ? ConnectionMode::Seed : ConnectionMode::Play);
+            config_.mode = (mode == "seed" || mode == "publish" ? ConnectionMode::Publish : ConnectionMode::Play);
             modeAtomic_.store(config_.mode, std::memory_order_release);
         }
         if (auto it = json.find("password"); it != json.end()) {
