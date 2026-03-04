@@ -14,7 +14,7 @@ function Resolve-IsccPath {
     }
 
     $candidates = @(
-        "$env:ProgramFiles(x86)\\Inno Setup 6\\ISCC.exe",
+        "${env:ProgramFiles(x86)}\\Inno Setup 6\\ISCC.exe",
         "$env:ProgramFiles\\Inno Setup 6\\ISCC.exe",
         (Join-Path (Join-Path $projectRoot "build\\tools\\InnoSetup6") "ISCC.exe")
     )
