@@ -1,6 +1,6 @@
 {
   "name": "vst",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Integration tooling for WebRTC VST",
   "main": "index.js",
   "scripts": {
