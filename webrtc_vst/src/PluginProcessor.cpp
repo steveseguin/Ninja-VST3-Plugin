@@ -250,9 +250,7 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
 }
 
 void WebRTCProcessor::stopSession() {
-    if (!sessionActive_.exchange(false, std::memory_order_acq_rel)) {
-        return;
-    }
+    sessionActive_.store(false, std::memory_order_release);
     if (shouldLogToStdout()) {
         std::cout << "[WebRTC] sessionActive=false (stopSession)" << std::endl;
     }

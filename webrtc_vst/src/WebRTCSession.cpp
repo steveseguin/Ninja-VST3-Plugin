@@ -2112,7 +2112,7 @@ void WebRTCSession::reconnectInternal() {
             isReconnecting_.store(false, std::memory_order_release);
             emitStatus("Reconnected");
 
-            // Re-post initial requests (rejoin room + reseed/replay)
+            // Re-post initial requests (rejoin room + re-publish/replay)
             {
                 std::lock_guard<SpinLock> lock(mutex_);
                 roomJoined_ = false;
@@ -2210,13 +2210,13 @@ void WebRTCSession::announceRoleIfReady() {
     }
 
     if (config_.mode == ConnectionMode::Publish) {
-        log("announceRoleIfReady: sending seed request");
-        nlohmann::json seedMessage = {
+        log("announceRoleIfReady: sending publish request");
+        nlohmann::json publishMessage = {
             {"request", "seed"},
             {"streamID", hashedStreamId_.empty() ? config_.streamId : hashedStreamId_}
         };
-        sendSignalingMessage(seedMessage);
-        log("Sent seed request for stream " + config_.streamId);
+        sendSignalingMessage(publishMessage);
+        log("Sent publish request for stream " + config_.streamId);
     } else {
         log("announceRoleIfReady: sending play request");
         nlohmann::json playMessage = {
