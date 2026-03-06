@@ -12,7 +12,7 @@ constexpr auto kVendor = "Open Source";
 constexpr auto kUrl = "https://vdo.ninja";
 constexpr auto kEmail = "support@vdo.ninja";
 constexpr auto kCategory = "Fx";
-constexpr auto kPluginName = "WebRTC Bridge";
+constexpr auto kPluginName = "VDO.Ninja WebRTC Bridge";
 }
 
 BEGIN_FACTORY_DEF(kVendor, kUrl, kEmail)
@@ -30,7 +30,7 @@ DEF_CLASS2(INLINE_UID_FROM_FUID(webrtc_vst::kWebRTCProcessorUID),
 DEF_CLASS2(INLINE_UID_FROM_FUID(webrtc_vst::kWebRTCControllerUID),
            PClassInfo::kManyInstances,
            kVstComponentControllerClass,
-           "WebRTC Bridge Controller",
+           "VDO.Ninja WebRTC Bridge Controller",
            0,
            "",
            WEBRTC_VST_VERSION_STRING,

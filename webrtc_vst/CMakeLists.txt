@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(WebRTC_VST VERSION 0.2.1 LANGUAGES CXX)
+project(WebRTC_VST VERSION 0.2.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -156,6 +156,7 @@ set(PLUGIN_SOURCES
     src/AudioRingBuffer.cpp
     src/PluginController.cpp
     src/ParameterStringRegistry.cpp
+    src/qrcodegen.cpp
     src/plugin_entry.cpp
     resources/webrtc_vst.uidesc
 )
@@ -170,6 +171,7 @@ set(PLUGIN_HEADERS
     src/StreamIdGenerator.h
     src/ParameterIDs.h
     src/ParameterStringRegistry.h
+    src/qrcodegen.hpp
     src/Version.h
 )
 

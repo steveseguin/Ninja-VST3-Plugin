@@ -44,6 +44,10 @@ private:
 
     StringParameter* findStringParameter(Steinberg::Vst::ParamID id) const;
     void updateDisableEncryptionFromPassword();
+    void updateShareLinks();
+    void setStringParameterAndNotify(Steinberg::Vst::ParamID id, const std::string& value);
+    void handleActionButton(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue value);
+    void postControllerStatus(const std::string& status);
     bool suppressDisableEdit_{false};
 };
 

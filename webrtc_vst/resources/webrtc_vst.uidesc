@@ -7,26 +7,45 @@
         <color name="Frame" rgba="#282c34ff"/>
         <color name="InputText" rgba="#18c460ff"/>
         <color name="Header" rgba="#18c460ff"/>
+        <color name="EditableFrame" rgba="#18c460ff"/>
+        <color name="ReadOnlyText" rgba="#aab6c3ff"/>
+        <color name="ActionText" rgba="#0f1512ff"/>
+        <color name="ActionTextHighlighted" rgba="#f8fffaff"/>
+        <color name="ActionFrame" rgba="#0d8a43ff"/>
     </colors>
-    <template background-color="Background" background-color-draw-style="filled" class="CViewContainer" mouse-enabled="true" name="view" opacity="1" origin="0, 0" size="480, 290" transparent="false">
-        <view back-color="Frame" class="CTextLabel" font="~ NormalFontVeryBig" font-color="Header" frame-color="Frame" frame-width="1" mouse-enabled="false" opacity="1" origin="20, 15" size="440, 30" style-round-rect="true" text-alignment="center" title="VDO.Ninja WebRTC Bridge" transparent="false"/>
-        
-        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 60" size="160, 20" text-alignment="left" title="Connection Mode" transparent="true"/>
-        <view class="COptionMenu" control-tag="Param::Mode" menu-popup-style="true" default-value="0" font="~ NormalFont" font-color="InputText" frame-color="Frame" frame-width="1" max-value="1" min-value="0" mouse-enabled="true" opacity="1" origin="200, 58" size="240, 24" style-3D-in="false" style-no-frame="false" text-alignment="center" transparent="false"/>
+    <gradients>
+        <gradient name="ActionButtonGradient">
+            <color-stop rgba="#8bf7b7ff" start="0"/>
+            <color-stop rgba="#24cf6eff" start="1"/>
+        </gradient>
+        <gradient name="ActionButtonGradientHighlighted">
+            <color-stop rgba="#24cf6eff" start="0"/>
+            <color-stop rgba="#0f8f46ff" start="1"/>
+        </gradient>
+    </gradients>
+    <template background-color="Background" background-color-draw-style="filled" class="CViewContainer" mouse-enabled="true" name="view" opacity="1" origin="0, 0" size="720, 340" transparent="false">
+        <view back-color="Frame" class="CTextLabel" font="~ NormalFontVeryBig" font-color="Header" frame-color="Frame" frame-width="1" mouse-enabled="false" opacity="1" origin="20, 15" size="680, 30" style-round-rect="true" text-alignment="center" title="VDO.Ninja WebRTC Bridge" transparent="false"/>
 
-        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 100" size="160, 20" text-alignment="left" title="Stream ID" transparent="true"/>
-        <view class="CTextEdit" control-tag="Param::StreamId" font="~ NormalFont" font-color="InputText" frame-color="Frame" frame-width="1" immediate-text-change="false" mouse-enabled="true" opacity="1" origin="200, 98" size="240, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
+        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 60" size="170, 20" text-alignment="left" title="Connection Mode" transparent="true"/>
+        <view class="COptionMenu" control-tag="Param::Mode" menu-popup-style="true" default-value="0" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" max-value="1" min-value="0" mouse-enabled="true" opacity="1" origin="200, 58" size="330, 24" style-3D-in="false" style-no-frame="false" text-alignment="center" transparent="false"/>
 
-        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 140" size="160, 20" text-alignment="left" title="Room Name" transparent="true"/>
-        <view class="CTextEdit" control-tag="Param::RoomName" font="~ NormalFont" font-color="InputText" frame-color="Frame" frame-width="1" immediate-text-change="false" mouse-enabled="true" opacity="1" origin="200, 138" size="240, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
+        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 100" size="170, 20" text-alignment="left" title="Stream ID" transparent="true"/>
+        <view class="CTextEdit" control-tag="Param::StreamId" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" immediate-text-change="false" mouse-enabled="true" opacity="1" origin="200, 98" size="330, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
 
-        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 180" size="160, 20" text-alignment="left" title="Password" transparent="true"/>
-        <view class="CTextEdit" control-tag="Param::Password" font="~ NormalFont" font-color="InputText" frame-color="Frame" frame-width="1" immediate-text-change="false" mouse-enabled="true" opacity="1" origin="200, 178" size="240, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
+        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 140" size="170, 20" text-alignment="left" title="Room Name" transparent="true"/>
+        <view class="CTextEdit" control-tag="Param::RoomName" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" immediate-text-change="false" mouse-enabled="true" opacity="1" origin="200, 138" size="330, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
 
-        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 220" size="160, 20" text-alignment="left" title="Status" transparent="true"/>
-        <view class="CParamDisplay" control-tag="Param::Status" font="~ NormalFont" font-color="InputText" frame-color="Frame" frame-width="1" mouse-enabled="false" opacity="1" origin="200, 218" size="240, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false"/>
+        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 180" size="170, 20" text-alignment="left" title="Password" transparent="true"/>
+        <view class="CTextEdit" control-tag="Param::Password" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" immediate-text-change="false" mouse-enabled="true" opacity="1" origin="200, 178" secure-style="true" size="330, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
 
-        <view back-color="Background" class="CTextLabel" font="~ NormalFontSmall" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 260" size="440, 20" text-alignment="center" title="Advanced: Handshake URL is customizable via VST host state if needed." transparent="true"/>
+        <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 220" size="170, 20" text-alignment="left" title="Status (read-only)" transparent="true"/>
+        <view class="CParamDisplay" control-tag="Param::Status" font="~ NormalFont" font-color="ReadOnlyText" frame-color="Frame" frame-width="1" mouse-enabled="false" opacity="1" origin="200, 218" size="330, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false"/>
+
+        <view back-color="Background" class="CTextLabel" font="~ NormalFontSmall" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 260" size="170, 20" text-alignment="left" title="VDO.Ninja Link (read-only)" transparent="true"/>
+        <view class="CParamDisplay" control-tag="Param::PushLink" font="~ NormalFontSmall" font-color="ReadOnlyText" frame-color="Frame" frame-width="1" mouse-enabled="false" opacity="1" origin="200, 258" size="330, 24" style-3D-in="false" style-no-frame="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false"/>
+        <view class="CTextButton" control-tag="Param::CopyPushLink" default-value="0" font="~ NormalFontSmall" frame-color="ActionFrame" frame-color-highlighted="ActionFrame" frame-width="1" gradient="ActionButtonGradient" gradient-highlighted="ActionButtonGradientHighlighted" kick-style="true" max-value="1" min-value="0" mouse-enabled="true" opacity="1" origin="540, 258" round-radius="4" size="75, 24" text-alignment="center" text-color="ActionText" text-color-highlighted="ActionTextHighlighted" title="Copy" transparent="false" wants-focus="true"/>
+        <view class="CTextButton" control-tag="Param::ShowPushQr" default-value="0" font="~ NormalFontSmall" frame-color="ActionFrame" frame-color-highlighted="ActionFrame" frame-width="1" gradient="ActionButtonGradient" gradient-highlighted="ActionButtonGradientHighlighted" kick-style="true" max-value="1" min-value="0" mouse-enabled="true" opacity="1" origin="625, 258" round-radius="4" size="75, 24" text-alignment="center" text-color="ActionText" text-color-highlighted="ActionTextHighlighted" title="QR" transparent="false" wants-focus="true"/>
+        <view back-color="Background" class="CTextLabel" font="~ NormalFontSmall" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 305" size="680, 20" text-alignment="center" title="The displayed link follows the current mode." transparent="true"/>
     </template>
     <variables/>
     <custom/>
@@ -39,5 +58,8 @@
         <control-tag name="Param::Password" tag="4"/>
         <control-tag name="Param::DisableEncryption" tag="5"/>
         <control-tag name="Param::Status" tag="6"/>
+        <control-tag name="Param::PushLink" tag="7"/>
+        <control-tag name="Param::CopyPushLink" tag="9"/>
+        <control-tag name="Param::ShowPushQr" tag="11"/>
     </control-tags>
 </vstgui-ui-description>

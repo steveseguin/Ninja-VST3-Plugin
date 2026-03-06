@@ -1,18 +1,28 @@
 #include "PluginController.h"
+#include "qrcodegen.hpp"
 #include "StreamIdGenerator.h"
 
 #include <nlohmann/json.hpp>
+#include <openssl/sha.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 #include <base/source/fstring.h>
 #include <pluginterfaces/base/ibstream.h>
+#include <vstgui/lib/cclipboard.h>
 #include <vstgui/plugin-bindings/vst3editor.h>
 #include <vstgui/lib/platform/platformfactory.h>
 #if SMTG_OS_WINDOWS
 #include <vstgui/lib/platform/win32/win32factory.h>
+#include <windows.h>
+#include <shellapi.h>
 #endif
 
 namespace webrtc_vst {
@@ -20,6 +30,7 @@ namespace webrtc_vst {
 namespace {
 
 constexpr auto kDefaultHandshakeUrl = "wss://wss.vdo.ninja";
+constexpr auto kDefaultVdoHost = "vdo.ninja";
 
 std::string toAscii(const Steinberg::Vst::TChar* text) {
     if (!text) {
@@ -66,6 +77,299 @@ bool passwordImpliesDisableEncryption(const std::string& value) {
     }
 
     return lowered == "0" || lowered == "off" || lowered == "false";
+}
+
+std::string urlEncode(const std::string& text) {
+    auto isUnreserved = [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~';
+    };
+
+    std::string encoded;
+    encoded.reserve(text.size() * 3);
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (unsigned char ch : text) {
+        if (isUnreserved(ch)) {
+            encoded.push_back(static_cast<char>(ch));
+            continue;
+        }
+        encoded.push_back('%');
+        encoded.push_back(kHex[(ch >> 4) & 0x0F]);
+        encoded.push_back(kHex[ch & 0x0F]);
+    }
+    return encoded;
+}
+
+std::string encodeURIComponentCompat(const std::string& text) {
+    auto isUnescaped = [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '!' ||
+               ch == '~' || ch == '*' || ch == '\'' || ch == '(' || ch == ')';
+    };
+
+    std::string encoded;
+    encoded.reserve(text.size() * 3);
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (unsigned char ch : text) {
+        if (isUnescaped(ch)) {
+            encoded.push_back(static_cast<char>(ch));
+            continue;
+        }
+        encoded.push_back('%');
+        encoded.push_back(kHex[(ch >> 4) & 0x0F]);
+        encoded.push_back(kHex[ch & 0x0F]);
+    }
+    return encoded;
+}
+
+std::string buildPasswordHash(const std::string& password) {
+    const auto trimmedPassword = trimCopy(password);
+    if (trimmedPassword.empty() || passwordImpliesDisableEncryption(trimmedPassword)) {
+        return {};
+    }
+
+    const auto payload = encodeURIComponentCompat(trimmedPassword) + kDefaultVdoHost;
+    std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
+    SHA256(reinterpret_cast<const unsigned char*>(payload.data()), payload.size(), digest.data());
+
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hash;
+    hash.reserve(4);
+    for (int i = 0; i < 2; ++i) {
+        hash.push_back(kHex[(digest[i] >> 4) & 0x0F]);
+        hash.push_back(kHex[digest[i] & 0x0F]);
+    }
+    return hash;
+}
+
+std::string buildVdoLink(bool push,
+                         const std::string& streamId,
+                         const std::string& roomName,
+                         const std::string& password) {
+    const auto trimmedStream = trimCopy(streamId);
+    if (trimmedStream.empty()) {
+        return {};
+    }
+
+    std::ostringstream url;
+    url << "https://" << kDefaultVdoHost << "/?";
+    if (push) {
+        url << "push=" << urlEncode(trimmedStream);
+    } else {
+        url << "view=" << urlEncode(trimmedStream) << "&style=2";
+    }
+
+    const auto trimmedRoom = trimCopy(roomName);
+    if (!trimmedRoom.empty()) {
+        url << "&room=" << urlEncode(trimmedRoom);
+    }
+
+    const auto passwordHash = buildPasswordHash(password);
+    if (!passwordHash.empty()) {
+        url << "&hash=" << passwordHash;
+    }
+
+    return url.str();
+}
+
+std::string htmlEscape(const std::string& text) {
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (char ch : text) {
+        switch (ch) {
+            case '&':
+                escaped += "&amp;";
+                break;
+            case '<':
+                escaped += "&lt;";
+                break;
+            case '>':
+                escaped += "&gt;";
+                break;
+            case '"':
+                escaped += "&quot;";
+                break;
+            case '\'':
+                escaped += "&#39;";
+                break;
+            default:
+                escaped.push_back(ch);
+                break;
+        }
+    }
+    return escaped;
+}
+
+std::string buildQrSvg(const std::string& targetUrl) {
+    const auto qr = qrcodegen::QrCode::encodeText(targetUrl.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
+    constexpr int border = 4;
+    const int dimension = qr.getSize() + border * 2;
+
+    std::ostringstream modules;
+    for (int y = 0; y < qr.getSize(); ++y) {
+        for (int x = 0; x < qr.getSize(); ++x) {
+            if (qr.getModule(x, y)) {
+                modules << "M" << (x + border) << "," << (y + border) << "h1v1h-1z ";
+            }
+        }
+    }
+
+    std::ostringstream svg;
+    svg << "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 "
+        << dimension << " " << dimension
+        << "' shape-rendering='crispEdges' aria-hidden='true'>"
+        << "<rect width='100%' height='100%' fill='#ffffff'/>"
+        << "<path d='" << modules.str() << "' fill='#000000'/>"
+        << "</svg>";
+    return svg.str();
+}
+
+std::string buildQrViewerHtml(const std::string& label, const std::string& svgMarkup) {
+    std::ostringstream html;
+    html << "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+         << "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+         << "<title>" << htmlEscape(label) << " QR</title>"
+         << "<style>"
+         << ":root{color-scheme:light;font-family:Segoe UI,Arial,sans-serif;}"
+         << "body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f1115;color:#f5f7fa;}"
+         << ".card{width:min(92vw,520px);padding:24px;border-radius:20px;background:#1a1e26;"
+         << "box-shadow:0 24px 80px rgba(0,0,0,.45);text-align:center;}"
+         << ".qr{background:#fff;border-radius:16px;padding:20px;display:inline-block;line-height:0;}"
+         << ".qr svg{width:min(70vw,360px);height:auto;display:block;}"
+         << "h1{margin:0 0 10px;font-size:28px;}p{margin:10px 0 0;color:#c8d0da;line-height:1.5;}"
+         << "</style></head><body><main class='card'><h1>" << htmlEscape(label)
+         << "</h1><div class='qr'>" << svgMarkup
+         << "</div><p>Generated locally by WebRTC VST. No third-party QR service is used.</p>"
+         << "</main></body></html>";
+    return html.str();
+}
+
+std::string writeLocalQrViewer(const std::string& label, const std::string& targetUrl) {
+    try {
+        namespace fs = std::filesystem;
+        fs::path qrDir = fs::temp_directory_path() / "webrtc_vst_qr";
+        fs::create_directories(qrDir);
+
+        std::string fileStem = "share_qr";
+        if (label.find("push") != std::string::npos) {
+            fileStem = "push_qr";
+        } else if (label.find("view") != std::string::npos) {
+            fileStem = "view_qr";
+        }
+
+        fs::path htmlPath = qrDir / ("webrtc_vst_" + fileStem + ".html");
+        std::ofstream output(htmlPath, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            return {};
+        }
+
+        output << buildQrViewerHtml(label, buildQrSvg(targetUrl));
+        output.close();
+        if (!output) {
+            return {};
+        }
+        return htmlPath.string();
+    } catch (...) {
+        return {};
+    }
+}
+
+bool copyToClipboard(const std::string& text) {
+    if (text.empty()) {
+        return false;
+    }
+#if SMTG_OS_WINDOWS
+    const int wideChars = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+    if (wideChars <= 0) {
+        return false;
+    }
+
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(wideChars) * sizeof(wchar_t));
+    if (!memory) {
+        return false;
+    }
+
+    auto* buffer = static_cast<wchar_t*>(GlobalLock(memory));
+    if (!buffer) {
+        GlobalFree(memory);
+        return false;
+    }
+
+    if (MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, buffer, wideChars) <= 0) {
+        GlobalUnlock(memory);
+        GlobalFree(memory);
+        return false;
+    }
+    GlobalUnlock(memory);
+
+    bool opened = false;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        if (OpenClipboard(nullptr)) {
+            opened = true;
+            break;
+        }
+        Sleep(20);
+    }
+    if (!opened) {
+        GlobalFree(memory);
+        return false;
+    }
+
+    if (!EmptyClipboard()) {
+        CloseClipboard();
+        GlobalFree(memory);
+        return false;
+    }
+
+    if (SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+        CloseClipboard();
+        GlobalFree(memory);
+        return false;
+    }
+
+    CloseClipboard();
+    return true;
+#else
+    return VSTGUI::CClipboard::setString(text.c_str());
+#endif
+}
+
+#if SMTG_OS_WINDOWS
+std::wstring asciiToWide(const std::string& text) {
+    std::wstring wide;
+    wide.reserve(text.size());
+    for (unsigned char ch : text) {
+        wide.push_back(static_cast<wchar_t>(ch));
+    }
+    return wide;
+}
+#endif
+
+bool openExternalUrl(const std::string& url) {
+    if (url.empty()) {
+        return false;
+    }
+#if SMTG_OS_WINDOWS
+    const auto wideUrl = asciiToWide(url);
+    const auto result = reinterpret_cast<intptr_t>(ShellExecuteW(nullptr,
+                                                                 L"open",
+                                                                 wideUrl.c_str(),
+                                                                 nullptr,
+                                                                 nullptr,
+                                                                 SW_SHOWNORMAL));
+    return result > 32;
+#elif SMTG_OS_LINUX
+    std::string escapedUrl;
+    escapedUrl.reserve(url.size());
+    for (char ch : url) {
+        if (ch == '"' || ch == '\\') {
+            escapedUrl.push_back('\\');
+        }
+        escapedUrl.push_back(ch);
+    }
+    const auto command = "xdg-open \"" + escapedUrl + "\" >/dev/null 2>&1";
+    return std::system(command.c_str()) == 0;
+#else
+    return false;
+#endif
 }
 } // namespace
 
@@ -162,6 +466,38 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
     disableInfo.flags |= Steinberg::Vst::ParameterInfo::kIsReadOnly;
     disableInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
 
+    auto* pushLinkParam = new StringParameter(STR16("VDO.Ninja Link"), kParamPushLink);
+    parameters.addParameter(pushLinkParam);
+    pushLinkParam->setDefaultString("");
+    pushLinkParam->setString("");
+    auto& pushLinkInfo = const_cast<Steinberg::Vst::ParameterInfo&>(pushLinkParam->getInfo());
+    pushLinkInfo.flags |= Steinberg::Vst::ParameterInfo::kIsReadOnly;
+    pushLinkInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
+
+    auto* copyPushParam = new Steinberg::Vst::RangeParameter(STR16("Copy VDO.Ninja Link"),
+                                                              kParamCopyPushLink,
+                                                              STR16(""),
+                                                              0.0,
+                                                              1.0,
+                                                              0.0);
+    copyPushParam->setPrecision(0);
+    parameters.addParameter(copyPushParam);
+    auto& copyPushInfo = const_cast<Steinberg::Vst::ParameterInfo&>(copyPushParam->getInfo());
+    copyPushInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
+
+    auto* showPushQrParam = new Steinberg::Vst::RangeParameter(STR16("Show VDO.Ninja Link QR"),
+                                                                kParamShowPushQr,
+                                                                STR16(""),
+                                                                0.0,
+                                                                1.0,
+                                                                0.0);
+    showPushQrParam->setPrecision(0);
+    parameters.addParameter(showPushQrParam);
+    auto& showPushQrInfo = const_cast<Steinberg::Vst::ParameterInfo&>(showPushQrParam->getInfo());
+    showPushQrInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
+
+    updateShareLinks();
+
     return Steinberg::kResultOk;
 }
 
@@ -207,6 +543,7 @@ void WebRTCController::applyStateJson(const std::string& jsonString) {
         }
 
         updateDisableEncryptionFromPassword();
+        updateShareLinks();
     } catch (...) {
         // ignore malformed state
     }
@@ -296,10 +633,122 @@ void WebRTCController::updateDisableEncryptionFromPassword() {
     }
 }
 
+void WebRTCController::setStringParameterAndNotify(Steinberg::Vst::ParamID id, const std::string& value) {
+    auto* param = findStringParameter(id);
+    if (!param || param->getString() == value) {
+        return;
+    }
+
+    param->setString(value);
+    if (componentHandler) {
+        componentHandler->beginEdit(id);
+        componentHandler->performEdit(id, param->getNormalized());
+        componentHandler->endEdit(id);
+    }
+}
+
+void WebRTCController::updateShareLinks() {
+    auto* modeParam = parameters.getParameter(kParamMode);
+    const bool isPublish = modeParam && modeParam->getNormalized() >= 0.5;
+
+    const auto streamId = [this]() {
+        if (auto* param = findStringParameter(kParamStreamId)) {
+            return param->getString();
+        }
+        return std::string{};
+    }();
+
+    const auto roomName = [this]() {
+        if (auto* param = findStringParameter(kParamRoomName)) {
+            return param->getString();
+        }
+        return std::string{};
+    }();
+
+    const auto password = [this]() {
+        if (auto* param = findStringParameter(kParamPassword)) {
+            return param->getString();
+        }
+        return std::string{};
+    }();
+
+    setStringParameterAndNotify(kParamPushLink, buildVdoLink(!isPublish, streamId, roomName, password));
+}
+
+void WebRTCController::postControllerStatus(const std::string& status) {
+    setStringParameterAndNotify(kParamStatus, status);
+}
+
+void WebRTCController::handleActionButton(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue value) {
+    auto* actionParam = parameters.getParameter(tag);
+    if (!actionParam) {
+        return;
+    }
+
+    if (value >= 0.5) {
+        const auto runCopyAction = [this](Steinberg::Vst::ParamID linkParamId, const char* label) {
+            auto* linkParam = findStringParameter(linkParamId);
+            if (!linkParam) {
+                postControllerStatus(std::string("Error: missing ") + label);
+                return;
+            }
+
+            const auto link = linkParam->getString();
+            if (!copyToClipboard(link)) {
+                postControllerStatus(std::string("Error: failed to copy ") + label);
+            }
+        };
+
+        const auto runQrAction = [this](Steinberg::Vst::ParamID linkParamId, const char* label) {
+            auto* linkParam = findStringParameter(linkParamId);
+            if (!linkParam) {
+                postControllerStatus(std::string("Error: missing ") + label);
+                return;
+            }
+
+            const auto link = linkParam->getString();
+            if (link.empty()) {
+                postControllerStatus(std::string("Error: ") + label + " is empty");
+                return;
+            }
+
+            const auto viewerPath = writeLocalQrViewer(label, link);
+            if (viewerPath.empty() || !openExternalUrl(viewerPath)) {
+                postControllerStatus(std::string("Error: failed to open ") + label + " QR");
+            }
+        };
+
+        switch (tag) {
+            case kParamCopyPushLink:
+                runCopyAction(kParamPushLink, "VDO.Ninja link");
+                break;
+            case kParamShowPushQr:
+                runQrAction(kParamPushLink, "VDO.Ninja link");
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (actionParam->getNormalized() != 0.0) {
+        actionParam->setNormalized(0.0);
+        if (componentHandler) {
+            componentHandler->beginEdit(tag);
+            componentHandler->performEdit(tag, 0.0);
+            componentHandler->endEdit(tag);
+        }
+    }
+}
+
 Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vst::ParamID tag,
                                                                    Steinberg::Vst::ParamValue value) {
     const auto result = EditControllerEx1::setParamNormalized(tag, value);
     if (result != Steinberg::kResultOk) {
+        return result;
+    }
+
+    if (tag == kParamCopyPushLink || tag == kParamShowPushQr) {
+        handleActionButton(tag, value);
         return result;
     }
 
@@ -309,11 +758,18 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
         } else {
             updateDisableEncryptionFromPassword();
         }
+        updateShareLinks();
         return result;
     }
 
     if (tag == kParamPassword) {
         updateDisableEncryptionFromPassword();
+        updateShareLinks();
+        return result;
+    }
+
+    if (tag == kParamMode || tag == kParamStreamId || tag == kParamRoomName) {
+        updateShareLinks();
     }
 
     return result;

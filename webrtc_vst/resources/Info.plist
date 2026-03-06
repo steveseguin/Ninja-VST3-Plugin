@@ -9,13 +9,13 @@
     <key>CFBundleIdentifier</key>
     <string>com.example.webrtc_vst</string>
     <key>CFBundleName</key>
-    <string>WebRTC VST</string>
+    <string>VDO.Ninja WebRTC Bridge</string>
     <key>CFBundlePackageType</key>
     <string>BRPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.2.2</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>0.2.2</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.13</string>
 </dict>
