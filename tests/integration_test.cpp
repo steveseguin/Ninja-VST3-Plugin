@@ -6,13 +6,17 @@
 #include <public.sdk/source/vst/hosting/module.h>
 #include <public.sdk/source/vst/hosting/plugprovider.h>
 #include <pluginterfaces/base/funknownimpl.h>
+#include <pluginterfaces/base/ibstream.h>
 #include <pluginterfaces/vst/ivstaudioprocessor.h>
 #include <pluginterfaces/vst/ivstcomponent.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/vst/ivstprocesscontext.h>
 #include <pluginterfaces/vst/vsttypes.h>
 
+#include "../webrtc_vst/src/ParameterIDs.h"
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -33,6 +37,70 @@ using namespace Steinberg::Vst;
 constexpr double kSampleRate = 48000.0;
 constexpr int32 kBlockSize = 512;  // Audacity uses 512
 constexpr int32 kNumChannels = 2;
+
+class StringStream : public IBStream {
+public:
+    explicit StringStream(const std::string& data) : data_(data) {}
+
+    tresult PLUGIN_API queryInterface(const TUID, void**) override { return kNoInterface; }
+    uint32 PLUGIN_API addRef() override { return ++refCount_; }
+    uint32 PLUGIN_API release() override {
+        if (--refCount_ == 0) {
+            delete this;
+            return 0;
+        }
+        return refCount_;
+    }
+
+    tresult PLUGIN_API read(void* buffer, int32 numBytes, int32* numBytesRead) override {
+        const int32 available = static_cast<int32>(data_.size()) - position_;
+        const int32 toRead = std::min(numBytes, available);
+        if (toRead > 0) {
+            std::memcpy(buffer, data_.data() + position_, static_cast<size_t>(toRead));
+        }
+        position_ += toRead;
+        if (numBytesRead) {
+            *numBytesRead = toRead;
+        }
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API write(void*, int32, int32*) override { return kNotImplemented; }
+
+    tresult PLUGIN_API seek(int64 pos, int32 mode, int64* result) override {
+        if (mode == kIBSeekSet) {
+            position_ = static_cast<int32>(pos);
+        } else if (mode == kIBSeekCur) {
+            position_ += static_cast<int32>(pos);
+        } else if (mode == kIBSeekEnd) {
+            position_ = static_cast<int32>(data_.size()) + static_cast<int32>(pos);
+        }
+        if (result) {
+            *result = position_;
+        }
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API tell(int64* pos) override {
+        if (pos) {
+            *pos = position_;
+        }
+        return kResultOk;
+    }
+
+private:
+    std::string data_;
+    int32 position_{0};
+    std::atomic<uint32> refCount_{1};
+};
+
+std::string string128ToAscii(const String128 text) {
+    std::string result;
+    for (int i = 0; i < 128 && text[i] != 0; ++i) {
+        result.push_back(static_cast<uint32_t>(text[i]) <= 0x7F ? static_cast<char>(text[i]) : '?');
+    }
+    return result;
+}
 
 // ============================================================================
 // Test Result Tracking
@@ -193,6 +261,44 @@ public:
         }
 
         active_ = false;
+        return true;
+    }
+
+    bool injectState(const std::string& json) {
+        if (!component_ || !controller_) {
+            lastError_ = "Plugin not fully loaded";
+            return false;
+        }
+
+        auto* componentState = new StringStream(json);
+        component_->setState(componentState);
+        componentState->release();
+
+        auto* controllerState = new StringStream(json);
+        const auto result = controller_->setComponentState(controllerState);
+        controllerState->release();
+        if (result != kResultOk) {
+            lastError_ = "Controller state sync failed";
+            return false;
+        }
+
+        return true;
+    }
+
+    bool readStringParam(ParamID id, std::string& value) {
+        if (!controller_) {
+            lastError_ = "Controller not available";
+            return false;
+        }
+
+        String128 text{};
+        const auto normalized = controller_->getParamNormalized(id);
+        if (controller_->getParamStringByValue(id, normalized, text) != kResultOk) {
+            lastError_ = "Failed to read controller parameter";
+            return false;
+        }
+
+        value = string128ToAscii(text);
         return true;
     }
 
@@ -463,6 +569,48 @@ TestResult test_long_running_session(const std::string& pluginPath) {
     return {"LongRunningSession(10s)", true, "", duration};
 }
 
+TestResult test_room_view_link_uses_solo(const std::string& pluginPath) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    VST3HostSimulator host(pluginPath);
+    if (!host.loadPlugin()) {
+        return {"RoomViewLinkUsesSolo", false, host.getLastError()};
+    }
+
+    if (!host.injectState(R"({"mode":"publish","streamId":"room-seed","roomName":"mix-room"})")) {
+        return {"RoomViewLinkUsesSolo", false, host.getLastError()};
+    }
+
+    std::string viewLink;
+    if (!host.readStringParam(webrtc_vst::kParamPushLink, viewLink)) {
+        return {"RoomViewLinkUsesSolo", false, host.getLastError()};
+    }
+
+    const std::string expectedViewLink = "https://vdo.ninja/?view=room-seed&style=2&room=mix-room&solo";
+    if (viewLink != expectedViewLink) {
+        return {"RoomViewLinkUsesSolo", false, "Unexpected view link: " + viewLink};
+    }
+
+    if (!host.injectState(R"({"mode":"play","streamId":"return-feed","roomName":"mix-room"})")) {
+        return {"RoomViewLinkUsesSolo", false, host.getLastError()};
+    }
+
+    std::string pushLink;
+    if (!host.readStringParam(webrtc_vst::kParamPushLink, pushLink)) {
+        return {"RoomViewLinkUsesSolo", false, host.getLastError()};
+    }
+
+    const std::string expectedPushLink = "https://vdo.ninja/?push=return-feed&room=mix-room";
+    if (pushLink != expectedPushLink) {
+        return {"RoomViewLinkUsesSolo", false, "Unexpected push link: " + pushLink};
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration<double, std::milli>(end - start).count();
+
+    return {"RoomViewLinkUsesSolo", true, "", duration};
+}
+
 // ============================================================================
 // Main Test Runner
 // ============================================================================
@@ -509,6 +657,7 @@ int main(int argc, char** argv) {
     suite.addResult(test_rapid_open_close(pluginPath));
     suite.addResult(test_process_while_deactivating(pluginPath));
     suite.addResult(test_long_running_session(pluginPath));
+    suite.addResult(test_room_view_link_uses_solo(pluginPath));
 
     // Print summary
     suite.printSummary();

@@ -160,6 +160,9 @@ std::string buildVdoLink(bool push,
     const auto trimmedRoom = trimCopy(roomName);
     if (!trimmedRoom.empty()) {
         url << "&room=" << urlEncode(trimmedRoom);
+        if (!push) {
+            url << "&solo";
+        }
     }
 
     const auto passwordHash = buildPasswordHash(password);
