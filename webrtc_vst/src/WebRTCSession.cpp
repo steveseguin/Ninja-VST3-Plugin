@@ -876,6 +876,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         std::optional<std::string> statusMessage;
         bool resetMediaFlags = false;
         bool refreshPlayRequest = false;
+        bool reconnectAfterPeerLoss = false;
         std::string refreshReason;
         {
             std::lock_guard<SpinLock> lock(mutex_);
@@ -906,9 +907,17 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection failed";
-                    if (config_.mode == ConnectionMode::Play) {
-                        refreshPlayRequest = true;
-                        refreshReason = "peer failed";
+                    if (signalingClient_ && !signalingClient_->isConnected() &&
+                        peerSessions_.empty() &&
+                        started_ &&
+                        !intentionalDisconnect_.load(std::memory_order_acquire) &&
+                        config_.enableAutoReconnect) {
+                        reconnectAfterPeerLoss = true;
+                    } else if (config_.mode == ConnectionMode::Play) {
+                        if (signalingClient_ && signalingClient_->isConnected()) {
+                            refreshPlayRequest = true;
+                            refreshReason = "peer failed";
+                        }
                     }
                     break;
                 case rtc::PeerConnection::State::Closed:
@@ -917,9 +926,17 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection closed";
-                    if (config_.mode == ConnectionMode::Play) {
-                        refreshPlayRequest = true;
-                        refreshReason = "peer closed";
+                    if (signalingClient_ && !signalingClient_->isConnected() &&
+                        peerSessions_.empty() &&
+                        started_ &&
+                        !intentionalDisconnect_.load(std::memory_order_acquire) &&
+                        config_.enableAutoReconnect) {
+                        reconnectAfterPeerLoss = true;
+                    } else if (config_.mode == ConnectionMode::Play) {
+                        if (signalingClient_ && signalingClient_->isConnected()) {
+                            refreshPlayRequest = true;
+                            refreshReason = "peer closed";
+                        }
                     }
                     break;
                 default:
@@ -938,6 +955,10 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
 
         if (refreshPlayRequest) {
             requestPlayRefresh(refreshReason);
+        }
+
+        if (reconnectAfterPeerLoss) {
+            attemptReconnect(false);
         }
     });
 
@@ -1496,21 +1517,33 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                 bool notifyDisconnect = false;
                 bool shouldReconnect = false;
                 bool idlePlayMode = false;
+                bool preservePeers = false;
                 {
                     std::lock_guard<SpinLock> innerLock(mutex_);
                     notifyDisconnect = started_;
                     const bool hadPeers = !peerSessions_.empty();
-                    resetAllPeerConnections();
-                    roomJoined_ = false;
-                    roleAnnounced_ = false;
+                    preservePeers = hadPeers;
+                    if (!preservePeers) {
+                        resetAllPeerConnections();
+                        roomJoined_ = false;
+                        roleAnnounced_ = false;
+                    }
                     idlePlayMode = (config_.mode == ConnectionMode::Play) && !hadPeers;
                     shouldReconnect = started_ &&
                                       !intentionalDisconnect_.load(std::memory_order_acquire) &&
-                                      config_.enableAutoReconnect;
+                                      config_.enableAutoReconnect &&
+                                      !preservePeers;
                 }
-                publishingAudio_.store(false, std::memory_order_relaxed);
-                receivingAudio_.store(false, std::memory_order_relaxed);
-                if (shouldReconnect) {
+                if (!preservePeers) {
+                    publishingAudio_.store(false, std::memory_order_relaxed);
+                    receivingAudio_.store(false, std::memory_order_relaxed);
+                }
+                if (preservePeers) {
+                    log("Preserving active peer sessions after signaling disconnect");
+                    if (notifyDisconnect) {
+                        emitStatus("Peer active; signaling disconnected");
+                    }
+                } else if (shouldReconnect) {
                     attemptReconnect(idlePlayMode);
                 } else if (notifyDisconnect) {
                     emitStatus("Signaling disconnected");
@@ -1683,9 +1716,21 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
     }
 
     if (message.contains("id") && message["id"].is_string()) {
-        std::lock_guard<SpinLock> lock(mutex_);
-        selfUuid_ = message["id"].get<std::string>();
-        log("Assigned signaling UUID: " + selfUuid_);
+        bool shouldRefreshPlay = false;
+        std::string assignedId;
+        {
+            std::lock_guard<SpinLock> lock(mutex_);
+            assignedId = message["id"].get<std::string>();
+            selfUuid_ = assignedId;
+            shouldRefreshPlay = started_ &&
+                                config_.mode == ConnectionMode::Play &&
+                                roleAnnounced_ &&
+                                peerSessions_.empty();
+        }
+        log("Assigned signaling UUID: " + assignedId);
+        if (shouldRefreshPlay) {
+            requestPlayRefresh("signaling id assigned");
+        }
         return;
     }
 
@@ -2127,21 +2172,30 @@ void WebRTCSession::reconnectInternal() {
             log("Signaling connection closed during reconnect");
             bool shouldRetry = false;
             bool idlePlayMode = false;
+            bool preservePeers = false;
             {
                 std::lock_guard<SpinLock> innerLock(mutex_);
                 const bool hadPeers = !peerSessions_.empty();
-                resetAllPeerConnections();
-                roomJoined_ = false;
-                roleAnnounced_ = false;
+                preservePeers = hadPeers;
+                if (!preservePeers) {
+                    resetAllPeerConnections();
+                    roomJoined_ = false;
+                    roleAnnounced_ = false;
+                }
                 idlePlayMode = (config_.mode == ConnectionMode::Play) && !hadPeers;
                 shouldRetry = started_ &&
                               !intentionalDisconnect_.load(std::memory_order_acquire) &&
-                              config_.enableAutoReconnect;
+                              config_.enableAutoReconnect &&
+                              !preservePeers;
             }
-            publishingAudio_.store(false, std::memory_order_relaxed);
-            receivingAudio_.store(false, std::memory_order_relaxed);
+            if (!preservePeers) {
+                publishingAudio_.store(false, std::memory_order_relaxed);
+                receivingAudio_.store(false, std::memory_order_relaxed);
+            }
             isReconnecting_.store(false, std::memory_order_release);
-            if (shouldRetry) {
+            if (preservePeers) {
+                emitStatus("Peer active; signaling disconnected");
+            } else if (shouldRetry) {
                 attemptReconnect(idlePlayMode);
             } else {
                 emitStatus("Signaling disconnected");
