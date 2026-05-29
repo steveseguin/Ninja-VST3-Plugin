@@ -21,6 +21,6 @@
   "license": "AGPL-3.0-only",
   "dependencies": {
     "@roamhq/wrtc": "^0.9.1",
-    "ws": "^8.18.3"
+    "ws": "^8.20.1"
   }
 }
