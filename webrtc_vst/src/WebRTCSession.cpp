@@ -1218,8 +1218,16 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                 }
             }
 
-            dc->onOpen([this, keyCopy, dc]() {
+            // A channel must not own itself through its callbacks. Otherwise
+            // async close can destroy the final facade reference while clearing
+            // onMessage, re-entering Channel::~Channel/resetCallbacks.
+            const std::weak_ptr<rtc::DataChannel> weakDc = dc;
+            dc->onOpen([this, weakDc]() {
                 if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
+                const auto dc = weakDc.lock();
+                if (!dc) {
                     return;
                 }
                 log("Datachannel opened, sending viewer preferences");
@@ -1236,8 +1244,12 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                 }
             });
 
-            dc->onMessage([this, keyCopy, dc](auto data) {
+            dc->onMessage([this, keyCopy, weakDc](auto data) {
                 if (shuttingDown_.load(std::memory_order_acquire)) {
+                    return;
+                }
+                const auto dc = weakDc.lock();
+                if (!dc) {
                     return;
                 }
                 // Handle incoming datachannel messages

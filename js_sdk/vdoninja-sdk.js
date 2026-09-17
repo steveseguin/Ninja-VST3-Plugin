@@ -6388,7 +6388,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
 
                 // Store pending request
                 if (!this._pendingRequests) {
-                    this._pendingRequests = {};
+                    this._pendingRequests = Object.create(null);
                 }
                 
                 this._pendingRequests[requestId] = {
@@ -6436,7 +6436,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
          */
         onRequest(requestType, handler) {
             if (!this._requestHandlers) {
-                this._requestHandlers = {};
+                this._requestHandlers = Object.create(null);
             }
             this._requestHandlers[requestType] = handler;
         }
@@ -6502,11 +6502,13 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
 
             // Handle requests
             if (data.type === 'request') {
-                if (this._requestHandlers && this._requestHandlers[data.requestType]) {
+                if (typeof data.requestType === 'string' && this._requestHandlers &&
+                    Object.prototype.hasOwnProperty.call(this._requestHandlers, data.requestType) &&
+                    typeof this._requestHandlers[data.requestType] === 'function') {
                     const handler = this._requestHandlers[data.requestType];
                     
                     // Execute handler (may be async)
-                    Promise.resolve(handler(data.data, uuid))
+                    Promise.resolve().then(() => handler(data.data, uuid))
                         .then(responseData => {
                             // Send response
                             this.respond(data.requestId, responseData, uuid);
@@ -6523,7 +6525,8 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
 
             // Handle responses
             if (data.type === 'response') {
-                if (this._pendingRequests && this._pendingRequests[data.requestId]) {
+                if (typeof data.requestId === 'string' && this._pendingRequests &&
+                    Object.prototype.hasOwnProperty.call(this._pendingRequests, data.requestId)) {
                     const pending = this._pendingRequests[data.requestId];
                     clearTimeout(pending.timeoutId);
                     

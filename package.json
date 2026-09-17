@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test:security": "node tools/tests/integration/ws_security.test.js",
-    "test:sdk": "node tools/tests/integration/sdk_publish_options.test.js",
+    "test:sdk": "node tools/tests/integration/sdk_publish_options.test.js && node tools/tests/integration/sdk_requests.test.js",
     "test:cli-loopback": "node tools/tests/integration/cli_loopback.test.js",
     "test:publish-audio": "node tools/tests/integration/publish_audio.test.js",
     "test:play-request-audio-only": "node tools/tests/integration/play_request_audio_only.test.js",

@@ -359,6 +359,15 @@ public:
         return true;
     }
 
+    bool hasOutputSignal() const {
+        for (const auto& channel : outputBuffers_) {
+            for (float sample : channel) {
+                if (std::abs(sample) > 0.001f) return true;
+            }
+        }
+        return false;
+    }
+
     bool checkPublishSilenceFlags(bool inPlace) {
         AudioBusBuffers inputBus{};
         inputBus.numChannels = kNumChannels;
@@ -672,6 +681,43 @@ TestResult test_publish_silence_flags(const std::string& pluginPath, bool inPlac
     return {name, true};
 }
 
+TestResult test_live_peer_teardown(const std::string& pluginPath) {
+    const char* value = std::getenv("WEBRTC_VST_TEST_LIVE_STREAM");
+    const std::string streamId = value ? value : "";
+    if (streamId.empty() || !std::all_of(streamId.begin(), streamId.end(), [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   (c >= '0' && c <= '9') || c == '-' || c == '_';
+        })) {
+        return {"LivePeerTeardown", false, "Set WEBRTC_VST_TEST_LIVE_STREAM to an owned tone publisher ID"};
+    }
+    // A DAW retains the module while replacing live instances. Keep the code
+    // loaded while asynchronous peer teardown finishes between replacements.
+    std::string error;
+    const auto module = VST3::Hosting::Module::create(pluginPath, error);
+    if (!module) return {"LivePeerTeardown", false, error};
+    for (int cycle = 0; cycle < 4; ++cycle) {
+        VST3HostSimulator host(pluginPath);
+        if (!host.loadPlugin() || !host.injectState(
+                "{\"mode\":\"play\",\"streamId\":\"" + streamId +
+                "\",\"handshakeUrl\":\"wss://wss.vdo.ninja\",\"password\":\"\"}") ||
+            !host.setupProcessing() || !host.activate()) {
+            return {"LivePeerTeardown", false, host.getLastError()};
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        int audibleBlocks = 0;
+        while (std::chrono::steady_clock::now() < deadline && audibleBlocks < 50) {
+            if (!host.process(1)) return {"LivePeerTeardown", false, host.getLastError()};
+            if (host.hasOutputSignal()) ++audibleBlocks;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (audibleBlocks < 50) return {"LivePeerTeardown", false, "Live audio was not sustained before teardown"};
+        host.cleanup();
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::cout << "Live peer teardown cycle " << cycle + 1 << "/4 passed" << std::endl;
+    }
+    return {"LivePeerTeardown", true};
+}
+
 int main(int argc, char** argv) {
     std::cout << std::string(60, '=') << std::endl;
     std::cout << "WebRTC VST3 Plugin - Integration Tests" << std::endl;
@@ -706,6 +752,12 @@ int main(int argc, char** argv) {
     std::cout << std::string(60, '-') << std::endl;
 
     TestSuite suite;
+
+    if (argc > 2 && std::string(argv[2]) == "--live-teardown") {
+        suite.addResult(test_live_peer_teardown(pluginPath));
+        suite.printSummary();
+        return suite.allPassed() ? 0 : 1;
+    }
 
     // Run tests
     suite.addResult(test_basic_load_unload(pluginPath));

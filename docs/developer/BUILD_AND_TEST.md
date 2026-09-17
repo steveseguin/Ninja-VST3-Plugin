@@ -61,9 +61,21 @@ plugin instances. The sequential cases exercise module load/unload separately.
 To isolate concurrent instance creation, pass the bundle path followed by
 `--concurrent-only` to `build/webrtc_vst_win/bin/Release/webrtc_vst_stress_test.exe`.
 
+For the live datachannel teardown regression, start an owned tone publisher with
+the default password and run:
+
+```powershell
+$env:WEBRTC_VST_TEST_LIVE_STREAM = 'your-owned-tone-stream'
+.\build\webrtc_vst_win\bin\Release\webrtc_vst_integration_test.exe build/webrtc_vst_win/VST3/Release/webrtc_vst.vst3 --live-teardown
+```
+
+This opt-in check requires sustained received audio before each of four instance
+replacements. It retains a host module while asynchronous teardown completes.
+
 ```bash
 npm install
 npm run test:security
+npm run test:sdk
 npm run test:integration
 npm run test:integration:live
 ```
@@ -71,6 +83,7 @@ npm run test:integration:live
 Notes:
 
 - `test:security` verifies the installed WebSocket dependency's close-reason and retained-fragment/chunk protections, plus normal compressed signaling. It only uses loopback and also runs at the start of `test:integration`.
+- `test:sdk` checks publisher options and safe request/response dispatch offline.
 - `test:integration` runs `audio-only` + loopback/publish tests. These use network signaling; the audio-only receive check also needs an active publisher selected with `WEBRTC_TEST_STREAM_ID` (default `steve1234`). An offline publisher is not evidence of a plugin failure.
 - `test:integration:local` creates its own sources for plugin-to-plugin and plugin-to-SDK audio tests, but still needs network signaling.
 - `test:integration:live` is a live room smoke test and depends on network + active remote audio source.
