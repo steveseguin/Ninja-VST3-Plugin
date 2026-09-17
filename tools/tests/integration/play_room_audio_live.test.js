@@ -73,7 +73,7 @@ function processChunk(prefix, chunk) {
         if (line.includes("Sent viewer preferences:")) {
             viewerPrefsSent = true;
         }
-        if (line.includes("Mapped publisher datachannel to peer session")) {
+        if (line.includes("Stored datachannel in peer session")) {
             datachannelMappedToPeer = true;
         }
         if (line.includes("Remote audio track attached")) {
@@ -113,7 +113,7 @@ const cli = spawn(cliExecutable, [], {
         WEBRTC_VST_LOG_SIGNALING: "1",
         WEBRTC_CLI_HOST_MONITOR_OUTPUT: "1",
         WEBRTC_CLI_HOST_WARMUP_MS: "2500",
-        WEBRTC_CLI_HOST_RUNTIME_MS: String(runtimeMs),
+        WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: String(runtimeMs),
         WEBRTC_CLI_HOST_BLOCK_SLEEP_MS: "5",
         WEBRTC_CLI_HOST_TIMEOUT_MS: String(timeoutMs)
     },

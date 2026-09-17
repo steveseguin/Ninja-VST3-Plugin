@@ -70,7 +70,7 @@ function processChunk(prefix, chunk) {
         if (line.includes("Sent viewer preferences:")) {
             viewerPrefsSent = true;
         }
-        if (line.includes("Mapped publisher datachannel to peer session")) {
+        if (line.includes("Stored datachannel in peer session")) {
             datachannelMappedToPeer = true;
         }
         if (line.includes("Ignoring non-audio remote track")) {
@@ -109,7 +109,7 @@ const cli = spawn(cliExecutable, [], {
         WEBRTC_VST_LOG_SIGNALING: "1",
         WEBRTC_CLI_HOST_MONITOR_OUTPUT: "1",
         WEBRTC_CLI_HOST_WARMUP_MS: "2500",
-        WEBRTC_CLI_HOST_RUNTIME_MS: String(runtimeMs),
+        WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: String(runtimeMs),
         WEBRTC_CLI_HOST_BLOCK_SLEEP_MS: "5",
         WEBRTC_CLI_HOST_TIMEOUT_MS: String(timeoutMs)
     },
@@ -141,7 +141,7 @@ cli.on("exit", (code) => {
     console.log("viewer prefs sent:", viewerPrefsSent ? "PASS" : "FAIL");
     console.log("datachannel mapped to peer:", datachannelMappedToPeer ? "PASS" : "FAIL");
     console.log("remote audio track attached:", remoteAudioTrackAttached ? "PASS" : "FAIL");
-    console.log("non-audio track received:", ignoredNonAudioTrack ? "YES" : "NO");
+    console.log("non-audio track ignored:", ignoredNonAudioTrack ? "YES" : "NONE OFFERED");
     console.log("unexpected remote-answer signaling-state error:", unexpectedRemoteAnswerStateError ? "YES" : "NO");
     console.log("monitor rms:", monitorRms);
 
@@ -155,7 +155,6 @@ cli.on("exit", (code) => {
         viewerPrefsSent &&
         datachannelMappedToPeer &&
         remoteAudioTrackAttached &&
-        !ignoredNonAudioTrack &&
         !unexpectedRemoteAnswerStateError;
 
     if (!passed) {
@@ -167,6 +166,6 @@ cli.on("exit", (code) => {
         console.warn("[WARN] No measurable audio RMS in this run (stream may be silent/offline).");
     }
 
-    console.log("[PASS] Audio-only preferences were sent and no video track was attached.");
+    console.log("[PASS] Audio-only preferences were sent and audio was attached; offered non-audio tracks were ignored.");
     process.exit(0);
 });

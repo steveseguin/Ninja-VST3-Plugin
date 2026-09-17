@@ -17,8 +17,8 @@ Write-Host "============================================================" -Foreg
 $rootDir = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $rootDir "build\webrtc_vst_win"
 $pluginPath = Join-Path $buildDir "VST3\Release\webrtc_vst.vst3"
-$integrationTest = Join-Path $buildDir "tests\Release\webrtc_vst_integration_test.exe"
-$stressTest = Join-Path $buildDir "tests\Release\webrtc_vst_stress_test.exe"
+$integrationTest = Join-Path $buildDir "bin\Release\webrtc_vst_integration_test.exe"
+$stressTest = Join-Path $buildDir "bin\Release\webrtc_vst_stress_test.exe"
 
 # Build
 if (-not $TestOnly) {

@@ -37,7 +37,7 @@ const cli = spawn(cliExecutable, [], {
         WEBRTC_VST_HANDSHAKE_URL: handshakeUrl,
         WEBRTC_VST_LOG_STDOUT: "1",
         WEBRTC_VST_LOG_SIGNALING: "1",
-        WEBRTC_CLI_HOST_RUNTIME_MS: String(runtimeMs),
+        WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: String(runtimeMs),
         WEBRTC_CLI_HOST_BLOCK_SLEEP_MS: "5",
         WEBRTC_CLI_HOST_TIMEOUT_MS: String(timeoutMs),
         WEBRTC_CLI_HOST_WARMUP_MS: "1200"

@@ -40,9 +40,10 @@ public:
         cleanup();
     }
 
-    bool initialize(const std::string& pluginPath) {
+    bool initialize(const std::string& pluginPath,
+                    const std::shared_ptr<VST3::Hosting::Module>& sharedModule = {}) {
         std::string error;
-        module_ = VST3::Hosting::Module::create(pluginPath, error);
+        module_ = sharedModule ? sharedModule : VST3::Hosting::Module::create(pluginPath, error);
         if (!module_) {
             return false;
         }
@@ -128,10 +129,11 @@ private:
 // Stress Test: Rapid Create/Destroy
 // ============================================================================
 
-void stress_rapid_create_destroy(const std::string& pluginPath, int iterations, std::atomic<int>& failures) {
+void stress_rapid_create_destroy(const std::string& pluginPath, int iterations, std::atomic<int>& failures,
+                                 const std::shared_ptr<VST3::Hosting::Module>& sharedModule = {}) {
     for (int i = 0; i < iterations; ++i) {
         PluginInstance instance(i);
-        if (!instance.initialize(pluginPath)) {
+        if (!instance.initialize(pluginPath, sharedModule)) {
             failures++;
             continue;
         }
@@ -152,13 +154,22 @@ void stress_rapid_create_destroy(const std::string& pluginPath, int iterations, 
 // ============================================================================
 
 void stress_concurrent_instances(const std::string& pluginPath, int numInstances, std::atomic<int>& failures) {
+    // Load once on the host thread. SDK module entry/exit and GUI platform
+    // initialization are not concurrent instance operations.
+    std::string error;
+    const auto module = VST3::Hosting::Module::create(pluginPath, error);
+    if (!module) {
+        std::cerr << "Module load failed: " << error << std::endl;
+        failures++;
+        return;
+    }
     std::vector<std::thread> threads;
     threads.reserve(numInstances);
 
     for (int i = 0; i < numInstances; ++i) {
-        threads.emplace_back([&pluginPath, i, &failures]() {
+        threads.emplace_back([&pluginPath, &module, i, &failures]() {
             PluginInstance instance(i);
-            if (!instance.initialize(pluginPath)) {
+            if (!instance.initialize(pluginPath, module)) {
                 failures++;
                 return;
             }
@@ -271,8 +282,10 @@ int main(int argc, char** argv) {
 
     std::atomic<int> totalFailures{0};
 
+    const bool concurrentOnly = argc > 2 && std::string(argv[2]) == "--concurrent-only";
+
     // Test 1: Rapid Create/Destroy (single threaded)
-    {
+    if (!concurrentOnly) {
         std::cout << "\n[1/5] Rapid Create/Destroy (200x)... " << std::flush;
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
@@ -287,7 +300,7 @@ int main(int argc, char** argv) {
     }
 
     // Test 2: Concurrent Instances
-    {
+    if (!concurrentOnly) {
         std::cout << "[2/5] Concurrent Instances (10 parallel)... " << std::flush;
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
@@ -302,7 +315,7 @@ int main(int argc, char** argv) {
     }
 
     // Test 3: Rapid Activate/Deactivate
-    {
+    if (!concurrentOnly) {
         std::cout << "[3/5] Rapid Activate/Deactivate (500x)... " << std::flush;
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
@@ -317,7 +330,7 @@ int main(int argc, char** argv) {
     }
 
     // Test 4: Memory Leak Check
-    {
+    if (!concurrentOnly) {
         std::cout << "[4/5] Memory Leak Check (100 cycles)... " << std::flush;
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
@@ -337,9 +350,17 @@ int main(int argc, char** argv) {
         auto start = std::chrono::high_resolution_clock::now();
         std::atomic<int> failures{0};
         std::vector<std::thread> threads;
-        for (int i = 0; i < 5; ++i) {
-            threads.emplace_back([&pluginPath, &failures]() {
-                stress_rapid_create_destroy(pluginPath, 40, failures);
+        // Keep one module/factory alive until every instance has been destroyed.
+        // The single-threaded tests above still cover actual module unloads.
+        std::string error;
+        const auto module = VST3::Hosting::Module::create(pluginPath, error);
+        if (!module) {
+            std::cerr << "Module load failed: " << error << std::endl;
+            failures++;
+        }
+        for (int i = 0; module && i < 5; ++i) {
+            threads.emplace_back([&pluginPath, &module, &failures]() {
+                stress_rapid_create_destroy(pluginPath, 40, failures, module);
             });
         }
         for (auto& t : threads) t.join();

@@ -33,7 +33,7 @@ const toneHz = process.env.WEBRTC_TEST_TONE_HZ || "1000";
 const pluginPassword = process.env.WEBRTC_TEST_PASSWORD ?? "";
 const passwordLower = typeof pluginPassword === "string" ? pluginPassword.trim().toLowerCase() : "";
 const disableEncryption = passwordLower === "0" || passwordLower === "false" || passwordLower === "off";
-const viewerPassword = disableEncryption ? false : "";
+const viewerPassword = disableEncryption ? false : pluginPassword;
 
 const cliEnv = {
     ...process.env,
@@ -41,7 +41,9 @@ const cliEnv = {
     WEBRTC_VST_STREAM_ID: streamId,
     WEBRTC_VST_PASSWORD: pluginPassword,
     WEBRTC_VST_HANDSHAKE_URL: handshakeUrl,
-    WEBRTC_CLI_HOST_RUNTIME_MS: runtimeMs,
+    WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: runtimeMs,
+    WEBRTC_CLI_HOST_BLOCK_SLEEP_MS: process.env.WEBRTC_TEST_BLOCK_SLEEP_MS || "5",
+    WEBRTC_CLI_HOST_TIMEOUT_MS: String(Number(runtimeMs) + 10000),
     WEBRTC_CLI_HOST_TONE_HZ: toneHz,
     WEBRTC_VST_LOG_STDOUT: "1"
 };

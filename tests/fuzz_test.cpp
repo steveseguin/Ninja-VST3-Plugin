@@ -14,7 +14,7 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/vsttypes.h>
 
-#include "../../webrtc_vst/src/ParameterIDs.h"
+#include "../webrtc_vst/src/ParameterIDs.h"
 
 #include <algorithm>
 #include <array>

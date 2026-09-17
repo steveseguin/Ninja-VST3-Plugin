@@ -48,16 +48,33 @@ cmake --build build/webrtc_vst_linux --config Release --target webrtc_vst webrtc
 
 ## Test commands
 
+Build and run the native suites on Windows:
+
+```powershell
+cmake --build build/webrtc_vst_win --config Release --parallel 4 --target webrtc_vst webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test
+ctest --test-dir build/webrtc_vst_win -C Release --parallel 1 --output-on-failure
+```
+
+Use a lower build parallelism on machines with fewer than eight logical processors.
+The concurrent stress cases share one loaded module while creating and destroying
+plugin instances. The sequential cases exercise module load/unload separately.
+To isolate concurrent instance creation, pass the bundle path followed by
+`--concurrent-only` to `build/webrtc_vst_win/bin/Release/webrtc_vst_stress_test.exe`.
+
 ```bash
 npm install
+npm run test:security
 npm run test:integration
 npm run test:integration:live
 ```
 
 Notes:
 
-- `test:integration` runs the local gate (`audio-only` + loopback/publish tests). It is cross-platform aware.
+- `test:security` verifies the installed WebSocket dependency's close-reason and retained-fragment/chunk protections, plus normal compressed signaling. It only uses loopback and also runs at the start of `test:integration`.
+- `test:integration` runs `audio-only` + loopback/publish tests. These use network signaling; the audio-only receive check also needs an active publisher selected with `WEBRTC_TEST_STREAM_ID` (default `steve1234`). An offline publisher is not evidence of a plugin failure.
+- `test:integration:local` creates its own sources for plugin-to-plugin and plugin-to-SDK audio tests, but still needs network signaling.
 - `test:integration:live` is a live room smoke test and depends on network + active remote audio source.
+- JS test durations use the CLI host's wall-clock runtime setting. The sample-count runtime can take longer than its nominal duration when Windows rounds block sleeps upward.
 
 ## Audacity smoke check
 

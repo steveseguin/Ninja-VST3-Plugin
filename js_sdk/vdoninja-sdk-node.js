@@ -197,8 +197,8 @@ class VDONinjaSDKNode extends OriginalVDONinjaSDK {
     /**
      * Override publish to check media support
      */
-    async publish(options = {}) {
-        if (options.stream || options.audio || options.video) {
+    async publish(stream, options = {}) {
+        if (stream && typeof stream.getTracks === 'function' && stream.getTracks().length > 0) {
             if (!this.webrtcAdapter.hasMediaSupport()) {
                 throw new Error(
                     `Media publishing not supported with ${this.webrtcAdapter.getImplementation()}. ` +
@@ -207,7 +207,7 @@ class VDONinjaSDKNode extends OriginalVDONinjaSDK {
             }
         }
         
-        return super.publish(options);
+        return super.publish(stream, options);
     }
     
     /**

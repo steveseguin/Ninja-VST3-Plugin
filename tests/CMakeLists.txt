@@ -147,16 +147,16 @@ if(MSVC)
 endif()
 
 # CTest integration
-enable_testing()
+get_target_property(_plugin_bundle webrtc_vst SMTG_PLUGIN_PACKAGE_PATH)
 
 add_test(NAME IntegrationTest
     COMMAND webrtc_vst_integration_test
-        $<TARGET_FILE_DIR:webrtc_vst>/../webrtc_vst.vst3
+        "${_plugin_bundle}"
 )
 
 add_test(NAME StressTest
     COMMAND webrtc_vst_stress_test
-        $<TARGET_FILE_DIR:webrtc_vst>/../webrtc_vst.vst3
+        "${_plugin_bundle}"
 )
 
 # Set test properties
@@ -172,7 +172,7 @@ set_tests_properties(StressTest PROPERTIES
 
 add_test(NAME FuzzTest
     COMMAND webrtc_vst_fuzz_test
-        $<TARGET_FILE_DIR:webrtc_vst>/../webrtc_vst.vst3
+        "${_plugin_bundle}"
 )
 
 set_tests_properties(FuzzTest PROPERTIES

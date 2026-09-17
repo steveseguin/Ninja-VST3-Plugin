@@ -1,12 +1,23 @@
-// VDO.Ninja SDK v1.3.13
+// VDO.Ninja SDK v1.4.0 — AGPL-3.0-only + SDK Exception; see LICENSE-SDK-EXCEPTION
+
+const MEDIA_STREAM_TRACK_ENABLED_DESCRIPTOR =
+    (typeof MediaStreamTrack !== 'undefined' && MediaStreamTrack?.prototype)
+        ? Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'enabled')
+        : null;
+
+const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
 /**
  * VDO.Ninja SDK - OFFICIAL SDK FOR VDO.NINJA WEBSOCKET API
  * Copyright (C) 2025 Steve Seguin and contributors
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * the Free Software Foundation, version 3 of the License only (AGPL-3.0-only).
+ *
+ * Additional Permission:
+ * Unmodified official builds of `vdoninja-sdk.js` and `vdoninja-sdk.min.js` may
+ * be used and distributed as part of proprietary works under the terms in
+ * `LICENSE-SDK-EXCEPTION`.
  * 
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -314,7 +325,7 @@
  *     sdk.sendData(data, { streamID: "user1", type: "viewer" })  // To viewers of stream
  * 
  * @author Steve Seguin
- * @license AGPLv3
+ * @license AGPL-3.0-only (with additional permission; see LICENSE-SDK-EXCEPTION)
  */
 
 (function (global) {
@@ -327,7 +338,7 @@
          * @returns {string} Current SDK version
          */
         static get VERSION() {
-            return '1.3.13';
+            return '1.4.0';
         }
         
         /**
@@ -499,6 +510,12 @@
          * @param {number} options.reconnectDelay - Initial reconnection delay in ms (default: 1000)
          * @param {boolean} options.autoPingViewer - Enable viewer-side auto ping (default: false)
          * @param {number} options.autoPingInterval - Auto ping interval in ms (default: 10000)
+         * @param {boolean} options.autoRecover - Recover failed peer directions automatically (default: true)
+         * @param {boolean} options.autoRelay - Temporarily escalate failed direct paths to TURN (default: true)
+         * @param {number} options.disconnectGracePeriod - ICE disconnected grace period in ms (default: 5000)
+         * @param {number} options.connectionTimeout - Initial peer connection timeout in ms (default: 20000)
+         * @param {number} options.recoveryTimeout - Wait between recovery phases in ms (default: 12000)
+         * @param {number} options.relayRestoreDelay - Delay before restoring direct-first ICE policy (default: 45000)
          */
         constructor(options = {}) {
             super();
@@ -550,6 +567,9 @@
             }
             this._pendingRoomID = options.roomid || options.roomID || null;  // Support both cases
             
+            // Preferred media configuration for outgoing WebRTC tracks
+            this._publishMediaConfig = null;
+            
             // Convenience event aliases for common patterns (Node-style)
             // sdk.on('event', handler), sdk.off('event', handler), sdk.once('event', handler)
             this.on = (evt, handler) => { try { this.addEventListener(evt, handler); } catch (e) {} return this; };
@@ -579,6 +599,9 @@
             this._failedViewerConnections = new Map(); // Track failed connections for retry
             this._intentionalDisconnect = false; // Flag for intentional disconnections
             this._passwordHash = null;  // Cached hash for streamID
+            this._passwordHashPromise = null; // Tracks in-flight hash computation
+            this._passwordHashKey = null; // Password+salt signature for cached hash
+            this._passwordHashPromiseKey = null; // Signature for in-flight hash
             this._viewHandlers = new Map();
             this._sessionIDs = {};
             this._remoteSessionIDs = {};
@@ -614,6 +637,29 @@
             this._maxReconnectAttempts = options.maxReconnectAttempts || 5;
             this._reconnectDelay = options.reconnectDelay || 1000;
             this._reconnectTimer = null;
+
+            // Desired application state is kept separately from transient transport
+            // state.  A WebSocket reconnect gets a new HSS UUID, so room, seed, and
+            // play intent must be replayed using the existing VDO.Ninja protocol.
+            this._connectionIntent = {
+                room: null,
+                publishing: null,
+                views: new Map()
+            };
+            this._stoppedViews = new Set();
+            this._restoringIntent = false;
+
+            // Peer recovery is local-only and uses the existing SDP/ICE messages.
+            this.autoRecover = options.autoRecover !== false;
+            this.autoRelay = options.autoRelay !== false;
+            this.disconnectGracePeriod = Number.isFinite(options.disconnectGracePeriod) ?
+                Math.max(0, options.disconnectGracePeriod) : 5000;
+            this.recoveryTimeout = Number.isFinite(options.recoveryTimeout) ?
+                Math.max(1000, options.recoveryTimeout) : 12000;
+            this.connectionTimeout = Number.isFinite(options.connectionTimeout) ?
+                Math.max(1000, options.connectionTimeout) : 20000;
+            this.relayRestoreDelay = Number.isFinite(options.relayRestoreDelay) ?
+                Math.max(0, options.relayRestoreDelay) : 45000;
             
             // Internal flags
             this._isReconnecting = false;
@@ -622,6 +668,10 @@
             // View retry mechanism
             this._viewRetryTimers = new Map();
             this._viewRetryInterval = 15 * 60 * 1000; // 15 minutes
+            
+            // Track monitoring for outbound video tracks
+            this._outboundVideoMonitors = new Map();
+            this._pendingVideoMuteFinalizers = new Set();
             
             // Initialize salt before setting up crypto
             this.salt = options.salt || "vdo.ninja";
@@ -724,7 +774,7 @@
             this._intentionalDisconnect = false;
             
             // Merge options
-            if (options.host) this.host = options.host;
+            if (options.host || options.wss) this.host = options.host || options.wss;
             if (options.room) this.room = this._sanitizeRoomName(options.room);
             else if (this._pendingRoomID) this.room = this._sanitizeRoomName(this._pendingRoomID);
             // Sanitize and apply password only if explicitly provided
@@ -751,9 +801,12 @@
                     this.signaling.onopen = () => {
                         this._log('WebSocket connected');
                         this.state.connected = true;
-                        this._reconnectAttempts = 0;
+                        if (!this._isReconnecting) {
+                            this._reconnectAttempts = 0;
+                        }
                         
                         this._emit('connected');
+                        this._emitIframeCompatible('hss-connection', 'connected');
                         
                         resolve();
                     };
@@ -777,11 +830,13 @@
                     this.signaling.onclose = () => {
                         this._log('WebSocket closed');
                         this.state.connected = false;
-                        // Reset per-connection states
+                        // These describe the current socket generation. Desired room,
+                        // publishing, and viewing state remains in _connectionIntent.
                         this.state.roomJoined = false;
                         this.state.publishing = false;
                         
                         this._emit('disconnected');
+                        this._emitIframeCompatible('hss-connection', 'closed');
                         
                         if (!this._intentionalDisconnect && this._reconnectAttempts < this._maxReconnectAttempts) {
                             this._attemptReconnect();
@@ -801,6 +856,21 @@
         disconnect() {
             this._log('Disconnecting...');
             this._intentionalDisconnect = true;
+
+            // disconnect() has always represented a full local teardown. Do not
+            // restore room/publish/view intent after a later explicit connect().
+            if (this._connectionIntent) {
+                this._connectionIntent.room = null;
+                this._connectionIntent.publishing = null;
+                if (this._connectionIntent.views) this._connectionIntent.views.clear();
+            }
+            if (this._stoppedViews) this._stoppedViews.clear();
+            if (this._failedViewerConnections) {
+                for (const failed of this._failedViewerConnections.values()) {
+                    if (failed && failed.timer) clearTimeout(failed.timer);
+                }
+                this._failedViewerConnections.clear();
+            }
             
             // Clear reconnect timer
             if (this._reconnectTimer) {
@@ -859,6 +929,8 @@
                         if (connection) {
                             // Stop ping monitoring
                             this._stopPingMonitoring(connection);
+                            this._clearConnectionRecoveryTimers(connection);
+                            connection._finalized = true;
                             // Close peer connection
                             if (connection.pc) {
                                 connection.pc.close();
@@ -867,19 +939,21 @@
                     }
                 }
                 this.connections.clear();
-                
+
+                this._clearAllVideoTrackMonitors();
+
                 // Clear all retry timers
                 for (const [streamID, timer] of this._viewRetryTimers) {
                     clearTimeout(timer);
                 }
                 this._viewRetryTimers.clear();
-                
+
                 // Close WebSocket
                 if (this.signaling) {
                     this.signaling.close();
                     this.signaling = null;
                 }
-                
+
                 // Reset state
                 this.state = {
                     connected: false,
@@ -889,7 +963,7 @@
                     roomJoined: false,
                     publishing: false
                 };
-                
+
                 this._emit('disconnected');
             });
         }
@@ -915,23 +989,11 @@
             this._reconnectTimer = setTimeout(async () => {
                 try {
                     await this.connect();
-                    
-                    // Rejoin room if we were in one
-                    if (this.state.room) {
-                        await this.joinRoom({ 
-                            room: this.state.room, 
-                            password: this.password 
-                        });
-                    }
-                    
-                    // Re-publish if we were publishing
-                    if (this.state.publishing && this.localStream) {
-                        await this.publish(this.localStream, { 
-                            streamID: this.state.streamID 
-                        });
-                    }
+
+                    await this._restoreConnectionIntent();
                     
                     this._emit('reconnected');
+                    this._reconnectAttempts = 0;
                     this._isReconnecting = false;
                     
                 } catch (error) {
@@ -945,6 +1007,55 @@
                     }
                 }
             }, delay);
+        }
+
+        /**
+         * Replay desired state after an HSS socket reconnect. This deliberately
+         * uses only joinroom, seed, and play messages already used by VDO.Ninja.
+         * @private
+         */
+        async _restoreConnectionIntent() {
+            if (this._restoringIntent) return;
+            this._restoringIntent = true;
+
+            try {
+                const intent = this._connectionIntent || {};
+
+                if (intent.room && intent.room.room) {
+                    await this.joinRoom({
+                        ...intent.room.options,
+                        room: intent.room.room,
+                        password: intent.room.password
+                    });
+                }
+
+                if (intent.publishing && intent.publishing.active) {
+                    const publishing = intent.publishing;
+                    const options = {
+                        ...publishing.options,
+                        streamID: publishing.streamID
+                    };
+                    if (publishing.dataOnly) {
+                        await this.announce(options);
+                    } else if (publishing.stream) {
+                        await this.publish(publishing.stream, options);
+                    }
+                }
+
+                if (intent.views && typeof intent.views.entries === 'function') {
+                    for (const [streamID, viewOptions] of intent.views.entries()) {
+                        if (this._stoppedViews && this._stoppedViews.has(streamID)) continue;
+                        // Start each play restoration without serially waiting up to
+                        // the view timeout for unavailable peers.
+                        this.view(streamID, { ...viewOptions, _intentReplay: true }).catch(error => {
+                            this._log('Failed to restore view intent for', streamID, error.message || error);
+                            this._setupViewRetry(streamID, viewOptions, 2000);
+                        });
+                    }
+                }
+            } finally {
+                this._restoringIntent = false;
+            }
         }
 
 
@@ -1029,6 +1140,12 @@
                 throw new Error('Room name is required');
             }
 
+            this._connectionIntent.room = {
+                room,
+                password,
+                options: { claim: !!options.claim }
+            };
+
             // Store password for later use, converting empty string to default
             if (password === '') {
                 this.password = this._sanitizePassword("someEncryptionKey123");
@@ -1100,6 +1217,7 @@
             const previousRoom = this.state.room;
             this.state.room = null;
             this.state.roomJoined = false;
+            if (this._connectionIntent) this._connectionIntent.room = null;
 
             this._emit('roomLeft', { room: previousRoom });
         }
@@ -1129,6 +1247,16 @@
             }
 
             this.localStream = stream;
+            
+            // Resolve desired media preferences for outgoing tracks
+            const mediaPreferences = await this._extractPublisherMediaOptions(options);
+            if (mediaPreferences) {
+                this._publishMediaConfig = mediaPreferences;
+            }
+            if (this._publishMediaConfig) {
+                await this._applyLocalMediaPreferences(this.localStream, this._publishMediaConfig);
+            }
+
             // Use provided streamID, fall back to pending value from constructor/property, then generate
             const streamID = this._sanitizeStreamID(options.streamID || this._pendingStreamID) || this._generateStreamID();
 
@@ -1183,6 +1311,13 @@
             this.state.streamID = streamID;
             this.state.publishing = true;
 
+            // Start monitoring outbound video tracks for mute state changes
+            this._clearAllVideoTrackMonitors();
+            if (this.localStream) {
+                const videoTracks = this.localStream.getVideoTracks ? this.localStream.getVideoTracks() : [];
+                videoTracks.forEach(track => this._monitorOutboundVideoTrack(track));
+            }
+
             // Send seed message
             const seedMessage = {
                 request: "seed",
@@ -1191,6 +1326,14 @@
 
             this._log('Sending seed message for streamID:', hashedStreamID);
             this._sendMessageWS(seedMessage);
+
+            this._connectionIntent.publishing = {
+                active: true,
+                dataOnly: false,
+                stream: this.localStream,
+                streamID,
+                options: { ...options, streamID }
+            };
 
             this._emit('publishing', { streamID, hashedStreamID });
             
@@ -1293,6 +1436,14 @@
 
             this._sendMessageWS(seedMessage);
 
+            this._connectionIntent.publishing = {
+                active: true,
+                dataOnly: true,
+                stream: null,
+                streamID,
+                options: { ...options, streamID }
+            };
+
             this._emit('publishing', { streamID, hashedStreamID, dataOnly: true });
 
             return streamID;
@@ -1302,9 +1453,18 @@
          * Stop publishing
          */
         stopPublishing() {
-            if (!this.state.publishing) {
+            const hadPublishingIntent = !!(this._connectionIntent && this._connectionIntent.publishing);
+            if (this._connectionIntent) this._connectionIntent.publishing = null;
+
+            if (!this.state.publishing && !hadPublishingIntent) {
                 this._log('Not currently publishing');
                 return;
+            }
+
+            if (this._outboundVideoMonitors && this._outboundVideoMonitors.size) {
+                for (const monitor of this._outboundVideoMonitors.values()) {
+                    this._sendVideoMutedState(monitor.track, true, null, 'stopPublishing');
+                }
             }
 
             // Send bye message to all viewers via data channels
@@ -1351,6 +1511,8 @@
                     if (connection) {
                         // Stop ping monitoring
                         this._stopPingMonitoring(connection);
+                        this._clearConnectionRecoveryTimers(connection);
+                        connection._finalized = true;
                         
                         if (connection.pc) {
                             connection.pc.close();
@@ -1363,6 +1525,8 @@
                         }
                     }
                 }
+
+                this._clearAllVideoTrackMonitors();
 
                 // Stop local stream tracks
                 if (this.localStream) {
@@ -1431,6 +1595,11 @@
                     return options || {};
                 })();
 
+                const rememberedOptions = { ...normalizedOptions };
+                delete rememberedOptions._intentReplay;
+                this._connectionIntent.views.set(streamID, rememberedOptions);
+                this._stoppedViews.delete(streamID);
+
                 // Track pending view so we know we initiated this
                 this._pendingViews.set(streamID, {
                     options: normalizedOptions,
@@ -1496,7 +1665,7 @@
          * @param {string} streamID - The stream ID to retry
          * @param {Object} options - View options
          */
-        _setupViewRetry(streamID, options) {
+        _setupViewRetry(streamID, options, delay = this._viewRetryInterval) {
             // Clear any existing retry timer for this stream
             if (this._viewRetryTimers.has(streamID)) {
                 clearTimeout(this._viewRetryTimers.get(streamID));
@@ -1513,7 +1682,7 @@
                         this._log('Retry view error:', err.message);
                     });
                 }
-            }, this._viewRetryInterval);
+            }, delay);
             
             this._viewRetryTimers.set(streamID, retryTimer);
         }
@@ -1523,8 +1692,11 @@
          * @param {string} streamID - The stream ID to stop viewing
          */
         stopViewing(streamID) {
-            // Mark as intentional disconnect
-            this._intentionalDisconnect = true;
+            streamID = this._sanitizeStreamID(streamID);
+            if (this._connectionIntent && this._connectionIntent.views) {
+                this._connectionIntent.views.delete(streamID);
+            }
+            if (this._stoppedViews) this._stoppedViews.add(streamID);
             
             // Cancel any retry timer for this stream
             if (this._viewRetryTimers.has(streamID)) {
@@ -1537,6 +1709,8 @@
             
             // Remove from failed connections if present
             if (this._failedViewerConnections) {
+                const failed = this._failedViewerConnections.get(streamID);
+                if (failed && failed.timer) clearTimeout(failed.timer);
                 this._failedViewerConnections.delete(streamID);
             }
             
@@ -1582,6 +1756,8 @@
                 for (const [uuid, connections] of this.connections) {
                     const viewerConnection = connections.viewer;
                     if (viewerConnection && viewerConnection.streamID === streamID) {
+                        this._clearConnectionRecoveryTimers(viewerConnection);
+                        viewerConnection._finalized = true;
                         if (viewerConnection.pc) {
                             viewerConnection.pc.close();
                         }
@@ -1595,9 +1771,6 @@
                 }
 
                 this._emit('viewingStopped', { streamID });
-                
-                // Reset the intentional disconnect flag
-                this._intentionalDisconnect = false;
             });
         }
 
@@ -1655,6 +1828,18 @@
                 pendingPing: null
             };
 
+            connection.healthState = 'connecting';
+            connection.recoveryStage = 0;
+            connection.recovering = false;
+            connection.disconnectTimer = null;
+            connection.recoveryTimer = null;
+            connection.connectTimer = null;
+            connection.relayRestoreTimer = null;
+            connection.relayEscalated = false;
+            connection.originalConfiguration = null;
+            connection._peerConnectedEmitted = false;
+            connection._finalized = false;
+
             // Add any additional properties from options
             if (options) {
                 if (options.streamID) connection.streamID = options.streamID;
@@ -1672,27 +1857,13 @@
             };
 
             connection.pc.oniceconnectionstatechange = () => {
-                this._log(`ICE state for ${uuid}:`, connection.pc.iceConnectionState);
-                
-                if (connection.pc.iceConnectionState === 'connected') {
-                    // Update stream state to connected
-                    if (connection.streamID && this.streams.has(connection.streamID)) {
-                        const stream = this.streams.get(connection.streamID);
-                        stream.state = 'connected';
-                        stream.lastSeen = Date.now();
-                        if (connection.uuid) stream.uuid = connection.uuid;
-                    }
-                    this._emit('peerConnected', { uuid, connection });
-                } else if (connection.pc.iceConnectionState === 'failed' || 
-                           connection.pc.iceConnectionState === 'disconnected') {
-                    // Update stream state to disconnected/failed
-                    if (connection.streamID && this.streams.has(connection.streamID)) {
-                        const stream = this.streams.get(connection.streamID);
-                        stream.state = connection.pc.iceConnectionState === 'failed' ? 'failed' : 'disconnected';
-                        stream.lastSeen = Date.now();
-                    }
-                    this._handleConnectionFailed(connection);
-                }
+                this._handlePeerConnectionState(connection, 'ice');
+            };
+
+            // connectionState catches DTLS failures that do not always produce a
+            // distinct ICE transition. Both handlers feed one idempotent state path.
+            connection.pc.onconnectionstatechange = () => {
+                this._handlePeerConnectionState(connection, 'peer');
             };
 
             connection.pc.ontrack = (event) => {
@@ -1728,8 +1899,462 @@
             
             const connections = this.connections.get(uuid);
             connections[type] = connection;
+
+            connection.connectTimer = setTimeout(() => {
+                connection.connectTimer = null;
+                if (!this._isCurrentConnection(connection) || !connection.pc) return;
+                const peerState = connection.pc.connectionState;
+                const iceState = connection.pc.iceConnectionState;
+                if (peerState !== 'connected' && iceState !== 'connected' && iceState !== 'completed') {
+                    this._recoverConnection(connection, 'connect-timeout');
+                }
+            }, this.connectionTimeout);
+            if (connection.connectTimer && typeof connection.connectTimer.unref === 'function') {
+                connection.connectTimer.unref();
+            }
             
             return connection;
+        }
+
+        /**
+         * Determine if a track is effectively muted for viewers.
+         * @private
+         * @param {MediaStreamTrack} track
+         * @returns {boolean}
+         */
+        _isTrackEffectivelyMuted(track) {
+            if (!track) return true;
+            if (track.readyState === 'ended') return true;
+            if (track.enabled === false) return true;
+            if (track.muted === true) return true;
+            return false;
+        }
+
+        /**
+         * Broadcast publisher video mute state to viewers.
+         * @private
+         * @param {MediaStreamTrack} track
+         * @param {boolean} muted
+         * @param {string|null} targetUuid
+         */
+        _sendVideoMutedState(track, muted, targetUuid = null, reason = null) {
+            if (!this.state || !this.state.publishing) {
+                return;
+            }
+
+            const payload = { videoMuted: !!muted };
+            if (track && typeof track.id === 'string') {
+                payload.trackId = track.id;
+            }
+            if (reason) {
+                this._log(`Broadcasting videoMuted:${payload.videoMuted} (${reason})`);
+            }
+
+            if (targetUuid) {
+                this._sendDataInternal(payload, targetUuid, null, 'publisher');
+            } else {
+                this._sendDataInternal(payload, null, 'publisher', 'publisher');
+            }
+        }
+
+        /**
+         * Start monitoring an outbound video track for mute state changes.
+         * @private
+         * @param {MediaStreamTrack} track
+         */
+        _monitorOutboundVideoTrack(track) {
+            if (!track || track.kind !== 'video') return;
+            if (this._pendingVideoMuteFinalizers && this._pendingVideoMuteFinalizers.size) {
+                this._cancelPendingVideoMuteFinalizers();
+            }
+            if (!this._outboundVideoMonitors) {
+                this._outboundVideoMonitors = new Map();
+            }
+            if (this._outboundVideoMonitors.has(track)) {
+                // Refresh state in case external code toggled before monitoring
+                const monitor = this._outboundVideoMonitors.get(track);
+                const currentState = this._isTrackEffectivelyMuted(track);
+                if (monitor) {
+                    monitor.lastState = currentState;
+                }
+                if (this.state?.publishing) {
+                    this._sendVideoMutedState(track, currentState, null, 'refresh');
+                }
+                return;
+            }
+
+            const monitor = {
+                track,
+                lastState: this._isTrackEffectivelyMuted(track),
+                restoreEnabled: null,
+                restoreStop: null,
+                listeners: [],
+                poller: null,
+                pendingFinalizer: null,
+                finalizing: false
+            };
+
+            const broadcastState = (muted, reasonLabel) => {
+                const label = reasonLabel || 'update';
+                this._sendVideoMutedState(track, muted, null, label);
+                this._emit('publisherVideoMuteState', {
+                    track,
+                    muted,
+                    reason: label
+                });
+            };
+
+            const emitState = (reason, options = {}) => {
+                const { force = false, delay = 0, cleanup = false } = options;
+                const evaluateMuted = () => this._isTrackEffectivelyMuted(track);
+
+                const dispatch = () => {
+                    if (monitor.pendingFinalizer) {
+                        monitor.pendingFinalizer = null;
+                    }
+                    const mutedNow = evaluateMuted();
+                    if (!force && mutedNow === monitor.lastState) {
+                        if (cleanup) {
+                            this._unmonitorOutboundVideoTrack(track, { skipSend: true });
+                        }
+                        return;
+                    }
+
+                    monitor.lastState = mutedNow;
+                    broadcastState(mutedNow, reason || 'update');
+
+                    if (cleanup) {
+                        this._unmonitorOutboundVideoTrack(track, { skipSend: true });
+                    }
+                };
+
+                if (monitor.pendingFinalizer) {
+                    try {
+                        monitor.pendingFinalizer.cancel();
+                    } catch (err) {
+                        this._log('Error cancelling pending mute finalizer:', err);
+                    }
+                    monitor.pendingFinalizer = null;
+                }
+
+                if (delay > 0) {
+                    monitor.pendingFinalizer = this._scheduleVideoMuteFinalizer(delay, dispatch, () => {
+                        monitor.pendingFinalizer = null;
+                    });
+                } else {
+                    dispatch();
+                }
+            };
+
+            const finalizeOnce = (reasonLabel) => {
+                if (monitor.finalizing) return;
+                monitor.finalizing = true;
+                emitState(reasonLabel, {
+                    force: true,
+                    delay: OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS,
+                    cleanup: true
+                });
+            };
+
+            const handleMute = () => emitState('mute');
+            const handleUnmute = () => emitState('unmute');
+            const handleEnded = () => finalizeOnce('ended');
+
+            if (typeof track.addEventListener === 'function') {
+                track.addEventListener('mute', handleMute);
+                track.addEventListener('unmute', handleUnmute);
+                track.addEventListener('ended', handleEnded);
+                monitor.listeners.push(['mute', handleMute], ['unmute', handleUnmute], ['ended', handleEnded]);
+            }
+
+            if (typeof track.stop === 'function') {
+                const originalStop = track.stop.bind(track);
+                try {
+                    track.stop = (...args) => {
+                        finalizeOnce('stop');
+                        return originalStop(...args);
+                    };
+                    monitor.restoreStop = () => {
+                        try {
+                            track.stop = originalStop;
+                        } catch (err) {
+                            this._log('Failed to restore track.stop:', err);
+                        }
+                    };
+                } catch (error) {
+                    this._log('Unable to wrap MediaStreamTrack.stop for monitoring:', error);
+                }
+            }
+
+            let trackExtensible = false;
+            try {
+                trackExtensible = Object.isExtensible(track);
+            } catch (err) {
+                this._log('Unable to inspect MediaStreamTrack extensibility:', err);
+            }
+
+            const canRedefineEnabled =
+                !!MEDIA_STREAM_TRACK_ENABLED_DESCRIPTOR &&
+                typeof MEDIA_STREAM_TRACK_ENABLED_DESCRIPTOR.get === 'function' &&
+                typeof MEDIA_STREAM_TRACK_ENABLED_DESCRIPTOR.set === 'function' &&
+                (MEDIA_STREAM_TRACK_ENABLED_DESCRIPTOR.configurable !== false) &&
+                trackExtensible;
+
+            if (canRedefineEnabled) {
+                const { get: baseGet, set: baseSet } = MEDIA_STREAM_TRACK_ENABLED_DESCRIPTOR;
+                try {
+                    Object.defineProperty(track, 'enabled', {
+                        configurable: true,
+                        enumerable: true,
+                        get() {
+                            return baseGet.call(track);
+                        },
+                        set: (value) => {
+                            const before = baseGet.call(track);
+                            baseSet.call(track, value);
+                            const after = baseGet.call(track);
+                            if (before !== after) {
+                                emitState('enabled-toggle');
+                            }
+                        }
+                    });
+                    monitor.restoreEnabled = () => {
+                        try {
+                            delete track.enabled;
+                        } catch (err) {
+                            this._log('Failed to restore track.enabled descriptor:', err);
+                        }
+                    };
+                } catch (error) {
+                    this._log('Unable to wrap MediaStreamTrack.enabled for monitoring:', error);
+                }
+            } else {
+                this._log('Skipping MediaStreamTrack.enabled override; falling back to polling.');
+            }
+
+            if (!monitor.restoreEnabled) {
+                // Poll as a Safari/iOS fallback so we still detect state updates when redefine fails.
+                monitor.poller = setInterval(() => emitState('poll'), 250);
+            }
+
+            this._outboundVideoMonitors.set(track, monitor);
+
+            // Send initial state so viewers immediately know current mute status
+            if (this.state?.publishing) {
+                broadcastState(monitor.lastState, 'initial');
+            } else {
+                this._emit('publisherVideoMuteState', {
+                    track,
+                    muted: monitor.lastState,
+                    reason: 'initial'
+                });
+            }
+        }
+
+        /**
+         * Stop monitoring an outbound video track.
+         * @private
+         * @param {MediaStreamTrack} track
+         * @param {Object} options
+         * @param {boolean} options.skipSend - If true, do not send final state
+         * @param {boolean} options.forceMuted - Optional final state override
+         */
+        _unmonitorOutboundVideoTrack(track, options = {}) {
+            if (!track || !this._outboundVideoMonitors || !this._outboundVideoMonitors.has(track)) {
+                return;
+            }
+
+            const monitor = this._outboundVideoMonitors.get(track);
+
+            if (monitor) {
+                if (monitor.pendingFinalizer) {
+                    try {
+                        monitor.pendingFinalizer.cancel();
+                    } catch (err) {
+                        this._log('Error cancelling monitor pending finalizer:', err);
+                    }
+                    monitor.pendingFinalizer = null;
+                }
+
+                const shouldSendFinal = !options.skipSend && this.state?.publishing && !monitor.finalizing;
+                if (shouldSendFinal) {
+                    const finalMuted = typeof options.forceMuted === 'boolean'
+                        ? options.forceMuted
+                        : true;
+                    const finalReason = typeof options.forceMuted === 'boolean'
+                        ? 'force-muted'
+                        : 'monitor-stopped';
+                    const delayMs = typeof options.delayMs === 'number'
+                        ? Math.max(0, options.delayMs)
+                        : (finalMuted ? OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS : 0);
+
+                    const dispatch = () => {
+                        this._sendVideoMutedState(track, finalMuted, null, finalReason);
+                        this._emit('publisherVideoMuteState', {
+                            track,
+                            muted: finalMuted,
+                            reason: finalReason
+                        });
+                    };
+
+                    if (delayMs > 0) {
+                        monitor.pendingFinalizer = this._scheduleVideoMuteFinalizer(delayMs, dispatch, () => {
+                            monitor.pendingFinalizer = null;
+                        });
+                    } else {
+                        dispatch();
+                    }
+                }
+                if (monitor.restoreEnabled) {
+                    try {
+                        monitor.restoreEnabled();
+                    } catch (err) {
+                        this._log('Failed to restore track.enabled descriptor:', err);
+                    }
+                }
+                if (monitor.restoreStop) {
+                    try {
+                        monitor.restoreStop();
+                    } catch (err) {
+                        this._log('Failed to restore track.stop override:', err);
+                    }
+                }
+                if (monitor.poller) {
+                    clearInterval(monitor.poller);
+                    monitor.poller = null;
+                }
+                if (monitor.listeners && typeof track.removeEventListener === 'function') {
+                    for (const [evt, handler] of monitor.listeners) {
+                        try {
+                            track.removeEventListener(evt, handler);
+                        } catch (err) {
+                            // Ignore cleanup errors
+                        }
+                    }
+                }
+            }
+
+            this._outboundVideoMonitors.delete(track);
+        }
+
+        /**
+         * Schedule a delayed videoMute broadcast that can be flushed later.
+         * @private
+         * @param {number} delayMs
+         * @param {Function} dispatch
+         * @param {Function} onFinish
+         * @returns {Object} finalizer handle with flush() and cancel()
+         */
+        _scheduleVideoMuteFinalizer(delayMs, dispatch, onFinish) {
+            if (!this._pendingVideoMuteFinalizers) {
+                this._pendingVideoMuteFinalizers = new Set();
+            }
+
+            const self = this;
+            const finalizer = {
+                timerId: null,
+                finished: false,
+                flush() {
+                    if (finalizer.finished) return;
+                    finalizer.finished = true;
+                    if (finalizer.timerId) {
+                        clearTimeout(finalizer.timerId);
+                        finalizer.timerId = null;
+                    }
+                    self._pendingVideoMuteFinalizers.delete(finalizer);
+                    try {
+                        dispatch();
+                    } catch (err) {
+                        self._log('Error dispatching videoMuted finalizer:', err);
+                    }
+                    if (typeof onFinish === 'function') {
+                        try {
+                            onFinish(true);
+                        } catch (err) {
+                            self._log('Error running mute finalizer onFinish handler:', err);
+                        }
+                    }
+                },
+                cancel() {
+                    if (finalizer.finished) return;
+                    finalizer.finished = true;
+                    if (finalizer.timerId) {
+                        clearTimeout(finalizer.timerId);
+                        finalizer.timerId = null;
+                    }
+                    self._pendingVideoMuteFinalizers.delete(finalizer);
+                    if (typeof onFinish === 'function') {
+                        try {
+                            onFinish(false);
+                        } catch (err) {
+                            self._log('Error running mute finalizer cancel handler:', err);
+                        }
+                    }
+                }
+            };
+
+            finalizer.timerId = setTimeout(() => finalizer.flush(), delayMs);
+            this._pendingVideoMuteFinalizers.add(finalizer);
+            return finalizer;
+        }
+
+        /**
+         * Cancel any pending delayed mute broadcasts.
+         * @private
+         */
+        _cancelPendingVideoMuteFinalizers() {
+            if (!this._pendingVideoMuteFinalizers || this._pendingVideoMuteFinalizers.size === 0) {
+                return;
+            }
+            const pending = Array.from(this._pendingVideoMuteFinalizers);
+            for (const finalizer of pending) {
+                try {
+                    finalizer.flush();
+                } catch (err) {
+                    this._log('Error flushing pending mute finalizer:', err);
+                }
+            }
+        }
+
+        /**
+         * Clear all outbound track monitors.
+         * @private
+         */
+        _clearAllVideoTrackMonitors() {
+            if (!this._outboundVideoMonitors || this._outboundVideoMonitors.size === 0) {
+                if (this._pendingVideoMuteFinalizers && this._pendingVideoMuteFinalizers.size) {
+                    this._cancelPendingVideoMuteFinalizers();
+                }
+                return;
+            }
+            this._cancelPendingVideoMuteFinalizers();
+            const tracks = Array.from(this._outboundVideoMonitors.keys());
+            for (const track of tracks) {
+                this._unmonitorOutboundVideoTrack(track, { skipSend: true });
+            }
+            this._outboundVideoMonitors.clear();
+            if (this._pendingVideoMuteFinalizers) {
+                this._pendingVideoMuteFinalizers.clear();
+            }
+        }
+
+        /**
+         * Synchronize current mute states with a newly opened data channel.
+         * @private
+         * @param {Object} connection
+         */
+        _syncVideoMuteStateToConnection(connection) {
+            if (!connection || connection.type !== 'publisher') return;
+            if (!this.state || !this.state.publishing) return;
+            if (!this._outboundVideoMonitors || this._outboundVideoMonitors.size === 0) return;
+
+            for (const monitor of this._outboundVideoMonitors.values()) {
+                const track = monitor.track;
+                const muted = typeof monitor.lastState === 'boolean'
+                    ? monitor.lastState
+                    : this._isTrackEffectivelyMuted(track);
+                this._sendVideoMutedState(track, muted, connection.uuid, 'sync');
+            }
         }
 
         /**
@@ -1827,6 +2452,9 @@
                     } catch (e) {
                         this._log('Failed to send publisher info:', e.message || e);
                     }
+
+                    // Sync current mute state so the viewer blanks immediately if needed
+                    this._syncVideoMuteStateToConnection(connection);
                 }
                 
                 // Start ping monitoring based on role/flags
@@ -1950,6 +2578,28 @@
                     } else if (msg.bye) {
                         this._log('Received bye message via data channel');
                         this._handleBye({ UUID: connection.uuid });
+                    } else if (Object.prototype.hasOwnProperty.call(msg, 'videoMuted')) {
+                        const detail = {
+                            muted: !!msg.videoMuted,
+                            trackId: (typeof msg.trackId === 'string') ? msg.trackId : null,
+                            streamID: connection.streamID || null,
+                            uuid: connection.uuid,
+                            connectionType: connection.type || 'unknown',
+                            timestamp: Date.now(),
+                            raw: msg
+                        };
+                        this._emit('remoteVideoMuteState', detail);
+                        this._emit('dataReceived', {
+                            data: msg,
+                            uuid: connection.uuid,
+                            streamID: connection.streamID
+                        });
+                        // Typo compatibility: also emit 'dataRecieved'
+                        this._emit('dataRecieved', {
+                            data: msg,
+                            uuid: connection.uuid,
+                            streamID: connection.streamID
+                        });
                     } else if (msg.pipe) {
                         // Handle generic data sent via pipe protocol
                         this._log('Received generic data via pipe');
@@ -1976,44 +2626,14 @@
                         }
                     } else if (msg.iceRestartRequest) {
                         this._log('Received ICE restart request via data channel');
-                        // Handle ICE restart
-                        if (connection.pc && connection.pc.restartIce) {
-                            connection.pc.restartIce();
-                        } else {
-                            // Create new offer with ICE restart
-                            const offer = await connection.pc.createOffer({ iceRestart: true });
-                            await connection.pc.setLocalDescription(offer);
-                            
-                            const offerMsg = {
-                                UUID: connection.uuid,
-                                session: connection.session,
-                                streamID: connection.streamID
-                            };
-                            
-                            // Encrypt and send via data channel
-                            if (this._getEffectivePassword() !== null) {
-                                try {
-                                    const [encrypted, vector] = await this._encryptMessage(JSON.stringify(offer));
-                            const restartMsg = { 
-                                UUID: connection.uuid,
-                                description: encrypted,
-                                vector: vector,
-                                session: connection.session
-                            };
-                                    this._logMessage('OUT', restartMsg, 'DataChannel');
-                                    channel.send(JSON.stringify(restartMsg));
-                                } catch (error) {
-                                    this._log('Failed to encrypt offer for ICE restart:', error);
-                                }
-                            } else {
-                            const restartMsg = { 
-                                UUID: connection.uuid,
-                                description: offer,
-                                session: connection.session
-                            };
-                                this._logMessage('OUT', restartMsg, 'DataChannel');
-                                channel.send(JSON.stringify(restartMsg));
-                            }
+                        // The publisher owns the offer in VDO.Ninja. Ignore a
+                        // misdirected request rather than letting a viewer create a
+                        // competing offer.
+                        if (connection.type === 'publisher') {
+                            await this._initiateICERestart(connection, 'remote_request', {
+                                skipRemoteRequest: true,
+                                preferDataChannel: true
+                            });
                         }
                     }
                 } catch (error) {
@@ -2112,6 +2732,9 @@
                         });
                     }
                 }
+                
+                // Apply encoding preferences (bitrate/codec) if requested
+                await this._applyEncodingPreferencesToConnection(connection);
 
                 // Create offer
                 const offer = await connection.pc.createOffer();
@@ -2124,6 +2747,565 @@
                 this._log('Error creating offer:', error.message);
                 throw error;
             }
+        }
+
+        /**
+         * Apply codec and encoding preferences to outgoing senders for a connection.
+         * @private
+         * @param {Object} connection - Connection object
+         * @param {Object} [configOverride] - Optional override config
+         */
+        async _applyEncodingPreferencesToConnection(connection, configOverride) {
+            if (!connection || !connection.pc || connection.type !== 'publisher') return;
+
+            const config = configOverride || this._publishMediaConfig;
+            if (!config) return;
+            if (typeof connection.pc.getSenders !== 'function') return;
+
+            const senders = connection.pc.getSenders();
+            if (!Array.isArray(senders) || senders.length === 0) return;
+
+            const transceivers = (typeof connection.pc.getTransceivers === 'function')
+                ? connection.pc.getTransceivers()
+                : [];
+
+            const tasks = [];
+
+            for (const sender of senders) {
+                if (!sender || !sender.track) continue;
+                const kind = sender.track.kind;
+                if (!kind) continue;
+
+                const mediaConfig = kind === 'video' ? config.video : (kind === 'audio' ? config.audio : null);
+                if (!mediaConfig) continue;
+
+                if (mediaConfig.codec) {
+                    this._preferCodecOnSender(sender, mediaConfig.codec, kind, transceivers);
+                }
+
+                if (typeof mediaConfig.maxBitrate === 'number' ||
+                    typeof mediaConfig.minBitrate === 'number' ||
+                    typeof mediaConfig.maxFramerate === 'number' ||
+                    typeof mediaConfig.scaleResolutionDownBy === 'number') {
+                    tasks.push(this._applySenderEncodingParameters(sender, mediaConfig, kind));
+                }
+            }
+
+            if (tasks.length > 0) {
+                await Promise.all(
+                    tasks.map(task => task.catch(error => this._log('Failed to apply RTP sender parameters:', error)))
+                );
+            }
+        }
+
+        /**
+         * Reset any explicit encoding preferences applied to a connection.
+         * @private
+         * @param {Object} connection - Connection to reset
+         */
+        async _resetEncodingPreferencesForConnection(connection) {
+            if (!connection || !connection.pc || typeof connection.pc.getSenders !== 'function') return;
+
+            const senders = connection.pc.getSenders();
+            if (!Array.isArray(senders) || senders.length === 0) return;
+
+            const tasks = senders.map(sender => this._clearSenderEncodingParameters(sender));
+            await Promise.all(
+                tasks.map(task => task.catch(error => this._log('Failed to clear RTP sender parameters:', error)))
+            );
+        }
+
+        /**
+         * Prioritize a codec on a transceiver when supported.
+         * @private
+         * @param {RTCRtpSender} sender - Sender to adjust
+         * @param {string} codecName - Desired codec (e.g. "VP9", "video/VP9")
+         * @param {string} kind - "audio" or "video"
+         * @param {RTCRtpTransceiver[]} transceivers - Available transceivers
+         */
+        _preferCodecOnSender(sender, codecName, kind, transceivers = []) {
+            if (!sender || !codecName) return;
+            if (typeof RTCRtpSender === 'undefined' || typeof RTCRtpSender.getCapabilities !== 'function') return;
+
+            const normalizedCodec = this._normalizeCodecName(codecName, kind);
+            if (!normalizedCodec) return;
+
+            const transceiver = Array.isArray(transceivers)
+                ? transceivers.find(t => t && t.sender === sender)
+                : null;
+
+            if (!transceiver || typeof transceiver.setCodecPreferences !== 'function') return;
+
+            const capabilities = RTCRtpSender.getCapabilities(kind);
+            if (!capabilities || !Array.isArray(capabilities.codecs) || capabilities.codecs.length === 0) return;
+
+            const preferenceList = this._buildCodecPreferenceList(capabilities.codecs, normalizedCodec);
+            if (!preferenceList) return;
+
+            try {
+                transceiver.setCodecPreferences(preferenceList);
+                this._log(`Applied codec preference ${normalizedCodec} for ${kind}`);
+            } catch (error) {
+                this._log('Codec preference application failed:', error);
+            }
+        }
+
+        /**
+         * Apply RTP sender encoding parameters such as bitrate.
+         * @private
+         * @param {RTCRtpSender} sender - Sender to adjust
+         * @param {Object} mediaConfig - Media configuration
+         * @param {string} kind - "audio" or "video"
+         */
+        async _applySenderEncodingParameters(sender, mediaConfig, kind) {
+            if (!sender || typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
+
+            let params;
+            try {
+                params = sender.getParameters();
+            } catch (error) {
+                this._log('Unable to read RTP sender parameters:', error);
+                return;
+            }
+
+            if (!params) return;
+
+            if (!Array.isArray(params.encodings) || params.encodings.length === 0) {
+                params.encodings = [{}];
+            }
+
+            const encoding = params.encodings[0];
+            let changed = false;
+
+            if (typeof mediaConfig.maxBitrate === 'number') {
+                encoding.maxBitrate = mediaConfig.maxBitrate;
+                changed = true;
+            }
+
+            if (typeof mediaConfig.minBitrate === 'number') {
+                encoding.minBitrate = mediaConfig.minBitrate;
+                changed = true;
+            }
+
+            if (typeof mediaConfig.maxFramerate === 'number') {
+                encoding.maxFramerate = mediaConfig.maxFramerate;
+                changed = true;
+            }
+
+            if (typeof mediaConfig.scaleResolutionDownBy === 'number') {
+                encoding.scaleResolutionDownBy = mediaConfig.scaleResolutionDownBy;
+                changed = true;
+            }
+
+            if (!changed) return;
+
+            try {
+                await sender.setParameters(params);
+            } catch (error) {
+                this._log('Failed to set RTP sender parameters:', error);
+            }
+        }
+
+        /**
+         * Clear custom RTP sender parameters.
+         * @private
+         * @param {RTCRtpSender} sender - Sender to reset
+         */
+        async _clearSenderEncodingParameters(sender) {
+            if (!sender || typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
+
+            let params;
+            try {
+                params = sender.getParameters();
+            } catch (error) {
+                this._log('Unable to read RTP sender parameters:', error);
+                return;
+            }
+
+            if (!params || !Array.isArray(params.encodings) || params.encodings.length === 0) return;
+
+            const encoding = params.encodings[0];
+            let changed = false;
+
+            for (const key of ['maxBitrate', 'minBitrate', 'maxFramerate', 'scaleResolutionDownBy']) {
+                if (encoding[key] !== undefined) {
+                    delete encoding[key];
+                    changed = true;
+                }
+            }
+
+            if (!changed) return;
+
+            try {
+                await sender.setParameters(params);
+            } catch (error) {
+                this._log('Failed to clear RTP sender parameters:', error);
+            }
+        }
+
+        /**
+         * Normalize codec name to match the format used by WebRTC capabilities.
+         * @private
+         * @param {string} codecName - Codec identifier
+         * @param {string} kind - "audio" or "video"
+         * @returns {string|null} Normalized codec string
+         */
+        _normalizeCodecName(codecName, kind) {
+            if (typeof codecName !== 'string') return null;
+
+            let normalized = codecName.trim();
+            if (!normalized) return null;
+
+            if (normalized.startsWith('/')) {
+                normalized = `${kind}${normalized}`;
+            } else if (!normalized.includes('/')) {
+                normalized = `${kind}/${normalized}`;
+            }
+
+            const parts = normalized.split('/');
+            if (parts.length !== 2) return null;
+
+            const prefix = parts[0].toLowerCase();
+            const suffix = parts[1].trim().toUpperCase();
+
+            if (!prefix || !suffix) return null;
+
+            return `${prefix}/${suffix}`;
+        }
+
+        /**
+         * Build a codec preference list prioritizing the requested codec.
+         * @private
+         * @param {Array} codecs - Codec capabilities
+         * @param {string} requestedCodec - Normalized codec string
+         * @returns {Array|null} Reordered codec list
+         */
+        _buildCodecPreferenceList(codecs, requestedCodec) {
+            if (!Array.isArray(codecs) || !requestedCodec) return null;
+
+            const target = requestedCodec.toLowerCase();
+            const primary = [];
+            const associated = [];
+            const fallback = [];
+
+            for (const codec of codecs) {
+                const mime = (codec && codec.mimeType ? codec.mimeType : '').toLowerCase();
+                if (!mime) {
+                    fallback.push(codec);
+                    continue;
+                }
+
+                if (mime === target) {
+                    primary.push(codec);
+                } else if (mime.endsWith('/rtx')) {
+                    associated.push(codec);
+                } else {
+                    fallback.push(codec);
+                }
+            }
+
+            if (primary.length === 0) return null;
+
+            const payloads = new Set(
+                primary
+                    .map(codec => codec && codec.preferredPayloadType)
+                    .filter(value => value !== undefined)
+            );
+
+            const orderedAssociated = associated.filter(codec => {
+                if (!codec || !codec.sdpFmtpLine) return false;
+                const match = codec.sdpFmtpLine.match(/apt=(\d+)/);
+                if (!match) return false;
+                return payloads.has(Number(match[1]));
+            });
+
+            return [...primary, ...orderedAssociated, ...fallback];
+        }
+
+        /**
+         * Apply local media constraints such as resolution.
+         * @private
+         * @param {MediaStream} stream - Local media stream
+         * @param {Object} config - Media configuration
+         */
+        async _applyLocalMediaPreferences(stream, config) {
+            if (!stream || !config) return;
+
+            const videoSettings = config.video;
+            if (!videoSettings || !videoSettings.resolution) return;
+
+            const constraints = {};
+            const { width, height, frameRate } = videoSettings.resolution;
+
+            if (typeof width === 'number' && width > 0) {
+                constraints.width = { ideal: width };
+            }
+
+            if (typeof height === 'number' && height > 0) {
+                constraints.height = { ideal: height };
+            }
+
+            if (typeof frameRate === 'number' && frameRate > 0) {
+                constraints.frameRate = { ideal: frameRate };
+            }
+
+            if (Object.keys(constraints).length === 0) return;
+
+            const videoTracks = stream.getVideoTracks ? stream.getVideoTracks() : [];
+            for (const track of videoTracks) {
+                if (!track || typeof track.applyConstraints !== 'function') continue;
+                try {
+                    await track.applyConstraints(constraints);
+                    this._log('Applied video constraints:', constraints);
+                } catch (error) {
+                    this._log('Failed to apply video constraints:', error);
+                }
+            }
+        }
+
+        /**
+         * Extract and normalize publisher media preferences from options.
+         * Accepts the same shape as publish() options (media/webrtc).
+         * @private
+         * @param {Object} options - Options provided to publish()/updatePublisherMedia()
+         * @returns {Object|null} Normalized configuration
+         */
+        async _extractPublisherMediaOptions(options = {}) {
+            if (!options) return null;
+
+            const sources = [];
+            if (options.media && typeof options.media === 'object') sources.push(options.media);
+            if (options.mediaSettings && typeof options.mediaSettings === 'object') sources.push(options.mediaSettings);
+            if (options.webrtc && typeof options.webrtc === 'object') sources.push(options.webrtc);
+            if (options.encoding && typeof options.encoding === 'object') sources.push(options.encoding);
+
+            const collected = { video: {}, audio: {} };
+            let hasValues = false;
+
+            const applySource = (source) => {
+                if (!source || typeof source !== 'object') return;
+
+                if (typeof source.video === 'object' && source.video !== null) {
+                    if (source.video.codec !== undefined) { collected.video.codec = source.video.codec; hasValues = true; }
+                    if (source.video.bitrate !== undefined) { collected.video.maxBitrate = source.video.bitrate; hasValues = true; }
+                    if (source.video.maxBitrate !== undefined) { collected.video.maxBitrate = source.video.maxBitrate; hasValues = true; }
+                    if (source.video.minBitrate !== undefined) { collected.video.minBitrate = source.video.minBitrate; hasValues = true; }
+                    if (source.video.resolution !== undefined) { collected.video.resolution = source.video.resolution; hasValues = true; }
+                    if (source.video.width !== undefined) { collected.video.width = source.video.width; hasValues = true; }
+                    if (source.video.height !== undefined) { collected.video.height = source.video.height; hasValues = true; }
+                    if (source.video.frameRate !== undefined) { collected.video.frameRate = source.video.frameRate; hasValues = true; }
+                }
+
+                if (source.videoCodec !== undefined) { collected.video.codec = source.videoCodec; hasValues = true; }
+                if (source.videoBitrate !== undefined) { collected.video.maxBitrate = source.videoBitrate; hasValues = true; }
+                if (source.videoResolution !== undefined) { collected.video.resolution = source.videoResolution; hasValues = true; }
+                if (source.videoWidth !== undefined) { collected.video.width = source.videoWidth; hasValues = true; }
+                if (source.videoHeight !== undefined) { collected.video.height = source.videoHeight; hasValues = true; }
+                if (source.videoFrameRate !== undefined) { collected.video.frameRate = source.videoFrameRate; hasValues = true; }
+
+                if (typeof source.audio === 'object' && source.audio !== null) {
+                    if (source.audio.codec !== undefined) { collected.audio.codec = source.audio.codec; hasValues = true; }
+                    if (source.audio.bitrate !== undefined) { collected.audio.maxBitrate = source.audio.bitrate; hasValues = true; }
+                    if (source.audio.maxBitrate !== undefined) { collected.audio.maxBitrate = source.audio.maxBitrate; hasValues = true; }
+                    if (source.audio.minBitrate !== undefined) { collected.audio.minBitrate = source.audio.minBitrate; hasValues = true; }
+                }
+
+                if (source.audioCodec !== undefined) { collected.audio.codec = source.audioCodec; hasValues = true; }
+                if (source.audioBitrate !== undefined) { collected.audio.maxBitrate = source.audioBitrate; hasValues = true; }
+            };
+
+            sources.forEach(applySource);
+
+            if (options.videoCodec !== undefined) { collected.video.codec = options.videoCodec; hasValues = true; }
+            if (options.videoBitrate !== undefined) { collected.video.maxBitrate = options.videoBitrate; hasValues = true; }
+            if (options.videoResolution !== undefined) { collected.video.resolution = options.videoResolution; hasValues = true; }
+            if (options.videoWidth !== undefined) { collected.video.width = options.videoWidth; hasValues = true; }
+            if (options.videoHeight !== undefined) { collected.video.height = options.videoHeight; hasValues = true; }
+            if (options.videoFrameRate !== undefined) { collected.video.frameRate = options.videoFrameRate; hasValues = true; }
+            if (options.audioCodec !== undefined) { collected.audio.codec = options.audioCodec; hasValues = true; }
+            if (options.audioBitrate !== undefined) { collected.audio.maxBitrate = options.audioBitrate; hasValues = true; }
+
+            if (!hasValues) return null;
+
+            const normalized = {};
+
+            const videoConfig = {};
+            if (collected.video.codec !== undefined) {
+                videoConfig.codec = collected.video.codec;
+            }
+            const parsedVideoBitrate = this._parseBitrateSetting(collected.video.maxBitrate);
+            if (parsedVideoBitrate !== null) {
+                videoConfig.maxBitrate = parsedVideoBitrate;
+            }
+            const parsedVideoMinBitrate = this._parseBitrateSetting(collected.video.minBitrate);
+            if (parsedVideoMinBitrate !== null) {
+                videoConfig.minBitrate = parsedVideoMinBitrate;
+            }
+            const parsedResolution = this._parseResolutionSetting(
+                collected.video.resolution,
+                collected.video.width,
+                collected.video.height,
+                collected.video.frameRate
+            );
+            if (parsedResolution) {
+                videoConfig.resolution = parsedResolution;
+            }
+
+            if (Object.keys(videoConfig).length > 0) {
+                normalized.video = videoConfig;
+            }
+
+            const audioConfig = {};
+            if (collected.audio.codec !== undefined) {
+                audioConfig.codec = collected.audio.codec;
+            }
+            const parsedAudioBitrate = this._parseBitrateSetting(collected.audio.maxBitrate);
+            if (parsedAudioBitrate !== null) {
+                audioConfig.maxBitrate = parsedAudioBitrate;
+            }
+            const parsedAudioMinBitrate = this._parseBitrateSetting(collected.audio.minBitrate);
+            if (parsedAudioMinBitrate !== null) {
+                audioConfig.minBitrate = parsedAudioMinBitrate;
+            }
+
+            if (Object.keys(audioConfig).length > 0) {
+                normalized.audio = audioConfig;
+            }
+
+            return Object.keys(normalized).length > 0 ? normalized : null;
+        }
+
+        /**
+         * Parse bitrate values provided in various formats and normalize to bits per second.
+         * @private
+         * @param {number|string} value - Bitrate input
+         * @returns {number|null} Normalized bitrate in bps
+         */
+        _parseBitrateSetting(value) {
+            if (value === undefined || value === null || value === '') return null;
+
+            let numericValue = value;
+            let multiplier = 1;
+
+            if (typeof value === 'string') {
+                const trimmed = value.trim().toLowerCase();
+                const match = trimmed.match(/^([\d.]+)\s*(kbps|mbps|bps|k|m)?$/);
+                if (!match) return null;
+                numericValue = parseFloat(match[1]);
+                if (Number.isNaN(numericValue)) return null;
+
+                const unit = match[2];
+                if (!unit) {
+                    multiplier = numericValue < 10000 ? 1000 : 1;
+                } else if (unit === 'mbps' || unit === 'm') {
+                    multiplier = 1000000;
+                } else if (unit === 'kbps' || unit === 'k') {
+                    multiplier = 1000;
+                } else {
+                    multiplier = 1;
+                }
+            } else if (typeof value === 'number') {
+                numericValue = value;
+                if (numericValue < 0) return null;
+                if (numericValue > 0 && numericValue < 10000) {
+                    multiplier = 1000;
+                }
+            } else {
+                return null;
+            }
+
+            const result = Math.round(numericValue * multiplier);
+            return result > 0 ? result : null;
+        }
+
+        /**
+         * Normalize resolution values expressed as objects or strings.
+         * @private
+         * @param {Object|string} resolution - Resolution descriptor
+         * @param {number} [widthAlias] - Explicit width override
+         * @param {number} [heightAlias] - Explicit height override
+         * @param {number} [frameRateAlias] - Explicit frame rate override
+         * @returns {Object|null} Normalized resolution constraints
+         */
+        _parseResolutionSetting(resolution, widthAlias, heightAlias, frameRateAlias) {
+            let width = widthAlias !== undefined ? Number(widthAlias) : undefined;
+            let height = heightAlias !== undefined ? Number(heightAlias) : undefined;
+            let frameRate = frameRateAlias !== undefined ? Number(frameRateAlias) : undefined;
+
+            if (resolution && typeof resolution === 'string') {
+                const trimmed = resolution.trim().toLowerCase();
+                const match = trimmed.match(/(\d+)x(\d+)(?:@([\d.]+))?/);
+                if (match) {
+                    width = Number(match[1]);
+                    height = Number(match[2]);
+                    if (match[3] !== undefined) {
+                        frameRate = Number(match[3]);
+                    }
+                }
+            } else if (resolution && typeof resolution === 'object') {
+                if (resolution.width !== undefined) width = Number(resolution.width);
+                if (resolution.height !== undefined) height = Number(resolution.height);
+                if (resolution.frameRate !== undefined) frameRate = Number(resolution.frameRate);
+                if (resolution.fps !== undefined && frameRate === undefined) frameRate = Number(resolution.fps);
+            }
+
+            const normalized = {};
+            if (Number.isFinite(width) && width > 0) normalized.width = Math.round(width);
+            if (Number.isFinite(height) && height > 0) normalized.height = Math.round(height);
+            if (Number.isFinite(frameRate) && frameRate > 0) normalized.frameRate = Math.round(frameRate);
+
+            return Object.keys(normalized).length > 0 ? normalized : null;
+        }
+
+        /**
+         * Merge existing media configuration with updates.
+         * @private
+         * @param {Object|null} baseConfig - Existing configuration
+         * @param {Object|null} updateConfig - New configuration
+         * @returns {Object|null} Merged configuration
+         */
+        _mergeMediaConfigs(baseConfig, updateConfig) {
+            const result = {};
+
+            if (baseConfig && baseConfig.video) {
+                result.video = { ...baseConfig.video };
+            }
+            if (baseConfig && baseConfig.audio) {
+                result.audio = { ...baseConfig.audio };
+            }
+
+            if (updateConfig) {
+                const mergeSection = (sectionName) => {
+                    const updateSection = updateConfig[sectionName];
+                    if (updateSection === null) {
+                        delete result[sectionName];
+                        return;
+                    }
+                    if (!updateSection || typeof updateSection !== 'object') return;
+
+                    if (!result[sectionName]) {
+                        result[sectionName] = {};
+                    }
+
+                    for (const [key, value] of Object.entries(updateSection)) {
+                        if (value === undefined) continue;
+                        if (value === null) {
+                            delete result[sectionName][key];
+                        } else {
+                            result[sectionName][key] = value;
+                        }
+                    }
+
+                    if (Object.keys(result[sectionName]).length === 0) {
+                        delete result[sectionName];
+                    }
+                };
+
+                mergeSection('video');
+                mergeSection('audio');
+            }
+
+            return Object.keys(result).length > 0 ? result : null;
         }
 
         /**
@@ -2247,15 +3429,259 @@
             }, connection.iceBundleDelay);
         }
 
+        _isCurrentConnection(connection) {
+            if (!connection || !this.connections) return false;
+            const pair = this.connections.get(connection.uuid);
+            return !!(pair && pair[connection.type] === connection);
+        }
+
+        _clearConnectionRecoveryTimers(connection) {
+            if (!connection) return;
+            for (const key of ['disconnectTimer', 'recoveryTimer', 'connectTimer', 'relayRestoreTimer']) {
+                if (connection[key]) clearTimeout(connection[key]);
+                connection[key] = null;
+            }
+        }
+
+        _setTrackedStreamState(connection, state) {
+            if (!connection || !connection.streamID || !this.streams.has(connection.streamID)) return;
+            const stream = this.streams.get(connection.streamID);
+            stream.state = state;
+            stream.lastSeen = Date.now();
+            if (connection.uuid) stream.uuid = connection.uuid;
+        }
+
         /**
-         * Handle connection failure
+         * Normalize RTCPeerConnection and ICE state changes into one directional
+         * health path. A transient disconnected state is not a terminal failure.
          * @private
-         * @param {Object} connection - Connection object
          */
-        _handleConnectionFailed(connection) {
+        _handlePeerConnectionState(connection, source = 'ice') {
+            if (!this._isCurrentConnection(connection) || connection._finalized || !connection.pc) return;
+
+            const peerState = connection.pc.connectionState;
+            const iceState = connection.pc.iceConnectionState;
+            let state;
+            if (peerState === 'failed' || iceState === 'failed') {
+                state = 'failed';
+            } else if (peerState === 'disconnected' || iceState === 'disconnected') {
+                state = 'disconnected';
+            } else if (peerState === 'connected' || iceState === 'connected' || iceState === 'completed') {
+                state = 'connected';
+            } else {
+                state = (peerState && peerState !== 'new') ? peerState : iceState;
+            }
+
+            this._log(`${source === 'peer' ? 'Peer' : 'ICE'} state for ${connection.uuid}:`, state);
+
+            if (state === 'connected') {
+                const recovered = connection.recoveryStage > 0 || connection.healthState === 'recovering';
+                this._clearConnectionRecoveryTimers(connection);
+                connection.healthState = 'connected';
+                connection.recovering = false;
+                connection.recoveryStage = 0;
+                this._setTrackedStreamState(connection, 'connected');
+
+                if (!connection._peerConnectedEmitted) {
+                    connection._peerConnectedEmitted = true;
+                    this._emit('peerConnected', { uuid: connection.uuid, connection });
+                    this._emitIframeCompatible(
+                        connection.type === 'publisher' ? 'push-connection' : 'view-connection',
+                        true,
+                        connection.uuid,
+                        connection.streamID
+                    );
+                }
+                if (recovered) {
+                    this._emit('connectionRecovered', {
+                        uuid: connection.uuid,
+                        type: connection.type,
+                        streamID: connection.streamID
+                    });
+                }
+                if (connection.relayEscalated) this._scheduleRelayPolicyRestore(connection);
+                if (connection.type === 'viewer' && connection.streamID && this._failedViewerConnections) {
+                    const failed = this._failedViewerConnections.get(connection.streamID);
+                    if (failed && failed.timer) clearTimeout(failed.timer);
+                    this._failedViewerConnections.delete(connection.streamID);
+                }
+                return;
+            }
+
+            if (state === 'disconnected') {
+                connection.healthState = 'degraded';
+                this._setTrackedStreamState(connection, 'disconnected');
+                if (!connection.disconnectTimer) {
+                    connection.disconnectTimer = setTimeout(() => {
+                        connection.disconnectTimer = null;
+                        if (!this._isCurrentConnection(connection) || !connection.pc) return;
+                        const peerConnected = connection.pc.connectionState === 'connected';
+                        const iceConnected = connection.pc.iceConnectionState === 'connected' ||
+                            connection.pc.iceConnectionState === 'completed';
+                        if (!peerConnected && !iceConnected) {
+                            this._recoverConnection(connection, 'disconnected');
+                        }
+                    }, this.disconnectGracePeriod);
+                    if (connection.disconnectTimer && typeof connection.disconnectTimer.unref === 'function') {
+                        connection.disconnectTimer.unref();
+                    }
+                }
+                return;
+            }
+
+            if (state === 'failed') {
+                if (connection.disconnectTimer) clearTimeout(connection.disconnectTimer);
+                connection.disconnectTimer = null;
+                this._setTrackedStreamState(connection, 'failed');
+                this._recoverConnection(connection, 'failed');
+            }
+        }
+
+        _hasTurnServer(configuration) {
+            const servers = configuration && Array.isArray(configuration.iceServers) ? configuration.iceServers : [];
+            return servers.some(server => {
+                const urls = Array.isArray(server.urls) ? server.urls : [server.urls || server.url];
+                return urls.some(url => typeof url === 'string' && /^turns?:/i.test(url));
+            });
+        }
+
+        _escalateConnectionToRelay(connection) {
+            if (!connection.pc || typeof connection.pc.setConfiguration !== 'function') return false;
+            const current = (typeof connection.pc.getConfiguration === 'function') ?
+                connection.pc.getConfiguration() : this.configuration;
+            if (!this._hasTurnServer(current)) return false;
+            if (current.iceTransportPolicy === 'relay') return true;
+
+            const next = { ...current };
+            if (Array.isArray(current.iceServers) && current.iceServers.length > 1) {
+                next.iceServers = current.iceServers.slice(1).concat(current.iceServers[0]);
+            }
+            next.iceTransportPolicy = 'relay';
+
+            try {
+                connection.pc.setConfiguration(next);
+                connection.originalConfiguration = current;
+                connection.relayEscalated = true;
+                this._emit('relayEscalated', {
+                    uuid: connection.uuid,
+                    type: connection.type,
+                    streamID: connection.streamID
+                });
+                return true;
+            } catch (error) {
+                this._log('Unable to escalate connection to TURN relay:', error.message || error);
+                return false;
+            }
+        }
+
+        _scheduleRelayPolicyRestore(connection) {
+            if (this.forceTURN || !connection.relayEscalated || connection.relayRestoreTimer) return;
+            connection.relayRestoreTimer = setTimeout(() => {
+                connection.relayRestoreTimer = null;
+                if (!this._isCurrentConnection(connection) || !connection.pc || !connection.originalConfiguration) return;
+                try {
+                    connection.pc.setConfiguration(connection.originalConfiguration);
+                    connection.relayEscalated = false;
+                    connection.originalConfiguration = null;
+                    this._emit('relayRestored', {
+                        uuid: connection.uuid,
+                        type: connection.type,
+                        streamID: connection.streamID
+                    });
+                } catch (error) {
+                    this._log('Unable to restore direct ICE policy:', error.message || error);
+                }
+            }, this.relayRestoreDelay);
+        }
+
+        async _requestConnectionICERestart(connection, reason) {
+            if (!connection || !connection.pc) return false;
+
+            // VDO.Ninja's publisher owns the offer. A viewer asks over the existing
+            // sendChannel; it never invents a new WebSocket request type.
+            if (connection.type === 'viewer') {
+                if (!connection.dataChannel || connection.dataChannel.readyState !== 'open') return false;
+                connection.dataChannel.send(JSON.stringify({ iceRestartRequest: true }));
+                this._emit('iceRestart', {
+                    uuid: connection.uuid,
+                    streamID: connection.streamID,
+                    reason
+                });
+                return true;
+            }
+
+            return this._initiateICERestart(connection, reason, { skipRemoteRequest: true });
+        }
+
+        async _recoverConnection(connection, reason) {
+            if (!this._isCurrentConnection(connection) || connection._finalized || connection.recovering) return;
+            if (!this.autoRecover || this._intentionalDisconnect) {
+                this._handleConnectionFailed(connection, reason);
+                return;
+            }
+
+            connection.recovering = true;
+            connection.healthState = 'recovering';
+            if (connection.recoveryTimer) clearTimeout(connection.recoveryTimer);
+            connection.recoveryTimer = null;
+
+            let phase = 'direct';
+            let started = false;
+
+            if (connection.recoveryStage === 0) {
+                connection.recoveryStage = 1;
+                started = await this._requestConnectionICERestart(connection, reason);
+            } else if (connection.recoveryStage === 1 && this.autoRelay) {
+                phase = 'relay';
+                connection.recoveryStage = 2;
+                if (this._escalateConnectionToRelay(connection)) {
+                    started = await this._requestConnectionICERestart(connection, `${reason}-relay`);
+                }
+            }
+
+            if (!started) {
+                connection.recovering = false;
+                this._handleConnectionFailed(connection, reason);
+                return;
+            }
+
+            this._emit('connectionRecovering', {
+                uuid: connection.uuid,
+                type: connection.type,
+                streamID: connection.streamID,
+                reason,
+                phase,
+                attempt: connection.recoveryStage
+            });
+
+            connection.recoveryTimer = setTimeout(() => {
+                connection.recoveryTimer = null;
+                connection.recovering = false;
+                if (!this._isCurrentConnection(connection) || !connection.pc) return;
+                const peerConnected = connection.pc.connectionState === 'connected';
+                const iceConnected = connection.pc.iceConnectionState === 'connected' ||
+                    connection.pc.iceConnectionState === 'completed';
+                if (peerConnected || iceConnected) {
+                    this._handlePeerConnectionState(connection, 'recovery');
+                } else {
+                    this._recoverConnection(connection, `${reason}-timeout`);
+                }
+            }, this.recoveryTimeout);
+            if (connection.recoveryTimer && typeof connection.recoveryTimer.unref === 'function') {
+                connection.recoveryTimer.unref();
+            }
+        }
+
+        /**
+         * Finalize a connection after bounded recovery is exhausted.
+         * @private
+         */
+        _handleConnectionFailed(connection, reason = 'failed') {
+            if (!connection || connection._finalized) return;
+            connection._finalized = true;
             this._log('Connection failed:', connection.uuid, 'type:', connection.type);
 
-            // Stop ping monitoring
+            this._clearConnectionRecoveryTimers(connection);
             this._stopPingMonitoring(connection);
 
             if (connection.pc) {
@@ -2269,10 +3695,18 @@
                     type: connection.type,
                     streamID: connection.streamID
                 });
+                this._emitIframeCompatible(
+                    connection.type === 'publisher' ? 'push-connection' : 'view-connection',
+                    false,
+                    connection.uuid,
+                    connection.streamID
+                );
             } catch (e) {}
 
             // For viewer connections, check if we should retry
-            if (connection.type === 'viewer' && connection.streamID && !this._intentionalDisconnect) {
+            const viewIntent = connection.streamID && this._connectionIntent && this._connectionIntent.views ?
+                this._connectionIntent.views.get(connection.streamID) : null;
+            if (connection.type === 'viewer' && connection.streamID && viewIntent && !this._intentionalDisconnect) {
                 this._log('Viewer connection failed for stream:', connection.streamID);
                 
                 // Store the stream we were viewing for retry
@@ -2281,17 +3715,21 @@
                 }
                 
                 // Track the failed connection with retry info
-                this._failedViewerConnections.set(connection.streamID, {
+                const previous = this._failedViewerConnections.get(connection.streamID);
+                if (previous && previous.timer) clearTimeout(previous.timer);
+                const failed = {
                     uuid: connection.uuid,
-                    viewOptions: connection.viewOptions || {},
-                    retryCount: 0,
-                    lastRetry: Date.now()
-                });
+                    viewOptions: viewIntent || connection.viewOptions || {},
+                    retryCount: previous ? previous.retryCount : 0,
+                    lastRetry: Date.now(),
+                    timer: null
+                };
+                this._failedViewerConnections.set(connection.streamID, failed);
                 
-                // Schedule a retry after a short delay
-                setTimeout(() => {
+                failed.timer = setTimeout(() => {
+                    failed.timer = null;
                     this._retryFailedViewerConnection(connection.streamID);
-                }, 2000); // Wait 2 seconds before retry
+                }, 2000);
             }
 
             // Remove the specific connection type
@@ -2308,7 +3746,8 @@
             this._emit('connectionFailed', {
                 uuid: connection.uuid,
                 type: connection.type,
-                streamID: connection.streamID
+                streamID: connection.streamID,
+                reason
             });
         }
 
@@ -2322,7 +3761,9 @@
             if (!failedConnection) return;
 
             // Check if we should still retry
-            if (this._intentionalDisconnect) {
+            const viewIntent = this._connectionIntent && this._connectionIntent.views ?
+                this._connectionIntent.views.get(streamID) : null;
+            if (this._intentionalDisconnect || !viewIntent || (this._stoppedViews && this._stoppedViews.has(streamID))) {
                 this._failedViewerConnections.delete(streamID);
                 return;
             }
@@ -2332,18 +3773,20 @@
 
             try {
                 // Re-request the stream
-                await this.view(streamID, failedConnection.viewOptions);
-                
-                // Success - remove from failed connections
-                this._failedViewerConnections.delete(streamID);
-                this._log('Successfully reconnected to stream:', streamID);
+                if (!this.state.connected) throw new Error('Signaling server is not connected');
+                const pc = await this.view(streamID, failedConnection.viewOptions);
+                if (!pc) throw new Error('Stream is not available yet');
+                // Keep the retry record until the replacement direction actually
+                // reaches connected; creating a PeerConnection is not recovery.
+                this._log('Replacement connection created for stream:', streamID);
             } catch (error) {
                 this._log('Retry failed for stream:', streamID, error.message);
                 
                 // Schedule another retry with exponential backoff
                 const nextDelay = Math.min(30000, 2000 * Math.pow(2, Math.min(failedConnection.retryCount - 1, 5)));
                 
-                setTimeout(() => {
+                failedConnection.timer = setTimeout(() => {
+                    failedConnection.timer = null;
                     this._retryFailedViewerConnection(streamID);
                 }, nextDelay);
             }
@@ -2401,17 +3844,17 @@
             } else if (msg.request === "play") {
                 await this._handlePlayRequest(msg);
             } else if (msg.request === "listing") {
-                this._handleListing(msg);
+                await this._handleListing(msg);
             } else if (msg.request === "videoaddedtoroom") {
-                this._handleVideoAddedToRoom(msg);
+                await this._handleVideoAddedToRoom(msg);
             } else if (msg.request === "someonejoined") {
-                this._handleSomeoneJoined(msg);
+                await this._handleSomeoneJoined(msg);
             } else if (msg.request === "error") {
                 this._handleError(msg);
             } else if (msg.request === "alert") {
                 this._handleAlert(msg);
             } else if (msg.request === "transferred") {
-                this._handleTransferred(msg);
+                await this._handleTransferred(msg);
             } else if (msg.request === "offerSDP") {
                 this._handleOfferSDPRequest(msg);
             } else if (msg.rejected) {
@@ -2461,6 +3904,10 @@
         async _handleOfferSDP(msg) {
             this._log('Handling offer from:', msg.UUID, 'session:', msg.session);
 
+            if (msg.streamID !== undefined) {
+                await this._ensurePasswordHash();
+            }
+
             // Normalize streamID to original (strip hash suffix if present), if provided
             const cleanStreamID = (msg.streamID !== undefined) ? this._stripHashFromStreamID(msg.streamID) : undefined;
 
@@ -2472,6 +3919,8 @@
                 // Session mismatch: close and drop, then recreate
                 this._log('Found existing connection with different session:', connection.session, 'vs', msg.session);
                 this._log('Closing old connection due to session mismatch');
+                this._clearConnectionRecoveryTimers(connection);
+                connection._finalized = true;
                 try { connection.pc && connection.pc.close(); } catch (e) {}
                 if (existingConnections) delete existingConnections.viewer;
                 connection = null;
@@ -2843,6 +4292,8 @@
         async _handlePlayRequest(msg) {
             this._log('Received play request for:', msg.streamID, 'from:', msg.UUID);
 
+            await this._ensurePasswordHash();
+
             // Normalize requested streamID (strip hash suffix if present)
             const requestedStream = this._stripHashFromStreamID(msg.streamID);
 
@@ -2917,23 +4368,100 @@
         }
 
         /**
+         * Ensure cached password hash is ready before stripping hashed stream IDs
+         * @private
+         * @returns {Promise<void>}
+         */
+        async _ensurePasswordHash() {
+            if (this.password === false || this.password === null) {
+                this._passwordHash = null;
+                this._passwordHashKey = null;
+                this._passwordHashPromise = null;
+                this._passwordHashPromiseKey = null;
+                return;
+            }
+
+            const effectivePassword = this._getEffectivePassword();
+            if (effectivePassword === null) {
+                this._passwordHash = null;
+                this._passwordHashKey = null;
+                this._passwordHashPromise = null;
+                this._passwordHashPromiseKey = null;
+                return;
+            }
+
+            const saltForHash = this.salt;
+            const hashKey = `${effectivePassword}:${saltForHash}`;
+
+            if (this._passwordHashKey && this._passwordHashKey !== hashKey) {
+                this._passwordHash = null;
+                this._passwordHashKey = null;
+            }
+
+            if (this._passwordHash && this._passwordHashKey === hashKey && typeof this._passwordHash === 'string' && this._passwordHash.length > 0) {
+                return;
+            }
+
+            if (this._passwordHashPromise) {
+                try {
+                    await this._passwordHashPromise;
+                } catch (error) {
+                    this._log('Failed to ensure password hash:', error);
+                }
+                if (this._passwordHash && this._passwordHashKey === hashKey && typeof this._passwordHash === 'string' && this._passwordHash.length > 0) {
+                    return;
+                }
+            }
+
+            const passwordForHash = effectivePassword;
+
+            const promise = this._generateHash(passwordForHash + saltForHash, 6);
+
+            this._passwordHashPromise = promise;
+            this._passwordHashPromiseKey = hashKey;
+
+            try {
+                const hash = await promise;
+                if (this._passwordHashPromise === promise && this._passwordHashPromiseKey === hashKey) {
+                    this._passwordHash = hash;
+                    this._passwordHashKey = hashKey;
+                }
+            } catch (error) {
+                this._log('Failed to precompute password hash:', error);
+            } finally {
+                if (this._passwordHashPromise === promise) {
+                    this._passwordHashPromise = null;
+                    this._passwordHashPromiseKey = null;
+                }
+            }
+        }
+
+        /**
          * Strip hash suffix from stream ID
          * @private
          * @param {string} streamID - Stream ID potentially with hash suffix
          * @returns {string} Clean stream ID without hash
          */
         _stripHashFromStreamID(streamID) {
-            if (!streamID || typeof streamID !== 'string') return streamID;
-            
-            // Hash suffixes are 6 characters long and are lowercase hex
-            if (streamID.length > 6) {
-                const lastSix = streamID.slice(-6);
-                // Check if last 6 chars are hex (0-9, a-f)
-                if (/^[a-f0-9]{6}$/.test(lastSix)) {
-                    return streamID.slice(0, -6);
-                }
+            if (!streamID || typeof streamID !== 'string') {
+                return streamID;
             }
-            
+
+            // Only strip when we have a cached password hash to compare against
+            if (!this._passwordHash || typeof this._passwordHash !== 'string') {
+                return streamID;
+            }
+
+            const suffixLength = this._passwordHash.length;
+            if (suffixLength === 0 || streamID.length <= suffixLength) {
+                return streamID;
+            }
+
+            const possibleHash = streamID.slice(-suffixLength);
+            if (possibleHash === this._passwordHash) {
+                return streamID.slice(0, -suffixLength);
+            }
+
             return streamID;
         }
 
@@ -2942,8 +4470,10 @@
          * @private
          * @param {Object} msg - Listing message
          */
-        _handleListing(msg) {
+        async _handleListing(msg) {
             this._log('Processing listing');
+
+            await this._ensurePasswordHash();
 
             // Emit internal event for room joined
             this._emit('_roomJoined');
@@ -2980,6 +4510,12 @@
                 
                 // Emit for the whole list
                 this._emit('listing', { list: cleanList, raw: msg });
+                this._emitIframeCompatible('room-peer-listing', {
+                    list: cleanList,
+                    director: msg.director || false,
+                    claim: Object.prototype.hasOwnProperty.call(msg, 'claim') ? msg.claim : null,
+                    source: 'listing'
+                });
 
                 // Also emit for each item
                 cleanList.forEach((item, index) => {
@@ -3001,6 +4537,15 @@
                     label: msg.label,
                     raw: msg
                 });
+                this._emitIframeCompatible('room-peer-listing', {
+                    list: msg.streamID ? [{
+                        streamID: this._stripHashFromStreamID(msg.streamID),
+                        UUID: msg.UUID
+                    }] : [],
+                    director: msg.director || false,
+                    claim: Object.prototype.hasOwnProperty.call(msg, 'claim') ? msg.claim : null,
+                    source: 'listing'
+                });
             }
 
             // Original peerListing event for backward compatibility
@@ -3012,7 +4557,9 @@
          * @private
          * @param {Object} msg - Video added message
          */
-        _handleVideoAddedToRoom(msg) {
+        async _handleVideoAddedToRoom(msg) {
+            await this._ensurePasswordHash();
+
             const cleanStreamID = this._stripHashFromStreamID(msg.streamID);
             this._log('Video added to room:', cleanStreamID);
 
@@ -3070,7 +4617,9 @@
          * @private
          * @param {Object} msg - User joined message
          */
-        _handleSomeoneJoined(msg) {
+        async _handleSomeoneJoined(msg) {
+            await this._ensurePasswordHash();
+
             const cleanStreamID = msg.streamID ? this._stripHashFromStreamID(msg.streamID) : null;
             this._log('Someone joined:', cleanStreamID || msg.UUID);
 
@@ -3138,6 +4687,7 @@
                 // Publishing failed - reset state
                 this.state.publishing = false;
                 this.state.streamID = null;
+                if (this._connectionIntent) this._connectionIntent.publishing = null;
                 this._log('Publishing failed due to stream ID conflict');
             }
             
@@ -3152,7 +4702,7 @@
          * @private
          * @param {Object} msg - Transferred message
          */
-        _handleTransferred(msg) {
+        async _handleTransferred(msg) {
             this._log('Transferred to new room');
             // Similar to listing, but indicates we were moved
             this._emit('transferred', {
@@ -3161,7 +4711,7 @@
                 raw: msg
             });
             // Also emit as listing for compatibility
-            this._handleListing(msg);
+            await this._handleListing(msg);
         }
 
         /**
@@ -3285,6 +4835,8 @@
                     if (connection) {
                         // Stop ping monitoring
                         this._stopPingMonitoring(connection);
+                        this._clearConnectionRecoveryTimers(connection);
+                        connection._finalized = true;
                         // Close peer connection
                         if (connection.pc) {
                             connection.pc.close();
@@ -3340,6 +4892,8 @@
                     if (connection) {
                         // Stop ping monitoring
                         this._stopPingMonitoring(connection);
+                        this._clearConnectionRecoveryTimers(connection);
+                        connection._finalized = true;
                         // Close peer connection
                         if (connection.pc) {
                             connection.pc.close();
@@ -3428,6 +4982,21 @@
          */
         _emit(eventName, detail = {}) {
             this.dispatchEvent(new CustomEvent(eventName, { detail }));
+        }
+
+        /**
+         * Additive EventTarget form of VDO.Ninja's iframe action/value shape.
+         * This is local API sugar; it does not send anything over WebSocket.
+         * @private
+         */
+        _emitIframeCompatible(action, value = null, uuid = null, streamID = null) {
+            this._emit(action, {
+                action,
+                value,
+                UUID: uuid,
+                uuid,
+                streamID
+            });
         }
 
         /**
@@ -4123,6 +5692,10 @@
                 this.localStream.addTrack(track);
             }
 
+            if (track.kind === 'video') {
+                this._monitorOutboundVideoTrack(track);
+            }
+
             // Add to all publisher connections (connections we're publishing to)
             for (const [uuid, connections] of this.connections) {
                 const connection = connections.publisher;
@@ -4136,6 +5709,7 @@
                     try {
                         // Add the track and create a new offer
                         connection.pc.addTrack(track, stream);
+                        await this._applyEncodingPreferencesToConnection(connection);
                         
                         // Renegotiate connection
                         const offer = await connection.pc.createOffer();
@@ -4184,6 +5758,10 @@
         async removeTrack(track) {
             if (!track) {
                 throw new Error('Track is required');
+            }
+
+            if (track.kind === 'video') {
+                this._unmonitorOutboundVideoTrack(track, { forceMuted: true });
             }
 
             // Remove from local stream
@@ -4260,10 +5838,18 @@
                 throw new Error('Tracks must be of the same kind (audio/video)');
             }
 
+            if (oldTrack.kind === 'video') {
+                this._unmonitorOutboundVideoTrack(oldTrack, { skipSend: true });
+            }
+
             // Update local stream
             if (this.localStream) {
                 this.localStream.removeTrack(oldTrack);
                 this.localStream.addTrack(newTrack);
+            }
+
+            if (newTrack.kind === 'video') {
+                this._monitorOutboundVideoTrack(newTrack);
             }
 
             // Replace in all connections
@@ -4277,6 +5863,7 @@
                         try {
                             // Use replaceTrack for seamless switching (no renegotiation needed)
                             await sender.replaceTrack(newTrack);
+                            await this._applyEncodingPreferencesToConnection(connection);
                             this._log(`Replaced ${newTrack.kind} track in connection: ${uuid}`);
                             
                             // Emit event
@@ -4295,6 +5882,66 @@
 
             // Stop the old track
             oldTrack.stop();
+        }
+
+        /**
+         * Update media encoding preferences for the active publisher.
+         * Accepts the same structure as publish() media options.
+         * @param {Object} options - Media configuration overrides
+         * @returns {Promise<Object|null>} Applied configuration
+         */
+        async updatePublisherMedia(options = {}) {
+            if (options === null || options === undefined) {
+                return this._publishMediaConfig;
+            }
+
+            const shouldClear = options.clear === true || options.reset === true || options.media === null;
+            if (shouldClear) {
+                this._publishMediaConfig = null;
+
+                if (this.state && this.state.publishing && this.connections && typeof this.connections.values === 'function') {
+                    const tasks = [];
+                    for (const connectionGroup of this.connections.values()) {
+                        if (connectionGroup && connectionGroup.publisher) {
+                            tasks.push(this._resetEncodingPreferencesForConnection(connectionGroup.publisher));
+                        }
+                    }
+                    if (tasks.length > 0) {
+                        await Promise.all(
+                            tasks.map(task => task.catch(error => this._log('Failed to reset encoding preferences:', error)))
+                        );
+                    }
+                }
+
+                return null;
+            }
+
+            const newConfig = await this._extractPublisherMediaOptions(options);
+            if (!newConfig) {
+                return this._publishMediaConfig;
+            }
+
+            this._publishMediaConfig = this._mergeMediaConfigs(this._publishMediaConfig, newConfig);
+
+            if (this.localStream) {
+                await this._applyLocalMediaPreferences(this.localStream, this._publishMediaConfig);
+            }
+
+            if (this.state && this.state.publishing && this.connections && typeof this.connections.values === 'function') {
+                const tasks = [];
+                for (const connectionGroup of this.connections.values()) {
+                    if (connectionGroup && connectionGroup.publisher) {
+                        tasks.push(this._applyEncodingPreferencesToConnection(connectionGroup.publisher));
+                    }
+                }
+                if (tasks.length > 0) {
+                    await Promise.all(
+                        tasks.map(task => task.catch(error => this._log('Failed to update encoding preferences:', error)))
+                    );
+                }
+            }
+
+            return this._publishMediaConfig;
         }
 
         /**
@@ -4964,15 +6611,28 @@
          * @private
          * @param {Object} connection - Connection to restart
          */
-        async _initiateICERestart(connection) {
+        async _initiateICERestart(connection, reason = 'missed_pings', options = {}) {
             if (!connection.pc) {
                 this._log('Cannot restart ICE - no peer connection');
-                return;
+                return false;
+            }
+
+            if (connection.type === 'viewer' && !options.allowViewerOffer) {
+                if (!options.skipRemoteRequest && connection.dataChannel && connection.dataChannel.readyState === 'open') {
+                    connection.dataChannel.send(JSON.stringify({ iceRestartRequest: true }));
+                    this._emit('iceRestart', {
+                        uuid: connection.uuid,
+                        streamID: connection.streamID,
+                        reason
+                    });
+                    return true;
+                }
+                return false;
             }
             
             try {
                 // Request ICE restart via data channel if available
-                if (connection.dataChannel && connection.dataChannel.readyState === 'open') {
+                if (!options.skipRemoteRequest && connection.dataChannel && connection.dataChannel.readyState === 'open') {
                     connection.dataChannel.send(JSON.stringify({ iceRestartRequest: true }));
                     this._log('Sent ICE restart request via data channel');
                 }
@@ -5013,18 +6673,31 @@
                     offerMsg.description = offer;
                 }
                 
-                this._sendMessageWS(offerMsg);
-                this._log('Sent ICE restart offer');
+                if (options.preferDataChannel && connection.dataChannel && connection.dataChannel.readyState === 'open') {
+                    const dcMsg = {
+                        description: offerMsg.description,
+                        session: connection.session
+                    };
+                    if (offerMsg.vector) dcMsg.vector = offerMsg.vector;
+                    this._logMessage('OUT', dcMsg, 'DataChannel');
+                    connection.dataChannel.send(JSON.stringify(dcMsg));
+                    this._log('Sent ICE restart offer via data channel');
+                } else {
+                    this._sendMessageWS(offerMsg);
+                    this._log('Sent ICE restart offer via WebSocket');
+                }
                 
                 // Emit event
                 this._emit('iceRestart', {
                     uuid: connection.uuid,
                     streamID: connection.streamID,
-                    reason: 'missed_pings'
+                    reason
                 });
+                return true;
                 
             } catch (error) {
                 this._log('Error initiating ICE restart:', error);
+                return false;
             }
         }
 

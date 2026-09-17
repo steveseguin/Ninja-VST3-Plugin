@@ -559,6 +559,12 @@ tresult PLUGIN_API WebRTCProcessor::process(ProcessData& data) {
     const bool hasInput = data.numInputs > 0 && data.inputs[0].channelBuffers32 != nullptr;
     const bool hasOutput = data.numOutputs > 0 && data.outputs[0].channelBuffers32 != nullptr;
 
+    if (hasOutput) {
+        // Hosts can reuse output buses marked silent by a previous block.
+        // Neither received audio nor publish passthrough may inherit that flag.
+        data.outputs[0].silenceFlags = 0;
+    }
+
     const int inputChannels = hasInput ? data.inputs[0].numChannels : 0;
     const int outputChannels = hasOutput ? data.outputs[0].numChannels : 0;
 

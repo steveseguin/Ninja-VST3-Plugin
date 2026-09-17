@@ -359,6 +359,51 @@ public:
         return true;
     }
 
+    bool checkPublishSilenceFlags(bool inPlace) {
+        AudioBusBuffers inputBus{};
+        inputBus.numChannels = kNumChannels;
+        inputBus.channelBuffers32 = inputPtrs_.data();
+        AudioBusBuffers outputBus{};
+        outputBus.numChannels = kNumChannels;
+        outputBus.channelBuffers32 = inPlace ? inputPtrs_.data() : outputPtrs_.data();
+
+        ProcessData data{};
+        data.processMode = kRealtime;
+        data.symbolicSampleSize = kSample32;
+        data.numSamples = kBlockSize;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &inputBus;
+        data.outputs = &outputBus;
+
+        // Hosts may reuse a bus previously marked silent. Alternate silence and
+        // signal while retaining the output flags between calls.
+        outputBus.silenceFlags = 3;
+        for (float level : {0.0f, 0.25f, 0.0f, -0.5f}) {
+            inputBus.silenceFlags = level == 0.0f ? 3 : 0;
+            for (auto& channel : inputBuffers_) {
+                std::fill(channel.begin(), channel.end(), level);
+            }
+            if (processor_->process(data) != kResultOk) {
+                lastError_ = "Publish processing failed";
+                return false;
+            }
+            for (int ch = 0; ch < kNumChannels; ++ch) {
+                const auto* samples = outputBus.channelBuffers32[ch];
+                if (!std::all_of(samples, samples + kBlockSize,
+                                 [level](float sample) { return sample == level; })) {
+                    lastError_ = "Publish passthrough changed audio samples";
+                    return false;
+                }
+                if (level != 0.0f && (outputBus.silenceFlags & (uint64{1} << ch))) {
+                    lastError_ = "Nonzero output is still marked silent";
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     void cleanup() {
         if (active_) {
             deactivate();
@@ -615,6 +660,18 @@ TestResult test_room_view_link_uses_solo(const std::string& pluginPath) {
 // Main Test Runner
 // ============================================================================
 
+TestResult test_publish_silence_flags(const std::string& pluginPath, bool inPlace) {
+    const std::string name = inPlace ? "PublishSilenceFlagsInPlace" : "PublishSilenceFlags";
+    VST3HostSimulator host(pluginPath);
+    if (!host.loadPlugin() ||
+        !host.injectState(R"({"mode":"publish","streamId":"silence-test","handshakeUrl":"ws://127.0.0.1:1"})") ||
+        !host.setupProcessing() || !host.activate() ||
+        !host.checkPublishSilenceFlags(inPlace) || !host.deactivate()) {
+        return {name, false, host.getLastError()};
+    }
+    return {name, true};
+}
+
 int main(int argc, char** argv) {
     std::cout << std::string(60, '=') << std::endl;
     std::cout << "WebRTC VST3 Plugin - Integration Tests" << std::endl;
@@ -658,6 +715,8 @@ int main(int argc, char** argv) {
     suite.addResult(test_process_while_deactivating(pluginPath));
     suite.addResult(test_long_running_session(pluginPath));
     suite.addResult(test_room_view_link_uses_solo(pluginPath));
+    suite.addResult(test_publish_silence_flags(pluginPath, false));
+    suite.addResult(test_publish_silence_flags(pluginPath, true));
 
     // Print summary
     suite.printSummary();
