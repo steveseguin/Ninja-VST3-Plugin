@@ -121,6 +121,7 @@ private:
         std::string sessionId;
         std::string streamId;
         std::vector<PendingIce> pendingRemoteIce;
+        bool loggedPendingIceLimit = false;
         uint32_t nextTimestamp{0};
         bool negotiationReady{false};
         bool remoteDescriptionSet{false};
@@ -155,8 +156,6 @@ private:
 
     void postInitialRequests();
     void announceRoleIfReady();
-    void attemptReconnect(bool idlePlayMode);
-    void reconnectInternal();
     void processCandidateMessage(PeerSession& session, const nlohmann::json& candidateMessage);
     void queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject);
     void flushPendingIceLocked(PeerSession& session);
@@ -167,7 +166,6 @@ private:
     void log(const std::string& line) const;
 
     std::optional<std::string> effectivePassword() const;
-    std::string deriveSalt(const std::string& url) const;
     std::string hashRoom(const std::string& room, const std::string& password) const;
     std::string hashStreamIdSuffix(const std::string& password) const;
     nlohmann::json decryptFieldIfNeeded(const nlohmann::json& message) const;
@@ -192,9 +190,6 @@ private:
     std::atomic<bool> shuttingDown_{false};
     bool started_{false};
     std::atomic<bool> intentionalDisconnect_{false};
-    std::atomic<bool> isReconnecting_{false};
-    int reconnectAttempts_{0};
-    std::unique_ptr<std::thread> reconnectThread_;
 
     ::OpusEncoder* opusEncoder_{nullptr};
     std::deque<float> outgoingFifo_;

@@ -1,4 +1,5 @@
 #include "WebRTCSession.h"
+#include "BrowserCryptoCompat.h"
 #include "StreamIdGenerator.h"
 
 #include <rtc/rtc.hpp>
@@ -22,7 +23,6 @@
 #include <iomanip>
 #include <optional>
 #include <random>
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -37,10 +37,6 @@ constexpr size_t kFrameSizeSamples = 960; // 20ms at 48kHz
 constexpr int kOpusPayloadType = 111;
 constexpr uint32_t kAudioSsrc = 0x11ECACA; // Arbitrary but stable
 constexpr size_t kPeerBufferFrames = 2048; // ~42ms at 48kHz
-constexpr int kMaxReconnectAttempts = 5;
-constexpr int kReconnectBaseDelayMs = 1000; // 1 second initial delay
-constexpr int kReconnectMaxDelayMs = 30000; // 30 second cap
-constexpr int kIdlePlayReconnectDelayMs = 15 * 60 * 1000; // 15 minute idle retry cadence
 constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
 constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
 constexpr size_t kMaxPeerSessions = 16;
@@ -217,28 +213,6 @@ std::string trimCopy(const std::string& value) {
     }
 
     return std::string(begin, end);
-}
-
-bool isIpAddress(const std::string& host) {
-    static const std::regex ipv4(R"(^((25[0-5]|2[0-4]\d|[0-1]?\d?\d)\.){3}(25[0-5]|2[0-4]\d|[0-1]?\d?\d)$)");
-    static const std::regex ipv6(R"(^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$)");
-    return std::regex_match(host, ipv4) || std::regex_match(host, ipv6);
-}
-
-std::string extractHost(const std::string& url) {
-    const auto schemePos = url.find("://");
-    size_t hostStart = 0;
-    if (schemePos != std::string::npos) {
-        hostStart = schemePos + 3;
-    }
-    const auto pathPos = url.find('/', hostStart);
-    std::string host = url.substr(hostStart, pathPos == std::string::npos ? std::string::npos : pathPos - hostStart);
-    const auto colonPos = host.find(':');
-    if (colonPos != std::string::npos) {
-        host = host.substr(0, colonPos);
-    }
-    std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return host;
 }
 
 struct SanitizedStreamId {
@@ -545,36 +519,8 @@ std::optional<std::string> WebRTCSession::effectivePassword() const {
         password = "someEncryptionKey123";
     }
 
-    cachedPassword_ = password;
+    cachedPassword_ = encodeBrowserPassword(password);
     return cachedPassword_;
-}
-
-std::string WebRTCSession::deriveSalt(const std::string& url) const {
-    const auto host = extractHost(url);
-    if (host.empty()) {
-        return "vdo.ninja";
-    }
-
-    if (host == "vdo.ninja" || host == "steveseguin.github.io") {
-        return "vdo.ninja";
-    }
-
-    const auto lastDot = host.rfind('.');
-    const auto secondLastDot = lastDot == std::string::npos ? std::string::npos : host.rfind('.', lastDot - 1);
-    std::string tld = host;
-    if (secondLastDot != std::string::npos) {
-        tld = host.substr(secondLastDot + 1);
-    }
-
-    if (tld == "vdo.ninja" || tld == "rtc.ninja" || tld == "versus.cam" || tld == "socialstream.ninja") {
-        return tld;
-    }
-
-    if (host == "localhost" || isIpAddress(host)) {
-        return "vdo.ninja";
-    }
-
-    return host;
 }
 
 std::string WebRTCSession::hashRoom(const std::string& room, const std::string& password) const {
@@ -603,7 +549,7 @@ std::pair<std::string, std::string> WebRTCSession::encryptPayload(const std::str
     }
 
     std::array<uint8_t, SHA256_DIGEST_LENGTH> key{};
-    const std::string phrase = *password + salt_;
+    const std::string phrase = browserAesKeyBytes(*password + salt_);
     SHA256(reinterpret_cast<const unsigned char*>(phrase.data()), phrase.size(), key.data());
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
@@ -650,7 +596,7 @@ std::string WebRTCSession::decryptPayload(const std::string& payload, const std:
     }
 
     std::array<uint8_t, SHA256_DIGEST_LENGTH> key{};
-    const std::string phrase = *password + salt_;
+    const std::string phrase = browserAesKeyBytes(*password + salt_);
     SHA256(reinterpret_cast<const unsigned char*>(phrase.data()), phrase.size(), key.data());
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
@@ -859,6 +805,10 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
     session.audioContext->buffer = std::make_shared<AudioRingBuffer>(kPeerBufferFrames, channelCount_);
 
     rtc::Configuration configuration;
+    // createDataChannel can otherwise negotiate synchronously while mutex_ is
+    // held. Certificate generation uses the RTC worker pool, whose callbacks
+    // also need mutex_: a peer burst can exhaust that pool and deadlock.
+    configuration.disableAutoNegotiation = true;
     if (!truthyEnvEnabled("WEBRTC_VST_DISABLE_STUN")) {
         configuration.iceServers.emplace_back("stun:stun.l.google.com:19302");
         configuration.iceServers.emplace_back("stun:stun1.l.google.com:19302");
@@ -876,7 +826,6 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         std::optional<std::string> statusMessage;
         bool resetMediaFlags = false;
         bool refreshPlayRequest = false;
-        bool reconnectAfterPeerLoss = false;
         std::string refreshReason;
         {
             std::lock_guard<SpinLock> lock(mutex_);
@@ -891,6 +840,15 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     break;
                 case rtc::PeerConnection::State::Connected:
                     it->second.negotiationReady = true;
+                    if (config_.mode == ConnectionMode::Play && !it->second.streamId.empty()) {
+                        // A signaling reconnect can assign the publisher a new
+                        // UUID. Keep distinct room streams, but never sum two
+                        // generations of the same stream into the DAW.
+                        std::vector<PeerKey> superseded;
+                        for (const auto& [otherKey, other] : peerSessions_)
+                            if (otherKey != keyCopy && other.streamId == it->second.streamId) superseded.push_back(otherKey);
+                        for (const auto& otherKey : superseded) closePeerSession(otherKey);
+                    }
                     log("Peer connection connected: " + keyCopy);
                     statusMessage = (config_.mode == ConnectionMode::Publish)
                                         ? std::string("Peer connected (publishing)")
@@ -907,13 +865,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection failed";
-                    if (signalingClient_ && !signalingClient_->isConnected() &&
-                        peerSessions_.empty() &&
-                        started_ &&
-                        !intentionalDisconnect_.load(std::memory_order_acquire) &&
-                        config_.enableAutoReconnect) {
-                        reconnectAfterPeerLoss = true;
-                    } else if (config_.mode == ConnectionMode::Play) {
+                    if (config_.mode == ConnectionMode::Play) {
                         if (signalingClient_ && signalingClient_->isConnected()) {
                             refreshPlayRequest = true;
                             refreshReason = "peer failed";
@@ -926,13 +878,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection closed";
-                    if (signalingClient_ && !signalingClient_->isConnected() &&
-                        peerSessions_.empty() &&
-                        started_ &&
-                        !intentionalDisconnect_.load(std::memory_order_acquire) &&
-                        config_.enableAutoReconnect) {
-                        reconnectAfterPeerLoss = true;
-                    } else if (config_.mode == ConnectionMode::Play) {
+                    if (config_.mode == ConnectionMode::Play) {
                         if (signalingClient_ && signalingClient_->isConnected()) {
                             refreshPlayRequest = true;
                             refreshReason = "peer closed";
@@ -957,9 +903,6 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
             requestPlayRefresh(refreshReason);
         }
 
-        if (reconnectAfterPeerLoss) {
-            attemptReconnect(false);
-        }
     });
 
     session.connection->onGatheringStateChange([this, keyCopy](rtc::PeerConnection::GatheringState state) {
@@ -1401,6 +1344,10 @@ void WebRTCSession::flushPendingIceLocked(PeerSession& session) {
 
 void WebRTCSession::queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject) {
     if (!session.remoteDescriptionSet) {
+        if (session.pendingRemoteIce.size() >= 256) {
+            if (!session.loggedPendingIceLimit) { log("Pre-SDP ICE limit reached (256)"); session.loggedPendingIceLimit = true; }
+            return;
+        }
         session.pendingRemoteIce.push_back({"candidate", candidateObject});
         return;
     }
@@ -1445,8 +1392,6 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
     // Clear shutdown flag when starting
     shuttingDown_.store(false, std::memory_order_release);
     intentionalDisconnect_.store(false, std::memory_order_release);
-    reconnectAttempts_ = 0;
-    isReconnecting_.store(false, std::memory_order_release);
 
     ConfigSink callback;
     std::optional<PluginConfig> sanitizedForCallback;
@@ -1471,7 +1416,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         sampleRate_ = sampleRate;
         channelCount_ = channels;
 
-        salt_ = deriveSalt(config_.handshakeUrl);
+        salt_ = effectiveSalt(config_.salt, config_.webBaseUrl);
         cachedPassword_.reset();
         hashedStreamId_ = buildHashedStreamId();
         hashedRoomId_.clear();
@@ -1511,12 +1456,13 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
 
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
-        signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
+        signalingClient_ = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl, config_.enableAutoReconnect);
         signalingClient_->setCallbacks({
             [this]() {
                 if (shuttingDown_.load(std::memory_order_acquire)) {
                     return;
                 }
+                { std::lock_guard<SpinLock> lock(mutex_); roomJoined_ = false; roleAnnounced_ = false; }
                 log("Connected to VDO.Ninja signaling server");
                 emitStatus("Signaling connected");
                 postInitialRequests();
@@ -1527,8 +1473,6 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                 }
                 log("Signaling connection closed");
                 bool notifyDisconnect = false;
-                bool shouldReconnect = false;
-                bool idlePlayMode = false;
                 bool preservePeers = false;
                 {
                     std::lock_guard<SpinLock> innerLock(mutex_);
@@ -1540,11 +1484,6 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                         roomJoined_ = false;
                         roleAnnounced_ = false;
                     }
-                    idlePlayMode = (config_.mode == ConnectionMode::Play) && !hadPeers;
-                    shouldReconnect = started_ &&
-                                      !intentionalDisconnect_.load(std::memory_order_acquire) &&
-                                      config_.enableAutoReconnect &&
-                                      !preservePeers;
                 }
                 if (!preservePeers) {
                     publishingAudio_.store(false, std::memory_order_relaxed);
@@ -1555,10 +1494,9 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                     if (notifyDisconnect) {
                         emitStatus("Peer active; signaling disconnected");
                     }
-                } else if (shouldReconnect) {
-                    attemptReconnect(idlePlayMode);
+
                 } else if (notifyDisconnect) {
-                    emitStatus("Signaling disconnected");
+                    emitStatus(config_.enableAutoReconnect ? "Signaling disconnected; retrying" : "Signaling disconnected");
                 }
             },
             [this](const nlohmann::json& message) {
@@ -1603,13 +1541,6 @@ void WebRTCSession::stop() {
     // Set shutdown flag FIRST to stop all callbacks immediately
     shuttingDown_.store(true, std::memory_order_release);
 
-    // Wait for any in-flight reconnect thread
-    if (reconnectThread_ && reconnectThread_->joinable()) {
-        reconnectThread_->join();
-    }
-    reconnectThread_.reset();
-    reconnectAttempts_ = 0;
-    isReconnecting_.store(false, std::memory_order_release);
 
     // Mark as stopped to prevent new operations
     {
@@ -1798,16 +1729,16 @@ void WebRTCSession::handleOfferRequest(const nlohmann::json& message) {
         return;
     }
 
-    std::lock_guard<SpinLock> lock(mutex_);
-    PeerSession* session = ensurePeerSession(uuid, std::string{}, true);
-    if (!session) {
-        return;
+    std::shared_ptr<rtc::PeerConnection> connection;
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        PeerSession* session = ensurePeerSession(uuid, std::string{}, true);
+        if (!session) return;
+        session->negotiationReady = false;
+        connection = session->connection;
     }
-    session->negotiationReady = false;
-
-    if (session->connection) {
-        session->connection->setLocalDescription();
-    }
+    // This may wait for a worker-generated certificate. Never hold mutex_.
+    if (connection) connection->setLocalDescription();
 }
 
 void WebRTCSession::handleRemoteDescription(const nlohmann::json& message) {
@@ -1851,6 +1782,7 @@ void WebRTCSession::handleRemoteDescription(const nlohmann::json& message) {
 
         try {
             connection->setRemoteDescription(rtc::Description(sdp, type));
+            connection->setLocalDescription(rtc::Description::Type::Answer);
         } catch (const std::exception& ex) {
             log(std::string("Failed to apply remote offer for ") + key + ": " + ex.what());
             return;
@@ -1971,8 +1903,7 @@ void WebRTCSession::handleRemoteCandidate(const nlohmann::json& message) {
 }
 
 void WebRTCSession::handleListingMessage(const nlohmann::json&) {
-    std::lock_guard<SpinLock> lock(mutex_);
-    roomJoined_ = true;
+    { std::lock_guard<SpinLock> lock(mutex_); roomJoined_ = true; }
     announceRoleIfReady();
 }
 
@@ -2062,179 +1993,6 @@ void WebRTCSession::sendIceCandidate(PeerSession& session,
     }
 }
 
-void WebRTCSession::attemptReconnect(bool idlePlayMode) {
-    if (isReconnecting_.exchange(true, std::memory_order_acq_rel)) {
-        return; // Already reconnecting
-    }
-
-    int delayMs = kReconnectBaseDelayMs;
-    if (idlePlayMode) {
-        reconnectAttempts_ = 0;
-        delayMs = kIdlePlayReconnectDelayMs;
-        log("Idle Play mode signaling disconnect; scheduling reconnect in 15 minutes");
-        emitStatus("Idle Play mode; retrying signaling in 15m");
-    } else {
-        reconnectAttempts_++;
-        if (reconnectAttempts_ > kMaxReconnectAttempts) {
-            log("Reconnection failed: max attempts (" + std::to_string(kMaxReconnectAttempts) + ") exhausted");
-            emitStatus("Reconnection failed");
-            isReconnecting_.store(false, std::memory_order_release);
-            reconnectAttempts_ = 0;
-            return;
-        }
-
-        // Exponential backoff: delay * 2^(attempt-1), capped at 30s
-        delayMs = std::min(
-            kReconnectBaseDelayMs * (1 << (reconnectAttempts_ - 1)),
-            kReconnectMaxDelayMs);
-
-        log("Reconnecting (attempt " + std::to_string(reconnectAttempts_) + "/" +
-            std::to_string(kMaxReconnectAttempts) + ") in " + std::to_string(delayMs) + "ms");
-        emitStatus("Reconnecting (" + std::to_string(reconnectAttempts_) + "/" +
-                   std::to_string(kMaxReconnectAttempts) + ")...");
-    }
-
-    // Clean up any previous reconnect thread object before replacing it.
-    if (reconnectThread_ && reconnectThread_->joinable()) {
-        reconnectThread_->join();
-    }
-    reconnectThread_.reset();
-
-    reconnectThread_ = std::make_unique<std::thread>([this, delayMs]() {
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (shuttingDown_.load(std::memory_order_acquire) ||
-                intentionalDisconnect_.load(std::memory_order_acquire)) {
-                isReconnecting_.store(false, std::memory_order_release);
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        }
-
-        if (shuttingDown_.load(std::memory_order_acquire) ||
-            intentionalDisconnect_.load(std::memory_order_acquire)) {
-            isReconnecting_.store(false, std::memory_order_release);
-            return;
-        }
-
-        reconnectInternal();
-    });
-}
-
-void WebRTCSession::reconnectInternal() {
-    // Tear down old signaling client
-    std::unique_ptr<VDONinjaSignalingClient> clientToDestroy;
-    {
-        std::lock_guard<SpinLock> lock(mutex_);
-        if (signalingClient_) {
-            signalingClient_->setCallbacks({});
-            clientToDestroy = std::move(signalingClient_);
-            // Release lock before disconnect to avoid deadlock
-        }
-    }
-    if (clientToDestroy) {
-        clientToDestroy->disconnect();
-        clientToDestroy.reset();
-    }
-
-    if (shuttingDown_.load(std::memory_order_acquire) ||
-        intentionalDisconnect_.load(std::memory_order_acquire)) {
-        isReconnecting_.store(false, std::memory_order_release);
-        return;
-    }
-
-    // Generate new UUID (server assigns its own, but we need a fresh "from" field)
-    {
-        std::lock_guard<SpinLock> lock(mutex_);
-        selfUuid_ = generateUUID();
-        outgoingFifo_.clear();
-        lastSentSignalingJson_.reset();
-        lastReceivedSignalingJson_.reset();
-        suppressingSentDuplicate_ = false;
-        suppressingReceivedDuplicate_ = false;
-    }
-
-    log("Reconnect: new UUID " + selfUuid_);
-
-    // Create new signaling client and connect
-    auto client = std::make_unique<VDONinjaSignalingClient>(config_.handshakeUrl);
-    client->setCallbacks({
-        [this]() {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            log("Reconnected to VDO.Ninja signaling server");
-            reconnectAttempts_ = 0;
-            isReconnecting_.store(false, std::memory_order_release);
-            emitStatus("Reconnected");
-
-            // Re-post initial requests (rejoin room + re-publish/replay)
-            {
-                std::lock_guard<SpinLock> lock(mutex_);
-                roomJoined_ = false;
-                roleAnnounced_ = false;
-            }
-            postInitialRequests();
-        },
-        [this]() {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            log("Signaling connection closed during reconnect");
-            bool shouldRetry = false;
-            bool idlePlayMode = false;
-            bool preservePeers = false;
-            {
-                std::lock_guard<SpinLock> innerLock(mutex_);
-                const bool hadPeers = !peerSessions_.empty();
-                preservePeers = hadPeers;
-                if (!preservePeers) {
-                    resetAllPeerConnections();
-                    roomJoined_ = false;
-                    roleAnnounced_ = false;
-                }
-                idlePlayMode = (config_.mode == ConnectionMode::Play) && !hadPeers;
-                shouldRetry = started_ &&
-                              !intentionalDisconnect_.load(std::memory_order_acquire) &&
-                              config_.enableAutoReconnect &&
-                              !preservePeers;
-            }
-            if (!preservePeers) {
-                publishingAudio_.store(false, std::memory_order_relaxed);
-                receivingAudio_.store(false, std::memory_order_relaxed);
-            }
-            isReconnecting_.store(false, std::memory_order_release);
-            if (preservePeers) {
-                emitStatus("Peer active; signaling disconnected");
-            } else if (shouldRetry) {
-                attemptReconnect(idlePlayMode);
-            } else {
-                emitStatus("Signaling disconnected");
-            }
-        },
-        [this](const nlohmann::json& message) {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            handleSignalingMessage(message);
-        },
-        [this](const std::string& error) {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            log("Signaling error during reconnect: " + error);
-        }
-    });
-
-    {
-        std::lock_guard<SpinLock> lock(mutex_);
-        signalingClient_ = std::move(client);
-    }
-
-    signalingClient_->connectAsync();
-}
-
 void WebRTCSession::postInitialRequests() {
     if (!signalingClient_) {
         return;
@@ -2284,6 +2042,11 @@ void WebRTCSession::announceRoleIfReady() {
         sendSignalingMessage(publishMessage);
         log("Sent publish request for stream " + config_.streamId);
     } else {
+        if (isConnected()) {
+            log("Preserving healthy Play media without requesting a duplicate peer");
+            roleAnnounced_ = true;
+            return;
+        }
         log("announceRoleIfReady: sending play request");
         nlohmann::json playMessage = {
             {"request", "play"},

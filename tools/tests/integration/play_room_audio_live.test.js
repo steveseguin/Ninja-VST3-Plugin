@@ -103,6 +103,7 @@ const cli = spawn(cliExecutable, [pluginBundle], {
         WEBRTC_VST_STREAM_ID: streamId,
         WEBRTC_VST_ROOM_NAME: roomName,
         WEBRTC_VST_PASSWORD: password,
+        WEBRTC_VST_SALT: process.env.WEBRTC_TEST_SALT || "vdo.ninja",
         WEBRTC_VST_HANDSHAKE_URL: handshakeUrl,
         WEBRTC_VST_LOG_STDOUT: "1",
         WEBRTC_VST_LOG_SIGNALING: "1",

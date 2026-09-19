@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "AdvancedSettings.h"
 
 namespace webrtc_vst {
 
@@ -13,7 +14,9 @@ struct PluginConfig {
     ConnectionMode mode{ConnectionMode::Play};
     std::string streamId;
     std::string roomName;
-    std::string handshakeUrl{"wss://wss.vdo.ninja"};
+    std::string handshakeUrl{kDefaultHandshakeUrl};
+    std::string webBaseUrl{kDefaultWebBaseUrl};
+    std::string salt; // empty = derive from the web domain, not the signaling server
     bool enableAutoReconnect{true};
     bool enableAec{false};
     bool disableEncryption{false};

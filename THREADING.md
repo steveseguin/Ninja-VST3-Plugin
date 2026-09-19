@@ -1,316 +1,113 @@
-# Threading Model Documentation
+# Threading and lifetime model
 
-## Overview
+Updated for the September 2026 hardening changes. See
+[validation evidence](docs/developer/HARDENING_VALIDATION.md) for tested limits.
 
-The WebRTC VST plugin uses multiple threads that must coordinate safely during operation and shutdown. This document explains the threading model and synchronization strategy.
+## Execution contexts
 
-## Thread Types
+| Context | Responsibilities | Must not do |
+|---|---|---|
+| Host audio callback, `WebRTCProcessor::process` | Float32 dry passthrough/zeroing, finite-sample handling, numeric automation mailbox, bounded audio-bridge transfer | Wait for a lock, allocate/grow buffers, encode/decode, send signaling, log, notify the host/UI |
+| Processor audio worker | Drain outgoing PCM, encode/send through the session, pull decoded audio/PLC into the bridge | Call controller/host UI APIs |
+| Processor configuration worker | Validate complete configuration, start/stop/reconfigure sessions; poll numeric mode mailbox | Run work on the audio callback |
+| IXWebSocket worker | Parse bounded signaling, announce roles, reconnect with cancellable backoff | Negotiate while holding the session lock |
+| libdatachannel callbacks | Peer state, SDP/ICE, data channels, decode received Opus into per-peer queues | Assume a shutdown flag alone proves object lifetime |
+| Controller UI timer | Poll processor status/configuration every 100 ms and update parameters | Be required for audio transport to work |
+| Host control/lifecycle calls | State serialization, setup/activation, editor lifetime, terminate | Be assumed to run on a particular OS thread without checking the host contract |
 
-### 1. **Audio Thread** (Real-Time, High Priority)
-- **Source**: VST3 host (Audacity, Reaper, etc.)
-- **Entry Point**: `WebRTCProcessor::process()`
-- **Constraints**:
-  - Must NOT block
-  - Must NOT allocate memory
-  - Must complete in < 1ms typically
-- **Operations**:
-  - Push outgoing audio to `outgoingBuffer_`
-  - Pull incoming audio from `receiveBuffer_`
-  - Flush status updates to controller
+## Audio boundary
 
-### 2. **WebRTC Callback Threads** (Background, Multiple)
-- **Source**: libdatachannel internal thread pool
-- **Entry Points**: All peer connection callbacks
-  - `onStateChange()`
-  - `onLocalDescription()`
-  - `onLocalCandidate()`
-  - `onTrack()`
-  - `Track::onFrame()` (audio data arrives here)
-  - `onDataChannel()`
-- **Operations**:
-  - Decode OPUS audio
-  - Process signaling messages
-  - Update connection state
-  - Push decoded audio to `receiveBuffer_`
+`RealtimeAudioBridge` owns preallocated stereo queues (8192 frames each) and
+512-frame worker chunks. Independent single-producer/single-consumer rings use
+lock-free atomic cursors: the host owns TX writes/RX reads and the serialized
+worker owns TX reads/RX writes. No try-lock contention drops host blocks.
+Reset discards at consumer-owned cursors rather than rewriting live storage.
+RX demand maintains four host blocks of scheduling headroom (minimum 1024 frames).
+An empty RX queue still produces silence; a full TX queue drops excess input.
+Bounded memory does not imply lossless operation under arbitrary starvation.
 
-### 3. **WebSocket Thread** (Background, Single)
-- **Source**: ixwebsocket internal thread
-- **Entry Points**: WebSocket callbacks
-  - `onConnected()`
-  - `onDisconnected()`
-  - `onMessage()`
-  - `onError()`
-- **Operations**:
-  - Parse JSON signaling messages
-  - Forward to `handleSignalingMessage()`
+Receive demand follows frames actually requested by the host. It does not
+free-run PLC ahead of the DAW. Mono input is duplicated to stereo; mono output
+averages the two received channels. Network jitter and worker scheduling add
+variable latency. Queue bounds prevent unbounded backlog; they do not guarantee
+dropout-free audio under arbitrary CPU starvation.
 
-### 4. **UI Thread** (Main Thread)
-- **Source**: VST3 host UI thread
-- **Entry Points**:
-  - `initialize()`
-  - `terminate()`
-  - `setActive()`
-  - Controller parameter changes
-- **Operations**:
-  - Start/stop sessions
-  - Update configuration
-  - Create/destroy plugin UI
+The session's resampler, Opus, per-peer buffers and scratch vectors can still
+allocate or lock, but execute off the host audio thread. `AudioRingBuffer` uses
+its own synchronization; it must not be described as lock-free.
 
-## Synchronization Primitives
+Offline-bounce blocks do not enqueue DAW audio for transmission. Their Seed
+output is dry; Play output is silent. Prefetch is **not** an offline bounce:
+`IPrefetchableSupport` requests real-time host processing for this live bridge,
+but prefetch blocks remain audible if a host ignores that request. Hosts that
+still anticipate the track may need their per-track anticipative processing
+disabled for lowest latency. Signaling can remain connected during an offline
+bounce, so this is not a network-isolation switch.
 
-### `SpinLock mutex_` (WebRTCSession)
-**Protects**:
-- `peerSessions_` map
-- `opusEncoder_`/`opusDecoder_`
-- `config_`
-- `started_` flag
+## Locks and ownership
 
-**Used by**: All threads when accessing shared state
+- `configMutex_` protects the processor's configuration snapshot. Text changes
+  travel as bounded JSON messages through `IConnectionPoint`, not a global
+  process-local string registry or numeric audio automation.
+- `audioWorkMutex_` serializes processor audio-worker session calls against
+  start/stop. The host audio callback never takes it.
+- The session `mutex_` protects peer maps and codec/session state. Per-peer
+  audio contexts have their own lock and shared ownership. Keep lock scopes
+  short and never wait on RTC worker futures while holding the session lock.
+- IX callback storage has its own lock. Copy callbacks under it, then invoke
+  outside it. Stop/join the WebSocket worker outside that lock.
+- Status is queued internally and sent to the host from the controller's poll.
+  Hosts without a UI event loop can explicitly send `PollStatus` for telemetry.
+- Copy/QR side effects require a native editor gesture. Host parameter writes
+  remain inert, even though hosts can write non-automatable parameter IDs.
 
-**Critical**: Keep locked sections SHORT (< 1μs) to avoid audio thread blocking
+Do not enable implicit RTC negotiation: `createDataChannel()` can otherwise
+wait for certificate generation under the session lock while the entire RTC
+pool waits for that lock. Create peer objects under the lock, retain a
+`shared_ptr`, release the lock, then set descriptions/explicitly answer offers.
+The peer-burst regression covers this previously reproduced deadlock.
 
-### `std::atomic<bool> shuttingDown_`
-**Purpose**: Fast early-exit for callbacks during shutdown
+## Reconnect
 
-**Pattern**:
-```cpp
-if (shuttingDown_.load(std::memory_order_acquire)) {
-    return;  // Exit immediately
-}
-```
+IX owns one retry worker, with failed-connect delays bounded to 1–30 seconds.
+An additional cancellable delay bounds repeated successful-open/close loops.
+There are no detached per-attempt reconnect threads.
 
-**Why atomic**: Prevents cache coherency issues across CPU cores
+Signaling failure does not immediately destroy active media. Reconnect restores
+room/publishing intent; a healthy Play peer is retained without requesting a
+duplicate. A replacement connection for the same stream retires the old peer;
+distinct room streams remain independent. Failed/closed Play peers request
+recovery. This is not full ICE restart or TURN support.
 
-### `SpinLock statusSinkMutex_`
-**Protects**: `statusSink_` callback pointer
+## Shutdown and remaining audit boundaries
 
-**Why separate**: Allows status updates without holding main `mutex_`
+Processor termination deactivates processing, joins its audio/config workers,
+and explicitly stops the session **before member destruction**. The destructor
+also performs this cleanup. Reverse declaration-order destruction is not a
+substitute for explicit lifetime management.
 
-## Shutdown Sequence (CRITICAL)
+Session stop marks shutdown/stopped, clears owned sinks, moves the signaling
+client out under lock, then stops and joins its worker outside the lock. Peer
+callbacks are detached, audio contexts marked inactive, peers closed, and codecs
+released. Shared audio-context captures keep decoder storage alive while held.
 
-### Problem: Callbacks Can Fire During Destruction
+An early shutdown-flag check does not cancel callbacks already in flight.
+Likewise, copying a raw codec pointer and releasing its lock does not make later
+use safe. Changes to callback ownership need live teardown stress and sanitizer
+coverage; do not infer safety merely from short smoke tests. Current ASan/UBSan
+and TSan coverage instruments settings/audio-bridge unit paths, **not the whole
+plugin and third-party RTC stack**. Full-stack TSan/ASan remains an explicit gap.
 
-When the plugin is closed:
-1. Host calls `terminate()` on UI thread
-2. `~WebRTCProcessor()` destructor runs
-3. `session_` member begins destruction
-4. **BUT**: WebRTC callbacks may still be executing on background threads!
+## Regression commands
 
-### Solution: Multi-Phase Shutdown
-
-#### Phase 1: Stop New Operations
-```cpp
-shuttingDown_.store(true, std::memory_order_release);
-```
-- All callbacks check this flag FIRST
-- Prevents new operations from starting
-
-#### Phase 2: Clear Callback Pointers
-```cpp
-statusSink_ = nullptr;
-configUpdateSink_ = nullptr;
-```
-- Prevents callbacks from invoking processor methods
-
-#### Phase 3: Disconnect Signaling (Non-Blocking)
-```cpp
-signalingClient_->disconnect();  // Uses close(), not stop()
-```
-- Closes WebSocket without waiting for thread join
-- Prevents deadlock
-
-#### Phase 4: Clear Peer Connection Callbacks
-```cpp
-session.connection->onStateChange(nullptr);
-session.connection->onTrack(nullptr);
-// ... etc
-```
-- Prevents libdatachannel from invoking callbacks
-
-#### Phase 5: Close Connections
-```cpp
-session.connection->close();
-```
-- Gracefully shuts down peer connections
-
-#### Phase 6: Destroy Codecs
-```cpp
-opus_encoder_destroy(opusEncoder_);
-opus_decoder_destroy(opusDecoder_);
-```
-- Safe now - no more callbacks can access them
-
-#### Phase 7: Reset Flag
-```cpp
-shuttingDown_.store(false, std::memory_order_release);
-```
-- Allows session to be restarted if needed
-
-## Race Condition Prevention
-
-### TOCTOU (Time-of-Check-Time-of-Use) in `onFrame()`
-
-**Problem**:
-```cpp
-// BAD: Race condition!
-if (shuttingDown_) return;
-// ← Decoder could be destroyed HERE
-use(opusDecoder_);  // CRASH!
-```
-
-**Solution**: Double-check with mutex
-```cpp
-// GOOD: Atomic check + mutex-protected access
-if (shuttingDown_.load(std::memory_order_acquire)) {
-    return;
-}
-
-::OpusDecoder* decoder = nullptr;
-{
-    std::lock_guard<SpinLock> lock(mutex_);
-    if (!started_ || !opusDecoder_) {
-        return;
-    }
-    decoder = opusDecoder_;  // Safe: decoder won't be destroyed while mutex held
-}
-
-use(decoder);  // Safe: we hold a valid pointer
-```
-
-## Member Destruction Order
-
-C++ destroys members in **REVERSE** declaration order:
-
-```cpp
-class WebRTCProcessor {
-    WebRTCSession session_;      // Declared first → destroyed LAST
-    AudioRingBuffer receiveBuffer_;
-    std::atomic<bool> statusDirty_;
-    // ...
-    bool configDirty_;           // Declared last → destroyed FIRST
-};
-```
-
-**Why this matters**:
-- `session_` destructor calls `stop()`
-- `stop()` triggers callbacks that may access `receiveBuffer_`, status members, etc.
-- By declaring `session_` first, other members are still valid when `stop()` runs
-
-## Audio Buffer Thread Safety
-
-### `AudioRingBuffer receiveBuffer_`
-
-**Writers**: WebRTC callback threads (via `onFrame()`)
-**Readers**: Audio thread (via `process()`)
-
-**Synchronization**: Internal lock-free ring buffer
-- `push()` from callback threads
-- `pull()` from audio thread
-- Lock-free operations prevent priority inversion
-
-### `outgoingBuffer_` (WebRTCSession)
-
-**Writers**: Audio thread (via `pushOutgoingAudio()`)
-**Readers**: WebRTC encoding thread
-
-**Synchronization**: `std::deque` protected by `mutex_`
-- Audio thread: Brief lock to push samples
-- Encoder thread: Lock to pull samples
-- FIFO ensures correct ordering
-
-## Best Practices for Future Development
-
-### 1. Always Check `shuttingDown_` First
-```cpp
-void callback() {
-    if (shuttingDown_.load(std::memory_order_acquire)) {
-        return;
-    }
-    // Rest of callback
-}
-```
-
-### 2. Use RAII for Locks
-```cpp
-{
-    std::lock_guard<SpinLock> lock(mutex_);
-    // Critical section
-}  // Lock automatically released
-```
-
-### 3. Minimize Lock Hold Time
-```cpp
-// BAD: Holds lock during slow operation
-{
-    std::lock_guard<SpinLock> lock(mutex_);
-    data = state_;
-    processData(data);  // SLOW!
-}
-
-// GOOD: Copy data, release lock, then process
-Data dataCopy;
-{
-    std::lock_guard<SpinLock> lock(mutex_);
-    dataCopy = state_;
-}
-processData(dataCopy);  // Lock released
-```
-
-### 4. Never Block Audio Thread
-```cpp
-tresult WebRTCProcessor::process(ProcessData& data) {
-    // GOOD: Lock-free or very short locks only
-    receiveBuffer_.pull(outputs, numSamples);
-
-    // BAD: Never do this!
-    // std::this_thread::sleep_for(...);
-    // signalingClient_->send(...);  // Network I/O!
-}
-```
-
-### 5. Test with Thread Sanitizer
 ```bash
-# Compile with TSan
-cmake -DCMAKE_CXX_FLAGS="-fsanitize=thread" ...
-
-# Run tests
-./validator.exe plugin.vst3
+ctest --test-dir build/webrtc_vst_mac -C Release --output-on-failure
+npm run test:hardening
+WEBRTC_EXTENDED_SECONDS=1800 npm run test:extended
+WEBRTC_SOAK_SECONDS=1800 WEBRTC_SOAK_RECONNECT=1 npm run test:audio-soak
 ```
 
-## Known Limitations
-
-1. **SpinLock on Audio Thread**: Could cause priority inversion on RT systems
-   - Consider lock-free structures for audio path
-
-2. **Resampler in Callback**: `incomingResampler_` allocates memory
-   - Should use pre-allocated buffers
-
-3. **No Graceful Shutdown Timeout**: If callbacks hang, shutdown waits forever
-   - Consider adding timeout with forced cleanup
-
-## Debugging Tips
-
-### Enable Debug Logging
-```powershell
-$env:WEBRTC_VST_LOG_STDOUT="1"
-```
-
-### Use DebugView
-1. Download from Microsoft Sysinternals
-2. Run as Administrator
-3. Enable "Capture Win32" and "Capture Global Win32"
-4. Watch shutdown sequence logs
-
-### Check for Deadlocks
-- If plugin hangs on close, check if any thread is waiting on `mutex_`
-- Use Visual Studio "Break All" and check call stacks
-
-### Verify Destruction Order
-- Add logging to all destructors
-- Ensure `~WebRTCSession()` runs before other members destroyed
-
-## References
-
-- [C++ Memory Order](https://en.cppreference.com/w/cpp/atomic/memory_order)
-- [VST3 Threading Model](https://steinbergmedia.github.io/vst3_dev_portal/pages/Technical+Documentation/Change+History/3.6.5/IProcessContextRequirements.html)
-- [Lock-Free Programming](https://preshing.com/20120612/an-introduction-to-lock-free-programming/)
+The extended runner owns a loopback signaling fixture, records seeds/RSS and
+checks that the plugin binary hash stays unchanged. The audio soak owns both
+synthetic endpoints and measures one-second stereo level, pitch, finite-output,
+silence and callback-duration windows. Neither test captures physical inputs.

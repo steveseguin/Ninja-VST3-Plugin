@@ -24,6 +24,7 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 
 - Build/test doc: [docs/developer/BUILD_AND_TEST.md](./docs/developer/BUILD_AND_TEST.md)
 - macOS build, install and signing: [docs/developer/MACOS.md](./docs/developer/MACOS.md)
+- Current hardening, audio measurements and testing gaps: [docs/developer/HARDENING_VALIDATION.md](./docs/developer/HARDENING_VALIDATION.md)
 - SDK policy: Steinberg VST3 SDK 3.8+ (MIT) only
 - Primary automation tests: `npm run test:integration`
 - Live room smoke test: `npm run test:integration:live`
@@ -33,6 +34,7 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 - Releases: https://github.com/steveseguin/Ninja-VST3-Plugin/releases
 - Docs landing page (when GitHub Pages is enabled): `docs/index.html`
 - Install instructions: [INSTALL.md](./INSTALL.md)
+- Self-hosted domains, salts and signaling: [Advanced settings](./docs/developer/ADVANCED_SETTINGS.md)
 
 ## License and contributions
 

@@ -35,6 +35,8 @@ const cliEnv = {
     WEBRTC_VST_STREAM_ID: streamId,
     WEBRTC_VST_PASSWORD: pluginPassword,
     WEBRTC_VST_HANDSHAKE_URL: handshakeUrl,
+    ...(process.env.WEBRTC_TEST_SALT !== undefined ? { WEBRTC_VST_SALT: process.env.WEBRTC_TEST_SALT } : {}),
+    ...(process.env.WEBRTC_TEST_WEB_BASE_URL ? { WEBRTC_VST_WEB_BASE_URL: process.env.WEBRTC_TEST_WEB_BASE_URL } : {}),
     WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: runtimeMs,
     WEBRTC_CLI_HOST_BLOCK_SLEEP_MS: process.env.WEBRTC_TEST_BLOCK_SLEEP_MS || "5",
     WEBRTC_CLI_HOST_TIMEOUT_MS: String(Number(runtimeMs) + 10000),
@@ -168,7 +170,7 @@ async function main() {
         autoReconnect: false
     };
     if (!disableEncryption) {
-        viewerOptions.salt = "vdo.ninja";
+        viewerOptions.salt = process.env.WEBRTC_TEST_SALT || "vdo.ninja";
     }
     const viewer = new VDONinjaSDK(viewerOptions);
 

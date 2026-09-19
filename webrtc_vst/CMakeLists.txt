@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 if(CMAKE_HOST_APPLE AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
-project(WebRTC_VST VERSION 0.2.4 LANGUAGES CXX)
+project(WebRTC_VST VERSION 0.2.5 LANGUAGES CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -313,6 +313,7 @@ target_include_directories(webrtc_vst_cli_host
 
 target_link_libraries(webrtc_vst_cli_host
     PRIVATE
+        nlohmann_json::nlohmann_json
         sdk
         sdk_common
         sdk_hosting

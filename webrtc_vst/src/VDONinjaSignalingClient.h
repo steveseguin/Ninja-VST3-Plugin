@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include "SpinLock.h"
 #include <functional>
 #include <memory>
@@ -25,7 +27,7 @@ public:
         std::function<void(const std::string&)> onError;
     };
 
-    explicit VDONinjaSignalingClient(std::string url);
+    explicit VDONinjaSignalingClient(std::string url, bool reconnect = true);
     ~VDONinjaSignalingClient();
 
     void setCallbacks(Callbacks callbacks);
@@ -40,6 +42,11 @@ private:
     void configureCallbacks();
 
     std::string url_;
+    bool reconnect_{true};
+    std::mutex reconnectWaitMutex_;
+    std::condition_variable reconnectWait_;
+    std::chrono::steady_clock::time_point openedAt_{};
+    unsigned consecutiveCloses_{0};
     std::unique_ptr<ix::WebSocket> socket_;
     mutable SpinLock mutex_;
     Callbacks callbacks_;

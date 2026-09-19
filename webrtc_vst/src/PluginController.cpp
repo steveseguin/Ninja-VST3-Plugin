@@ -1,6 +1,8 @@
 #include "PluginController.h"
 #include "qrcodegen.hpp"
 #include "StreamIdGenerator.h"
+#include "ConfigState.h"
+#include <cmath>
 
 #include <nlohmann/json.hpp>
 #include <openssl/sha.h>
@@ -17,6 +19,7 @@
 #include <base/source/fstring.h>
 #include <pluginterfaces/base/ibstream.h>
 #include <vstgui/lib/cclipboard.h>
+#include <vstgui/lib/controls/ccontrol.h>
 #include <vstgui/plugin-bindings/vst3editor.h>
 #include <vstgui/lib/platform/platformfactory.h>
 #if SMTG_OS_WINDOWS
@@ -32,30 +35,51 @@ namespace webrtc_vst {
 
 namespace {
 
-constexpr auto kDefaultHandshakeUrl = "wss://wss.vdo.ninja";
-constexpr auto kDefaultVdoHost = "vdo.ninja";
+class WebRTCEditor final : public VSTGUI::VST3Editor {
+public:
+    using VST3Editor::VST3Editor;
+    static bool isExternalAction(const VSTGUI::CControl* control) {
+        return control && (control->getTag() == kParamCopyPushLink || control->getTag() == kParamShowPushQr);
+    }
+    void valueChanged(VSTGUI::CControl* control) override {
+        if (!isExternalAction(control)) { VST3Editor::valueChanged(control); return; }
+        // Parameter listeners also invoke valueChanged during host updates.
+        // Only an actual editing gesture may touch clipboard / launch a URL.
+        if (control->isEditing() && control->getValueNormalized() >= 0.5f) {
+            static_cast<WebRTCController*>(getController())->performUserAction(control->getTag());
+            control->setValueNormalized(0.f);
+            control->invalid();
+        }
+    }
+    void controlBeginEdit(VSTGUI::CControl* control) override {
+        if (!isExternalAction(control)) VST3Editor::controlBeginEdit(control);
+    }
+    void controlEndEdit(VSTGUI::CControl* control) override {
+        if (!isExternalAction(control)) VST3Editor::controlEndEdit(control);
+    }
+    VSTGUI::CView* verifyView(VSTGUI::CView* view, const VSTGUI::UIAttributes& attributes,
+                            const VSTGUI::IUIDescription* description) override {
+        if (auto* control = dynamic_cast<VSTGUI::CControl*>(view); control && control->getTag() == 1000) {
+            // UIViewSwitchContainer observes this local control directly. Binding
+            // an unregistered tag to VST3Editor causes recursive valueChanged().
+            control->setListener(nullptr);
+        }
+        return VST3Editor::verifyView(view, attributes, description);
+    }
+};
 
-std::string toAscii(const Steinberg::Vst::TChar* text) {
-    if (!text) {
-        return {};
-    }
-    std::string result;
-    while (*text) {
-        auto code = static_cast<uint32_t>(*text++);
-        result.push_back(code <= 0x7F ? static_cast<char>(code) : '?');
-    }
-    return result;
+std::string toUtf8(const Steinberg::Vst::TChar* text) {
+    if (!text) return {};
+    Steinberg::String converted(text);
+    if (!converted.toMultiByte(Steinberg::kCP_Utf8)) return {};
+    return converted.text8();
 }
 
-void copyAsciiToTChar(const std::string& text, Steinberg::Vst::String128 dest) {
-    size_t count = std::min<size_t>(text.size(), 127);
-    for (size_t i = 0; i < count; ++i) {
-        dest[i] = static_cast<Steinberg::Vst::TChar>(text[i]);
-    }
-    dest[count] = 0;
-    for (size_t i = count + 1; i < 128; ++i) {
-        dest[i] = 0;
-    }
+void copyUtf8ToTChar(const std::string& text, Steinberg::Vst::String128 dest) {
+    std::fill_n(dest, 128, 0);
+    Steinberg::String converted(text.c_str(), Steinberg::kCP_Utf8);
+    converted.copyTo16(dest, 0, 127);
+    dest[127] = 0;
 }
 
 std::string trimCopy(const std::string& text) {
@@ -123,13 +147,13 @@ std::string encodeURIComponentCompat(const std::string& text) {
     return encoded;
 }
 
-std::string buildPasswordHash(const std::string& password) {
+std::string buildPasswordHash(const std::string& password, const std::string& salt) {
     const auto trimmedPassword = trimCopy(password);
     if (trimmedPassword.empty() || passwordImpliesDisableEncryption(trimmedPassword)) {
         return {};
     }
 
-    const auto payload = encodeURIComponentCompat(trimmedPassword) + kDefaultVdoHost;
+    const auto payload = encodeURIComponentCompat(trimmedPassword) + salt;
     std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
     SHA256(reinterpret_cast<const unsigned char*>(payload.data()), payload.size(), digest.data());
 
@@ -146,14 +170,17 @@ std::string buildPasswordHash(const std::string& password) {
 std::string buildVdoLink(bool push,
                          const std::string& streamId,
                          const std::string& roomName,
-                         const std::string& password) {
+                         const std::string& password,
+                         const std::string& webBaseUrl,
+                         const std::string& saltOverride,
+                         const std::string& handshakeUrl) {
     const auto trimmedStream = trimCopy(streamId);
     if (trimmedStream.empty()) {
         return {};
     }
 
     std::ostringstream url;
-    url << "https://" << kDefaultVdoHost << "/?";
+    url << webBaseUrl << "?";
     if (push) {
         url << "push=" << urlEncode(trimmedStream);
     } else {
@@ -168,10 +195,21 @@ std::string buildVdoLink(bool push,
         }
     }
 
-    const auto passwordHash = buildPasswordHash(password);
+    const auto salt = effectiveSalt(saltOverride, webBaseUrl);
+    const auto passwordHash = buildPasswordHash(password, salt);
     if (!passwordHash.empty()) {
         url << "&hash=" << passwordHash;
     }
+
+    if (passwordImpliesDisableEncryption(password)) url << "&password=false";
+    if (salt != saltForUrl(webBaseUrl)) url << "&salt=" << urlEncode(salt);
+    // wss2 changes the endpoint while retaining the VDO.Ninja signaling
+    // protocol. wss would switch the browser to its generic-relay protocol.
+    // Carry the endpoint even if the custom web front end has other defaults.
+    // ws:// is for CLI tests only.
+    if (handshakeUrl.starts_with("ws://")) return {};
+    if (handshakeUrl != kDefaultHandshakeUrl || webBaseUrl != kDefaultWebBaseUrl)
+        url << "&wss2=" << urlEncode(handshakeUrl);
 
     return url.str();
 }
@@ -246,36 +284,6 @@ std::string buildQrViewerHtml(const std::string& label, const std::string& svgMa
          << "</div><p>Generated locally by WebRTC VST. No third-party QR service is used.</p>"
          << "</main></body></html>";
     return html.str();
-}
-
-std::string writeLocalQrViewer(const std::string& label, const std::string& targetUrl) {
-    try {
-        namespace fs = std::filesystem;
-        fs::path qrDir = fs::temp_directory_path() / "webrtc_vst_qr";
-        fs::create_directories(qrDir);
-
-        std::string fileStem = "share_qr";
-        if (label.find("push") != std::string::npos) {
-            fileStem = "push_qr";
-        } else if (label.find("view") != std::string::npos) {
-            fileStem = "view_qr";
-        }
-
-        fs::path htmlPath = qrDir / ("webrtc_vst_" + fileStem + ".html");
-        std::ofstream output(htmlPath, std::ios::binary | std::ios::trunc);
-        if (!output) {
-            return {};
-        }
-
-        output << buildQrViewerHtml(label, buildQrSvg(targetUrl));
-        output.close();
-        if (!output) {
-            return {};
-        }
-        return htmlPath.string();
-    } catch (...) {
-        return {};
-    }
 }
 
 bool copyToClipboard(const std::string& text) {
@@ -385,37 +393,79 @@ const Steinberg::FUID kWebRTCControllerUID(0x2A1D4B56, 0x5E7341FA, 0x8C00C53F, 0
 
 StringParameter::StringParameter(const Steinberg::char16* title,
                                  Steinberg::Vst::ParamID tag)
-    : Steinberg::Vst::Parameter(title, tag) {}
+    : Steinberg::Vst::Parameter(title, tag) {
+    getInfo().flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
+}
 
 void StringParameter::setString(const std::string& value) {
-    uint32_t id = ParameterStringRegistry::instance().registerValue(value);
-    setNormalized(idToNormalized(id));
+    if (text_ == value) return;
+    text_ = value;
+    pendingText_.reset();
+    Parameter::setNormalized(static_cast<double>((++serial_ & 0xffffff) + 1) / 16777216.0);
 }
 
 void StringParameter::setDefaultString(const std::string& value) {
-    const uint32_t id = ParameterStringRegistry::instance().registerValue(value);
-    const auto normalized = idToNormalized(id);
-    getInfo().defaultNormalizedValue = normalized;
-    setNormalized(normalized);
+    setString(value);
+    getInfo().defaultNormalizedValue = getNormalized();
 }
 
 std::string StringParameter::getString() const {
-    return ParameterStringRegistry::instance().lookup(normalizedToId(getNormalized()));
+    return text_;
+}
+
+bool StringParameter::setNormalized(Steinberg::Vst::ParamValue value) {
+    if (!std::isfinite(value)) return false;
+    if (pendingText_ && value == pendingValue_) {
+        text_ = std::move(*pendingText_);
+        pendingText_.reset();
+        return Parameter::setNormalized(value);
+    }
+    return false;
 }
 
 void StringParameter::toString(Steinberg::Vst::ParamValue normValue, Steinberg::Vst::String128 string) const {
-    auto text = ParameterStringRegistry::instance().lookup(normalizedToId(normValue));
-    copyAsciiToTChar(text, string);
+    copyUtf8ToTChar(pendingText_ && normValue == pendingValue_ ? *pendingText_ : text_, string);
 }
 
 bool StringParameter::fromString(const Steinberg::Vst::TChar* text, Steinberg::Vst::ParamValue& normValue) const {
-    std::string ascii = toAscii(text);
-    uint32_t id = ParameterStringRegistry::instance().registerValue(ascii);
-    normValue = idToNormalized(id);
+    std::string ascii = toUtf8(text);
+#if SMTG_OS_MACOS
+    // VSTGUI decomposes Cocoa text into NFD, unlike ordinary browser password
+    // entry. Compose UI edits back to NFC; preset/config bytes remain untouched.
+    ascii = normalizeMacEditedText(ascii);
+#endif
+    try { validateSettingText(ascii); } catch (...) { return false; }
+    if (getInfo().id == kParamWebBaseUrl || getInfo().id == kParamHandshakeUrl) {
+        auto normalized = normalizeEndpoint(ascii, getInfo().id == kParamWebBaseUrl);
+        if (!normalized || normalized->size() > 127 || normalized->starts_with("ws://")) return false;
+        ascii = *normalized;
+    }
+    pendingText_ = std::move(ascii);
+    // VSTGUI's text conversion passes through float. Use exactly representable
+    // binary fractions or toString would discard the draft during that round trip.
+    pendingValue_ = static_cast<double>((++serial_ & 0xffffff) + 1) / 16777216.0;
+    normValue = pendingValue_;
     return true;
 }
 
 WebRTCController::WebRTCController() = default;
+
+WebRTCController::~WebRTCController() {
+    if (statusTimer_) statusTimer_->release();
+}
+
+Steinberg::tresult PLUGIN_API WebRTCController::terminate() {
+    if (statusTimer_) { statusTimer_->release(); statusTimer_ = nullptr; }
+    return EditControllerEx1::terminate();
+}
+
+void WebRTCController::onTimer(Steinberg::Timer*) {
+    if (auto* message = allocateMessage()) {
+        message->setMessageID("PollStatus");
+        sendMessage(message);
+        message->release();
+    }
+}
 
 Steinberg::FUnknown* WebRTCController::createInstance(void* /*context*/) {
     return static_cast<Steinberg::Vst::IEditController*>(new WebRTCController());
@@ -448,6 +498,9 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
     parameters.addParameter(handshakeUrlParam);
     handshakeUrlParam->setDefaultString(kDefaultHandshakeUrl);
     handshakeUrlParam->setString(kDefaultHandshakeUrl);
+
+    auto& handshakeInfo = const_cast<Steinberg::Vst::ParameterInfo&>(handshakeUrlParam->getInfo());
+    handshakeInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
 
     auto* statusParam = new StringParameter(STR16("Status"), kParamStatus);
     auto& statusInfo = const_cast<Steinberg::Vst::ParameterInfo&>(statusParam->getInfo());
@@ -504,61 +557,59 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
     auto& showPushQrInfo = const_cast<Steinberg::Vst::ParameterInfo&>(showPushQrParam->getInfo());
     showPushQrInfo.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
 
+    // Append, preserving existing host parameter indices as well as stable IDs.
+    for (const auto& item : {
+             std::pair{kParamWebBaseUrl, STR16("Web domain / URL")},
+             std::pair{kParamSalt, STR16("Custom salt")}}) {
+        auto* param = new StringParameter(item.second, item.first);
+        param->setDefaultString(item.first == kParamWebBaseUrl ? kDefaultWebBaseUrl : "");
+        auto& info = const_cast<Steinberg::Vst::ParameterInfo&>(param->getInfo());
+        info.flags &= ~Steinberg::Vst::ParameterInfo::kCanAutomate;
+        parameters.addParameter(param);
+    }
+
+    parameters.addParameter(STR16("Apply advanced settings"), nullptr, 1, 0,
+        0, kParamApplyAdvanced);
+
     updateShareLinks();
 
+    statusTimer_ = Steinberg::Timer::create(this, 100);
     return Steinberg::kResultOk;
 }
 
-void WebRTCController::applyStateJson(const std::string& jsonString) {
+bool WebRTCController::applyStateJson(const std::string& jsonString) {
     if (jsonString.empty()) {
-        return;
+        return true;
     }
 
     try {
-        const auto json = nlohmann::json::parse(jsonString);
-
-        if (auto it = json.find("streamId"); it != json.end()) {
-            const auto streamId = it->get<std::string>();
-            if (auto* param = findStringParameter(kParamStreamId)) {
-                param->setDefaultString(streamId);
-                param->setString(streamId);
-            }
-        }
-
-        if (auto it = json.contains("roomName") ? json.find("roomName") : json.find("roomId"); it != json.end()) {
-            if (auto* param = findStringParameter(kParamRoomName)) {
-                param->setString(it->get<std::string>());
-            }
-        }
-
-        if (auto it = json.contains("handshakeUrl") ? json.find("handshakeUrl") : json.find("signalingUrl"); it != json.end()) {
-            if (auto* param = findStringParameter(kParamHandshakeUrl)) {
-                param->setString(it->get<std::string>());
-            }
-        }
-
-        if (auto it = json.find("password"); it != json.end()) {
-            if (auto* param = findStringParameter(kParamPassword)) {
-                param->setString(it->get<std::string>());
-            }
-        }
-
-        if (auto it = json.find("mode"); it != json.end()) {
-            if (auto* param = parameters.getParameter(kParamMode)) {
-                const auto mode = it->get<std::string>();
-                param->setNormalized((mode == "seed" || mode == "publish") ? 1.0 : 0.0);
-            }
-        }
+        PluginConfig previous;
+        previous.streamId = findStringParameter(kParamStreamId)->getString();
+        previous.roomName = findStringParameter(kParamRoomName)->getString();
+        previous.password = findStringParameter(kParamPassword)->getString();
+        previous.handshakeUrl = findStringParameter(kParamHandshakeUrl)->getString();
+        previous.mode = parameters.getParameter(kParamMode)->getNormalized() >= 0.5 ? ConnectionMode::Publish : ConnectionMode::Play;
+        const auto next = parseConfigState(jsonString, previous);
+        committedAdvanced_ = next;
+        advancedDirty_ = false;
+        findStringParameter(kParamStreamId)->setString(next.streamId);
+        findStringParameter(kParamRoomName)->setString(next.roomName);
+        findStringParameter(kParamHandshakeUrl)->setString(next.handshakeUrl);
+        findStringParameter(kParamWebBaseUrl)->setString(next.webBaseUrl);
+        findStringParameter(kParamSalt)->setString(next.salt);
+        findStringParameter(kParamPassword)->setString(next.password);
+        parameters.getParameter(kParamMode)->setNormalized(next.mode == ConnectionMode::Publish ? 1.0 : 0.0);
 
         updateDisableEncryptionFromPassword();
         updateShareLinks();
+        return true;
     } catch (...) {
-        // ignore malformed state
+        return false;
     }
 }
 
 
-std::string WebRTCController::exportStateJson() const {
+std::string WebRTCController::exportStateJson(bool includeDraft) const {
     auto* modeParam = parameters.getParameter(kParamMode);
     const bool isPublish = modeParam && modeParam->getNormalized() >= 0.5;
 
@@ -595,18 +646,39 @@ std::string WebRTCController::exportStateJson() const {
     nlohmann::json json = {
         {"streamId", streamId},
         {"roomName", roomName},
-        {"handshakeUrl", handshakeUrl},
+        {"handshakeUrl", includeDraft ? handshakeUrl : committedAdvanced_.handshakeUrl},
+        {"webBaseUrl", includeDraft ? findStringParameter(kParamWebBaseUrl)->getString() : committedAdvanced_.webBaseUrl},
+        {"salt", includeDraft ? findStringParameter(kParamSalt)->getString() : committedAdvanced_.salt},
         {"password", password},
         {"mode", isPublish ? "publish" : "play"},
         {"disableEncryption", disableEncryption}
     };
 
     json["roomId"] = roomName;
-    json["signalingUrl"] = handshakeUrl;
+    json["signalingUrl"] = json["handshakeUrl"];
 
     return json.dump();
 }
 
+
+bool WebRTCController::sendConfig(bool includeDraft) {
+    const auto serialized = exportStateJson(includeDraft);
+    try { (void)parseConfigState(serialized, committedAdvanced_); } catch (...) { return false; }
+    auto* message = allocateMessage();
+    if (!message) return false;
+    message->setMessageID("ConfigUpdate");
+    message->getAttributes()->setBinary("config", serialized.data(), static_cast<Steinberg::uint32>(serialized.size()));
+    const bool sent = sendMessage(message) == Steinberg::kResultOk;
+    message->release();
+    if (sent && includeDraft) {
+        committedAdvanced_.handshakeUrl = findStringParameter(kParamHandshakeUrl)->getString();
+        committedAdvanced_.webBaseUrl = findStringParameter(kParamWebBaseUrl)->getString();
+        committedAdvanced_.salt = findStringParameter(kParamSalt)->getString();
+        advancedDirty_ = false;
+    }
+    if (!sent) postControllerStatus("Error: host did not accept settings");
+    return sent;
+}
 
 StringParameter* WebRTCController::findStringParameter(Steinberg::Vst::ParamID id) const {
     return dynamic_cast<StringParameter*>(parameters.getParameter(id));
@@ -680,11 +752,16 @@ void WebRTCController::updateShareLinks() {
         return std::string{};
     }();
 
-    setStringParameterAndNotify(kParamPushLink, buildVdoLink(!isPublish, streamId, roomName, password));
+    setStringParameterAndNotify(kParamPushLink, buildVdoLink(!isPublish, streamId, roomName, password,
+        committedAdvanced_.webBaseUrl, committedAdvanced_.salt, committedAdvanced_.handshakeUrl));
 }
 
 void WebRTCController::postControllerStatus(const std::string& status) {
     setStringParameterAndNotify(kParamStatus, status);
+}
+
+void WebRTCController::performUserAction(Steinberg::Vst::ParamID tag) {
+    if (tag == kParamCopyPushLink || tag == kParamShowPushQr) handleActionButton(tag, 1.0);
 }
 
 void WebRTCController::handleActionButton(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue value) {
@@ -720,13 +797,16 @@ void WebRTCController::handleActionButton(Steinberg::Vst::ParamID tag, Steinberg
                 return;
             }
 
-            const auto viewerPath = writeLocalQrViewer(label, link);
+            const auto viewerPath = qrPages_.write(buildQrViewerHtml(label, buildQrSvg(link)));
             if (viewerPath.empty() || !openExternalUrl(viewerPath)) {
                 postControllerStatus(std::string("Error: failed to open ") + label + " QR");
             }
         };
 
         switch (tag) {
+            case kParamApplyAdvanced:
+                if (sendConfig(true)) { updateShareLinks(); postControllerStatus("Advanced settings applied"); }
+                break;
             case kParamCopyPushLink:
                 runCopyAction(kParamPushLink, "VDO.Ninja link");
                 break;
@@ -750,12 +830,17 @@ void WebRTCController::handleActionButton(Steinberg::Vst::ParamID tag, Steinberg
 
 Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vst::ParamID tag,
                                                                    Steinberg::Vst::ParamValue value) {
+    if (!std::isfinite(value) || value < 0 || value > 1) return Steinberg::kInvalidArgument;
+    // Non-automatable is advisory: validators and hosts may still write these
+    // IDs. Keep them inert and off; side effects require a native UI gesture.
+    if (tag == kParamCopyPushLink || tag == kParamShowPushQr)
+        return EditControllerEx1::setParamNormalized(tag, 0.0);
     const auto result = EditControllerEx1::setParamNormalized(tag, value);
     if (result != Steinberg::kResultOk) {
         return result;
     }
 
-    if (tag == kParamCopyPushLink || tag == kParamShowPushQr) {
+    if (tag == kParamApplyAdvanced) {
         handleActionButton(tag, value);
         return result;
     }
@@ -773,11 +858,16 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
     if (tag == kParamPassword) {
         updateDisableEncryptionFromPassword();
         updateShareLinks();
+        sendConfig();
         return result;
     }
 
-    if (tag == kParamMode || tag == kParamStreamId || tag == kParamRoomName) {
+    if (tag == kParamWebBaseUrl || tag == kParamSalt || tag == kParamHandshakeUrl) {
+        advancedDirty_ = true;
+        postControllerStatus("Advanced changes pending: click Apply");
+    } else if (tag == kParamMode || tag == kParamStreamId || tag == kParamRoomName) {
         updateShareLinks();
+        sendConfig();
     }
 
     return result;
@@ -786,7 +876,7 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
 Steinberg::IPlugView* PLUGIN_API WebRTCController::createView(const char* name) {
     Steinberg::ConstString viewName(name);
     if (viewName == Steinberg::Vst::ViewType::kEditor) {
-        return new VSTGUI::VST3Editor(this, "view", "webrtc_vst.uidesc");
+        return new WebRTCEditor(this, "view", "webrtc_vst.uidesc");
     }
     return nullptr;
 }
@@ -796,23 +886,9 @@ Steinberg::tresult PLUGIN_API WebRTCController::setComponentState(Steinberg::IBS
         return Steinberg::kInvalidArgument;
     }
 
-    std::string buffer;
-    buffer.resize(4096);
-    Steinberg::int32 bytesRead = 0;
     std::string serialized;
-
-    do {
-        const auto status = state->read(buffer.data(), static_cast<Steinberg::int32>(buffer.size()), &bytesRead);
-        if (bytesRead > 0) {
-            serialized.append(buffer.data(), static_cast<size_t>(bytesRead));
-        }
-        if (status != Steinberg::kResultTrue) {
-            break;
-        }
-    } while (bytesRead > 0);
-
-    applyStateJson(serialized);
-    return Steinberg::kResultOk;
+    if (!readBoundedState(state, serialized)) return Steinberg::kResultFalse;
+    return applyStateJson(serialized) ? Steinberg::kResultOk : Steinberg::kResultFalse;
 }
 
 Steinberg::tresult PLUGIN_API WebRTCController::setState(Steinberg::IBStream* state) {
@@ -827,13 +903,14 @@ Steinberg::tresult PLUGIN_API WebRTCController::getState(Steinberg::IBStream* st
     const auto serialized = exportStateJson();
     Steinberg::int32 written = 0;
     auto* mutableData = const_cast<char*>(serialized.data());
-    state->write(mutableData, static_cast<Steinberg::int32>(serialized.size()), &written);
-    return Steinberg::kResultOk;
+    const auto result = state->write(mutableData, static_cast<Steinberg::int32>(serialized.size()), &written);
+    return result == Steinberg::kResultOk && written == static_cast<Steinberg::int32>(serialized.size())
+        ? Steinberg::kResultOk : Steinberg::kResultFalse;
 }
 
 
 Steinberg::tresult PLUGIN_API WebRTCController::notify(Steinberg::Vst::IMessage* message) {
-    if (!message) {
+    if (!message || !message->getMessageID()) {
         return EditControllerEx1::notify(message);
     }
 
@@ -841,17 +918,27 @@ Steinberg::tresult PLUGIN_API WebRTCController::notify(Steinberg::Vst::IMessage*
         const void* data = nullptr;
         Steinberg::uint32 size = 0;
         if (auto* attributes = message->getAttributes();
-            attributes && attributes->getBinary("config", data, size) == Steinberg::kResultTrue && data && size > 0) {
+            attributes && attributes->getBinary("config", data, size) == Steinberg::kResultTrue && data && size > 0 && size <= kMaxStateBytes) {
             const char* charData = static_cast<const char*>(data);
             std::string serialized(charData, (size > 0 && charData[size - 1] == '\0') ? size - 1 : size);
-            applyStateJson(serialized);
+            const bool hadDraft = advancedDirty_;
+            const auto draftWeb = findStringParameter(kParamWebBaseUrl)->getString();
+            const auto draftSalt = findStringParameter(kParamSalt)->getString();
+            const auto draftWss = findStringParameter(kParamHandshakeUrl)->getString();
+            if (!applyStateJson(serialized)) return Steinberg::kResultFalse;
+            if (hadDraft) {
+                findStringParameter(kParamWebBaseUrl)->setString(draftWeb);
+                findStringParameter(kParamSalt)->setString(draftSalt);
+                findStringParameter(kParamHandshakeUrl)->setString(draftWss);
+                advancedDirty_ = true;
+            }
         }
         return Steinberg::kResultOk;
     }
     if (std::strcmp(message->getMessageID(), "StatusUpdate") == 0) {
         const void* data = nullptr;
         Steinberg::uint32 size = 0;
-        if (auto* attributes = message->getAttributes(); attributes && attributes->getBinary("status", data, size) == Steinberg::kResultTrue && data && size > 0) {
+        if (auto* attributes = message->getAttributes(); attributes && attributes->getBinary("status", data, size) == Steinberg::kResultTrue && data && size > 0 && size <= 512) {
             const char* charData = static_cast<const char*>(data);
             std::string status(charData, (size > 0 && charData[size - 1] == '\0') ? size - 1 : size);
             if (auto* statusParam = findStringParameter(kParamStatus)) {
@@ -871,4 +958,3 @@ Steinberg::tresult PLUGIN_API WebRTCController::notify(Steinberg::Vst::IMessage*
 }
 
 } // namespace webrtc_vst
-

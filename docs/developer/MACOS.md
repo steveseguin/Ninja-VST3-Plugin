@@ -5,8 +5,9 @@ build targets macOS 11 or later. Use a VST3 host such as REAPER or Studio One;
 Logic Pro and GarageBand require an Audio Units plugin, which this project does
 not currently provide. Audio processing is 32-bit float, as on Windows.
 
-See [MACOS_VALIDATION.md](MACOS_VALIDATION.md) for the tested machines, results and
-remaining public-release checks.
+See [HARDENING_VALIDATION.md](HARDENING_VALIDATION.md) for current host journeys,
+audio measurements and remaining gaps. [MACOS_VALIDATION.md](MACOS_VALIDATION.md)
+is the historical initial-port report.
 
 ## Requirements and build
 

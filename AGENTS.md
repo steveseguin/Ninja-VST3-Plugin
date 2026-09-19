@@ -15,7 +15,7 @@ Primary practical use-cases:
 - Voiceover direction and mix review
 - Lightweight collaboration without self-hosted signaling
 
-Current version macro: `0.1.4` (`webrtc_vst/src/Version.h`).
+Current version macro: `0.2.5` (`webrtc_vst/src/Version.h`).
 
 ## 2) Repository Map
 
@@ -159,6 +159,7 @@ Primary plugin env vars:
 - `WEBRTC_VST_STREAM_ID`
 - `WEBRTC_VST_ROOM_NAME` (legacy alias: `WEBRTC_VST_ROOM_ID`)
 - `WEBRTC_VST_HANDSHAKE_URL` (legacy alias: `WEBRTC_VST_SIGNALING_URL`)
+- `WEBRTC_VST_WEB_BASE_URL` / `WEBRTC_VST_SALT` (see `docs/developer/ADVANCED_SETTINGS.md`)
 - `WEBRTC_VST_PASSWORD`
 - `WEBRTC_VST_DISABLE_ENCRYPTION`
 - `WEBRTC_VST_LOG_STDOUT`
@@ -172,6 +173,7 @@ Controller parameters exposed in plugin UI/state:
 - Stream ID
 - Room Name
 - Handshake URL
+- Web domain / URL and Salt override (hidden behind Advanced; saved per instance)
 - Password
 - Disable Encryption (derived/read-only behavior)
 - Status (read-only)
@@ -248,6 +250,7 @@ npm run test:integration:live
 Script groups in `package.json`:
 
 - `test:integration:audio-only`
+- `test:advanced-settings` (loopback server, salt/hash/endpoint checks)
 - `test:integration:local`
 - `test:integration:live`
 - `test:publish-audio`

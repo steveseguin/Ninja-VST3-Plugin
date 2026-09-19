@@ -1,4 +1,5 @@
 #include "VDONinjaSignalingClient.h"
+#include "BoundedJson.h"
 
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXSocketTLSOptions.h>
@@ -33,8 +34,8 @@ bool rawSignalingLoggingEnabled() {
 }
 } // namespace
 
-VDONinjaSignalingClient::VDONinjaSignalingClient(std::string url)
-    : url_(std::move(url)) {
+VDONinjaSignalingClient::VDONinjaSignalingClient(std::string url, bool reconnect)
+    : url_(std::move(url)), reconnect_(reconnect) {
     ensureIxInitialized();
 }
 
@@ -60,10 +61,11 @@ void VDONinjaSignalingClient::configureCallbacks() {
         switch (msg->type) {
             case ix::WebSocketMessageType::Message: {
                 try {
+                    auto jsonMsg = parseBoundedJson(msg->str, 256 * 1024);
+                    if (!jsonMsg.is_object()) throw std::invalid_argument("Signaling message must be an object");
                     if (rawSignalingLoggingEnabled()) {
                         std::cout << "[raw signaling] " << msg->str << std::endl;
                     }
-                    auto jsonMsg = nlohmann::json::parse(msg->str);
 
                     std::function<void(const nlohmann::json&)> onMessage;
                     {
@@ -80,12 +82,14 @@ void VDONinjaSignalingClient::configureCallbacks() {
                         onError = callbacks_.onError;
                     }
                     if (onError) {
-                        onError(std::string("Failed to parse signaling message: ") + ex.what());
+                        // Parser errors can embed passwords/tokens from remote input.
+                        onError("Rejected malformed or oversized signaling message");
                     }
                 }
                 break;
             }
             case ix::WebSocketMessageType::Open: {
+                openedAt_ = std::chrono::steady_clock::now();
                 connected_.store(true, std::memory_order_relaxed);
                 std::function<void()> onConnected;
                 {
@@ -106,6 +110,15 @@ void VDONinjaSignalingClient::configureCallbacks() {
                 }
                 if (onDisconnected) {
                     onDisconnected();
+                }
+                // IX backs off failed handshakes, but reconnects immediately
+                // after a successful connection closes. Bound that loop too.
+                if (reconnect_ && !stopCalled_.load(std::memory_order_acquire)) {
+                    if (std::chrono::steady_clock::now() - openedAt_ > std::chrono::seconds(30)) consecutiveCloses_ = 0;
+                    consecutiveCloses_ = std::min(6u, consecutiveCloses_ + 1);
+                    const auto delay = std::chrono::milliseconds(std::min(30000u, 1000u << (consecutiveCloses_ - 1)));
+                    std::unique_lock<std::mutex> waitLock(reconnectWaitMutex_);
+                    reconnectWait_.wait_for(waitLock, delay, [this] { return stopCalled_.load(std::memory_order_acquire); });
                 }
                 break;
             }
@@ -155,11 +168,18 @@ void VDONinjaSignalingClient::connectAsync() {
     socket->setTLSOptions(tlsOptions);
 
     socket->setPingInterval(10);
-    socket->disableAutomaticReconnection();
+    // One owner for retries (including DNS/TLS/connection errors). IX cancels
+    // and joins its worker on stop; no detached per-attempt session threads.
+    socket->setMinWaitBetweenReconnectionRetries(1000);
+    socket->setMaxWaitBetweenReconnectionRetries(30000);
+    if (reconnect_) socket->enableAutomaticReconnection();
+    else socket->disableAutomaticReconnection();
     socket->start();
 }
 
 void VDONinjaSignalingClient::disconnect() {
+    stopCalled_.store(true, std::memory_order_release);
+    reconnectWait_.notify_all();
     std::unique_ptr<ix::WebSocket> socketToStop;
     {
         std::lock_guard<SpinLock> lock(mutex_);
@@ -167,10 +187,7 @@ void VDONinjaSignalingClient::disconnect() {
             connected_.store(false, std::memory_order_relaxed);
             return;
         }
-        if (stopCalled_.exchange(true, std::memory_order_acq_rel)) {
-            connected_.store(false, std::memory_order_relaxed);
-            return;
-        }
+        callbacks_ = {};
         socketToStop = std::move(socket_);
     }
 
@@ -178,16 +195,14 @@ void VDONinjaSignalingClient::disconnect() {
 
     if (socketToStop) {
         try {
-            // Clear callbacks first to prevent callbacks during shutdown
-            socketToStop->setOnMessageCallback([](const ix::WebSocketMessagePtr&) {});
-            // Close the socket - use close() instead of stop() to avoid blocking
-            socketToStop->close();
+            // Join outside our lock. Replacing IX's callback while its thread
+            // invokes it would race; our own callbacks were cleared under lock.
+            socketToStop->stop();
         } catch (...) {
             // Ignore exceptions during shutdown
         }
     }
 
-    stopCalled_.store(false, std::memory_order_relaxed);
 }
 
 

@@ -14,6 +14,10 @@
         <color name="ActionFrame" rgba="#0d8a43ff"/>
     </colors>
     <gradients>
+        <gradient name="AdvancedButtonGradient">
+            <color-stop rgba="#282c34ff" start="0"/>
+            <color-stop rgba="#20242aff" start="1"/>
+        </gradient>
         <gradient name="ActionButtonGradient">
             <color-stop rgba="#8bf7b7ff" start="0"/>
             <color-stop rgba="#24cf6eff" start="1"/>
@@ -23,8 +27,7 @@
             <color-stop rgba="#0f8f46ff" start="1"/>
         </gradient>
     </gradients>
-    <template background-color="Background" background-color-draw-style="filled" class="CViewContainer" mouse-enabled="true" name="view" opacity="1" origin="0, 0" size="720, 340" transparent="false">
-        <view back-color="Frame" class="CTextLabel" font="~ NormalFontVeryBig" font-color="Header" frame-color="Frame" frame-width="1" mouse-enabled="false" opacity="1" origin="20, 15" size="680, 30" style-round-rect="true" text-alignment="center" title="VDO.Ninja WebRTC Bridge" transparent="false"/>
+    <template background-color="Background" background-color-draw-style="filled" class="CViewContainer" mouse-enabled="true" name="main" opacity="1" origin="0, 0" size="720, 340" transparent="false">
 
         <view back-color="Background" class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 60" size="170, 20" text-alignment="left" title="Connection Mode" transparent="true"/>
         <view class="COptionMenu" control-tag="Param::Mode" menu-popup-style="true" default-value="0" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" max-value="1" min-value="0" mouse-enabled="true" opacity="1" origin="200, 58" size="330, 24" style-3D-in="false" style-no-frame="false" text-alignment="center" transparent="false"/>
@@ -47,6 +50,26 @@
         <view class="CTextButton" control-tag="Param::ShowPushQr" default-value="0" font="~ NormalFontSmall" frame-color="ActionFrame" frame-color-highlighted="ActionFrame" frame-width="1" gradient="ActionButtonGradient" gradient-highlighted="ActionButtonGradientHighlighted" kick-style="true" max-value="1" min-value="0" mouse-enabled="true" opacity="1" origin="625, 258" round-radius="4" size="75, 24" text-alignment="center" text-color="ActionText" text-color-highlighted="ActionTextHighlighted" title="QR" transparent="false" wants-focus="true"/>
         <view back-color="Background" class="CTextLabel" font="~ NormalFontSmall" font-color="LabelText" frame-color="Background" frame-width="0" mouse-enabled="false" opacity="1" origin="20, 305" size="680, 20" text-alignment="center" title="The displayed link follows the current mode." transparent="true"/>
     </template>
+    <template background-color="Background" class="CViewContainer" name="advanced" origin="0, 0" size="720, 340" transparent="false">
+        <view class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-width="0" mouse-enabled="false" origin="20, 65" size="680, 22" title="Advanced deployment settings (saved with this plugin instance)" transparent="true"/>
+        <view class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-width="0" mouse-enabled="false" origin="20, 108" size="170, 22" text-alignment="left" title="Web domain / URL" transparent="true"/>
+        <view class="CTextEdit" control-tag="Param::WebBaseUrl" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" immediate-text-change="false" origin="200, 106" size="500, 24" style-3D-in="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
+        <view class="CTextLabel" font="~ NormalFontSmall" font-color="ReadOnlyText" frame-width="0" mouse-enabled="false" origin="200, 134" size="500, 18" text-alignment="left" title="Domain or https:// URL for view / push links and QR codes." transparent="true"/>
+        <view class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-width="0" mouse-enabled="false" origin="20, 169" size="170, 22" text-alignment="left" title="Salt override" transparent="true"/>
+        <view class="CTextEdit" control-tag="Param::Salt" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" immediate-text-change="false" origin="200, 167" size="500, 24" style-3D-in="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
+        <view class="CTextLabel" font="~ NormalFontSmall" font-color="ReadOnlyText" frame-width="0" mouse-enabled="false" origin="200, 195" size="500, 18" text-alignment="left" title="Blank = web domain. The exact salt must match every peer." transparent="true"/>
+        <view class="CTextLabel" font="~ NormalFont" font-color="LabelText" frame-width="0" mouse-enabled="false" origin="20, 230" size="170, 22" text-alignment="left" title="Signaling server (WSS)" transparent="true"/>
+        <view class="CTextEdit" control-tag="Param::HandshakeUrl" font="~ NormalFont" font-color="InputText" frame-color="EditableFrame" frame-width="2" immediate-text-change="false" origin="200, 228" size="500, 24" style-3D-in="false" style-round-rect="true" text-alignment="left" text-inset="6, 2" transparent="false" wants-focus="true"/>
+        <view class="CTextLabel" font="~ NormalFontSmall" font-color="ReadOnlyText" frame-width="0" mouse-enabled="false" origin="200, 256" size="500, 18" text-alignment="left" title="Leave blank for wss://wss.vdo.ninja. Does not change the salt." transparent="true"/>
+        <view class="CTextLabel" font="~ NormalFontSmall" font-color="LabelText" frame-width="0" mouse-enabled="false" origin="20, 295" size="475, 28" title="Edit fields, then Apply to reconnect. Advanced returns to the main view." transparent="true"/>
+        <view class="CTextButton" control-tag="Param::ApplyAdvanced" default-value="0" font="~ NormalFontSmall" frame-color="ActionFrame" frame-color-highlighted="ActionFrame" gradient="ActionButtonGradient" gradient-highlighted="ActionButtonGradientHighlighted" kick-style="true" min-value="0" max-value="1" origin="515, 295" size="185, 28" round-radius="4" text-color="ActionText" text-color-highlighted="ActionTextHighlighted" title="Apply advanced settings" wants-focus="true"/>
+    </template>
+    <template background-color="Background" class="CViewContainer" name="view" origin="0, 0" size="720, 340" transparent="false">
+        <view class="UIViewSwitchContainer" origin="0, 0" size="720, 340" template-names="main,advanced" template-switch-control="UI::Advanced" animation-time="0"/>
+        <view back-color="Frame" class="CTextLabel" font="~ NormalFontVeryBig" font-color="Header" frame-color="Frame" frame-width="1" mouse-enabled="false" origin="20, 15" size="570, 30" style-round-rect="true" text-alignment="center" title="VDO.Ninja WebRTC Bridge" transparent="false"/>
+        <!-- Local view toggle only: deliberately not a VST parameter or saved setting. -->
+        <view class="CTextButton" control-tag="UI::Advanced" default-value="0" font="~ NormalFontSmall" frame-color="Frame" frame-color-highlighted="ActionFrame" frame-width="1" gradient="AdvancedButtonGradient" gradient-highlighted="AdvancedButtonGradient" kick-style="false" min-value="0" max-value="1" origin="600, 15" size="100, 30" round-radius="4" text-color="ReadOnlyText" text-color-highlighted="Header" title="Advanced" wants-focus="true"/>
+    </template>
     <variables/>
     <custom/>
     <bitmaps/>
@@ -61,5 +84,9 @@
         <control-tag name="Param::PushLink" tag="7"/>
         <control-tag name="Param::CopyPushLink" tag="9"/>
         <control-tag name="Param::ShowPushQr" tag="11"/>
+        <control-tag name="Param::WebBaseUrl" tag="13"/>
+        <control-tag name="Param::Salt" tag="14"/>
+        <control-tag name="Param::ApplyAdvanced" tag="15"/>
+        <control-tag name="UI::Advanced" tag="1000"/>
     </control-tags>
 </vstgui-ui-description>

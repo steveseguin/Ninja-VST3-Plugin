@@ -2,6 +2,13 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+add_executable(webrtc_vst_settings_test settings_unit_test.cpp)
+target_include_directories(webrtc_vst_settings_test PRIVATE ${vst3sdk_SOURCE_DIR})
+target_link_libraries(webrtc_vst_settings_test PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
+target_compile_features(webrtc_vst_settings_test PRIVATE cxx_std_20)
+add_test(NAME SettingsUnitTest COMMAND webrtc_vst_settings_test)
+set_tests_properties(SettingsUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;settings")
+
 # Integration Tests
 add_executable(webrtc_vst_integration_test
     integration_test.cpp
@@ -141,7 +148,7 @@ endif()
 
 # Set MSVC runtime to match plugin
 if(MSVC)
-    foreach(tgt webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test)
+    foreach(tgt webrtc_vst_settings_test webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test)
         set_property(TARGET ${tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endforeach()
 endif()
@@ -196,7 +203,7 @@ if(APPLE)
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/connectionproxy.cpp)
     target_include_directories(webrtc_vst_mac_editor_test PRIVATE ${vst3sdk_SOURCE_DIR})
-    target_link_libraries(webrtc_vst_mac_editor_test PRIVATE sdk sdk_common sdk_hosting "-framework Cocoa")
+    target_link_libraries(webrtc_vst_mac_editor_test PRIVATE sdk sdk_common sdk_hosting "-framework Cocoa" "-framework Vision")
     target_compile_options(webrtc_vst_mac_editor_test PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
     target_compile_definitions(webrtc_vst_mac_editor_test PRIVATE WEBRTC_VST_DEFAULT_PLUGIN_PATH="${_plugin_bundle}")
     add_dependencies(webrtc_vst_mac_editor_test webrtc_vst)

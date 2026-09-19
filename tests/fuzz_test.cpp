@@ -354,7 +354,9 @@ TestResult test_mode_toggle_while_streaming(const std::string& path) {
         return {"ModeToggleWhileStreaming", false, host.err(), 0};
     }
 
-    std::mt19937 rng(42);
+    const auto seed = std::getenv("WEBRTC_FUZZ_SEED") ? static_cast<unsigned>(std::stoul(std::getenv("WEBRTC_FUZZ_SEED"))) : 42u;
+    std::cout << " seed=" << seed << std::flush;
+    std::mt19937 rng(seed);
     std::uniform_int_distribution<int> dist(1, 30); // blocks between toggles
     bool publishMode = false; // start in Play (0.0)
 

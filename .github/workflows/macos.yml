@@ -38,7 +38,7 @@ jobs:
       - name: Install JavaScript test dependencies
         run: npm ci
       - name: SDK and signaling security tests
-        run: npm run test:security && npm run test:sdk
+        run: npm run test:security && npm run test:sdk && npm run test:advanced-settings && npm run test:hardening
       - name: WebRTC publish and receive tests
         run: npm run test:play-request-audio-only && npm run test:integration:local
       - name: Package development bundle

@@ -1,5 +1,9 @@
 # macOS validation — 2026-09-19
 
+Historical initial-port report. See [HARDENING_VALIDATION.md](HARDENING_VALIDATION.md)
+for later audio/settings fixes, host journeys and remaining gaps. These initial
+results do not certify the later source changes or the interrupted soak.
+
 Implemented and checked locally on an Apple Silicon Mac running macOS 26.4.1,
 with Apple Clang 21, CMake 4.0.1, Ninja 1.12.1 and Node.js 22.14.0. The starting
 repository revision was `80023c6` (project version 0.2.4).

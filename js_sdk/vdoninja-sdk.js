@@ -1134,7 +1134,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
             }
 
             const room = this._sanitizeRoomName(options.room || this.room);
-            const password = this._sanitizePassword(options.password !== undefined ? options.password : this.password);
+            const password = options.password !== undefined ? this._sanitizePassword(options.password) : this.password;
             
             if (!room) {
                 throw new Error('Room name is required');
@@ -1142,7 +1142,9 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
 
             this._connectionIntent.room = {
                 room,
-                password,
+                // Public joinRoom options are raw; the instance value is
+                // already URI-encoded. Preserve a raw intent for reconnect.
+                password: typeof password === 'string' ? decodeURIComponent(password) : password,
                 options: { claim: !!options.claim }
             };
 
@@ -1292,7 +1294,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
             if (!this.state.roomJoined && options.room) {
                 await this.joinRoom({ 
                     room: options.room, 
-                    password: options.password !== undefined ? options.password : this.password 
+                    password: options.password
                 });
             }
 
@@ -1405,7 +1407,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
             if (!this.state.roomJoined && options.room) {
                 await this.joinRoom({ 
                     room: options.room, 
-                    password: options.password !== undefined ? options.password : this.password 
+                    password: options.password
                 });
             }
 
@@ -5162,6 +5164,14 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
             return this._encoder.encode(str);
         }
 
+        // Match the web client's legacy AES phrase encoding. Hashes and JSON
+        // payloads retain their UTF-8 encoding; ASCII behavior is unchanged.
+        _aesKeyBytes(str) {
+            const bytes = new Uint8Array(str.length);
+            for (let i = 0; i < str.length; ++i) bytes[i] = str.charCodeAt(i);
+            return bytes;
+        }
+
         /**
          * Convert byte array to hex string
          * @private
@@ -5210,7 +5220,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
             try {
                 const keyMaterial = await crypto.subtle.digest(
                     { name: "SHA-256" }, 
-                    this._convertStringToArrayBufferView(phrase)
+                    this._aesKeyBytes(phrase)
                 );
                 
                 const key = await crypto.subtle.importKey(
@@ -5260,7 +5270,7 @@ const OUTBOUND_VIDEO_STOP_MUTE_DELAY_MS = 500;
             try {
                 const keyMaterial = await crypto.subtle.digest(
                     { name: "SHA-256" }, 
-                    this._convertStringToArrayBufferView(phrase)
+                    this._aesKeyBytes(phrase)
                 );
                 
                 const key = await crypto.subtle.importKey(

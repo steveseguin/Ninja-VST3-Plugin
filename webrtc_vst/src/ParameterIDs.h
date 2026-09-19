@@ -17,6 +17,9 @@ constexpr Steinberg::Vst::ParamID kParamCopyPushLink = 9;
 constexpr Steinberg::Vst::ParamID kParamCopyViewLink = 10;
 constexpr Steinberg::Vst::ParamID kParamShowPushQr = 11;
 constexpr Steinberg::Vst::ParamID kParamShowViewQr = 12;
+constexpr Steinberg::Vst::ParamID kParamWebBaseUrl = 13;
+constexpr Steinberg::Vst::ParamID kParamSalt = 14;
+constexpr Steinberg::Vst::ParamID kParamApplyAdvanced = 15;
 
 } // namespace webrtc_vst
 

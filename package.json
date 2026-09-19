@@ -1,10 +1,15 @@
 {
   "name": "vst",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Integration tooling for WebRTC VST",
   "main": "index.js",
   "scripts": {
     "test:security": "node tools/tests/integration/ws_security.test.js",
+    "test:advanced-settings": "node tools/tests/integration/advanced_settings.test.js",
+    "test:hardening": "node tools/tests/integration/crypto_compat.test.js && node tools/tests/integration/signaling_recovery.test.js && node tools/tests/integration/signaling_limits.test.js",
+    "test:extended": "node tools/tests/extended_validation.js",
+    "test:audio-soak": "node tools/tests/integration/audio_quality_soak.test.js",
+    "test:playback-quality": "node tools/tests/integration/playback_quality.test.js",
     "test:sdk": "node tools/tests/integration/sdk_publish_options.test.js && node tools/tests/integration/sdk_requests.test.js",
     "test:cli-loopback": "node tools/tests/integration/cli_loopback.test.js",
     "test:publish-audio": "node tools/tests/integration/publish_audio.test.js",
@@ -14,7 +19,7 @@
     "test:integration:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
     "test:integration:local": "npm run test:cli-loopback && npm run test:publish-audio",
     "test:integration:live": "npm run test:play-room-live",
-    "test:integration": "npm run test:security && npm run test:sdk && npm run test:integration:audio-only && npm run test:integration:local",
+    "test:integration": "npm run test:security && npm run test:sdk && npm run test:advanced-settings && npm run test:integration:audio-only && npm run test:integration:local",
     "test:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
     "test": "npm run test:audio-only"
   },

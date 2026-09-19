@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <cmath>
+#include <nlohmann/json.hpp>
 
 #include <public.sdk/source/vst/hosting/hostclasses.h>
 #include <public.sdk/source/vst/hosting/module.h>
@@ -318,36 +320,19 @@ void populateInputWithTone(std::vector<BusBuffers>& inputBuses,
 }
 
 std::string buildPluginStateJson() {
-    std::string json = "{";
-    bool hasField = false;
-    if (const char* mode = std::getenv("WEBRTC_CLI_HOST_MODE")) {
-        json += "\"mode\":\"" + std::string(mode) + "\"";
-        hasField = true;
-    }
-    if (const char* sid = std::getenv("WEBRTC_CLI_HOST_STREAM_ID")) {
-        if (hasField) json += ",";
-        json += "\"streamId\":\"" + std::string(sid) + "\"";
-        hasField = true;
-    }
-    if (const char* room = std::getenv("WEBRTC_CLI_HOST_ROOM")) {
-        if (hasField) json += ",";
-        json += "\"roomName\":\"" + std::string(room) + "\"";
-        hasField = true;
-    }
-    if (const char* password = std::getenv("WEBRTC_CLI_HOST_PASSWORD")) {
-        if (hasField) json += ",";
-        json += "\"password\":\"" + std::string(password) + "\"";
-        hasField = true;
-    }
-    json += "}";
-    return hasField ? json : "";
+    nlohmann::json state = nlohmann::json::object();
+    for (const auto& [environment, field] : {
+        std::pair{"WEBRTC_CLI_HOST_MODE", "mode"}, {"WEBRTC_CLI_HOST_STREAM_ID", "streamId"},
+        {"WEBRTC_CLI_HOST_ROOM", "roomName"}, {"WEBRTC_CLI_HOST_PASSWORD", "password"}})
+        if (const auto* value = std::getenv(environment)) state[field] = value;
+    return state.empty() ? "" : state.dump();
 }
 
 bool injectPluginState(Steinberg::Vst::IComponent* component,
                        Steinberg::Vst::IEditController* controller,
                        const std::string& jsonState) {
     if (jsonState.empty()) return true;
-    std::cout << "[config] Injecting plugin state: " << jsonState << std::endl;
+    std::cout << "[config] Injecting plugin state (values omitted for privacy)" << std::endl;
 
     auto* stream1 = new StringStream(jsonState);
     component->setState(stream1);
@@ -458,6 +443,10 @@ int main(int argc, char** argv) {
 
     Steinberg::Vst::ProcessSetup setup {};
     setup.processMode = Steinberg::Vst::kRealtime;
+    if (const char* mode = std::getenv("WEBRTC_CLI_HOST_PROCESS_MODE")) {
+        if (std::strcmp(mode, "prefetch") == 0) setup.processMode = Steinberg::Vst::kPrefetch;
+        else if (std::strcmp(mode, "offline") == 0) setup.processMode = Steinberg::Vst::kOffline;
+    }
     setup.symbolicSampleSize = Steinberg::Vst::kSample32;
     setup.maxSamplesPerBlock = kBlockSize;
     setup.sampleRate = kSampleRate;
@@ -501,7 +490,7 @@ int main(int argc, char** argv) {
     }
 
     Steinberg::Vst::ProcessData data {};
-    data.processMode = Steinberg::Vst::kRealtime;
+    data.processMode = setup.processMode;
     data.symbolicSampleSize = Steinberg::Vst::kSample32;
     data.numSamples = kBlockSize;
     data.numInputs = static_cast<Steinberg::int32>(inputBusViews.size());
@@ -524,9 +513,22 @@ int main(int argc, char** argv) {
 
     std::vector<float> toneBlock(kBlockSize, 0.0f);
     double tonePhase = 0.0;
+    double rightTonePhase = 0.0;
+    const double rightToneHz = parseDoubleEnv(std::getenv("WEBRTC_CLI_HOST_RIGHT_TONE_HZ"), 0.0);
     const bool monitorOutput = shouldMonitorOutput();
     double outputEnergy = 0.0;
     size_t outputSamples = 0;
+    const bool qualityMonitor = std::getenv("WEBRTC_CLI_HOST_QUALITY") != nullptr;
+    const bool precisePacing = std::getenv("WEBRTC_CLI_HOST_REALTIME_PACING") != nullptr;
+    const bool probeEnvelope = std::getenv("WEBRTC_CLI_HOST_PROBE_ENVELOPE") != nullptr;
+    std::ofstream capture;
+    if (const char* path = std::getenv("WEBRTC_CLI_HOST_CAPTURE")) {
+        // Test-host instrumentation only; file IO never occurs inside process().
+        capture.open(path, std::ios::binary | std::ios::out | std::ios::trunc);
+        if (!capture) { std::cerr << "Cannot open owned capture file\n"; return 1; }
+    }
+    double windowEnergy[2]{}, previousSample[2]{}, callbackMaxUs = 0;
+    size_t crossings[2]{}, windowFrames = 0, windowBlocks = 0, silentBlocks = 0, nonfinite = 0;
 
     int iteration = 0;
     const auto processStart = std::chrono::steady_clock::now();
@@ -551,17 +553,71 @@ int main(int argc, char** argv) {
                 }
             }
             populateInputWithTone(inputBuses, toneBlock);
+            if (rightToneHz > 0 && inputBuses[0].storage.size() > 1) {
+                for (auto& value : inputBuses[0].storage[1]) {
+                    value = static_cast<float>(kToneAmplitude * std::sin(rightTonePhase));
+                    rightTonePhase += kTwoPi * rightToneHz / kSampleRate;
+                    if (rightTonePhase >= kTwoPi) rightTonePhase -= kTwoPi;
+                }
+            }
+            if (probeEnvelope) {
+                // 500 ms high, 1500 ms low: measurable one-way level edges,
+                // with a nonzero floor so DTX/stream-start do not skew latency.
+                for (auto& bus : inputBuses) for (auto& channel : bus.storage)
+                    for (size_t sample = 0; sample < channel.size(); ++sample)
+                        if ((static_cast<uint64_t>(iteration) * kBlockSize + sample) % 96000 >= 24000) channel[sample] *= 0.2f;
+            }
         }
+        const auto callbackStart = std::chrono::steady_clock::now();
         const auto processResult = processor->process(data);
+        callbackMaxUs = std::max(callbackMaxUs, std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - callbackStart).count());
         if (processResult != Steinberg::kResultOk) {
             std::cerr << "process call failed at iteration " << iteration << "\n";
             break;
         }
+        if (capture && iteration < static_cast<int>(kSampleRate * 120 / kBlockSize) && !outputBuses.empty()) {
+            // Native-endian records: double monotonic block timestamp (seconds),
+            // then 256 float32 left samples and 256 right samples, 48 kHz.
+            const double timestamp = std::chrono::duration<double>(callbackStart.time_since_epoch()).count();
+            capture.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
+            for (size_t ch = 0; ch < 2; ++ch) capture.write(
+                reinterpret_cast<const char*>(outputBuses[0].storage[std::min(ch, outputBuses[0].storage.size()-1)].data()), kBlockSize * sizeof(float));
+        }
         if (monitorOutput && !outputBuses.empty()) {
             accumulateOutputMetrics(outputBuses, outputEnergy, outputSamples);
         }
+        if (qualityMonitor && !outputBuses.empty()) {
+            double blockEnergy = 0;
+            const auto& bus = outputBuses[0];
+            for (size_t ch = 0; ch < std::min(size_t{2}, bus.storage.size()); ++ch) {
+                for (float value : bus.storage[ch]) {
+                    if (!std::isfinite(value)) { ++nonfinite; continue; }
+                    const double energy = static_cast<double>(value) * value;
+                    blockEnergy += energy; windowEnergy[ch] += energy;
+                    if (previousSample[ch] <= 0 && value > 0) ++crossings[ch];
+                    previousSample[ch] = value;
+                }
+            }
+            ++windowBlocks; windowFrames += kBlockSize;
+            if (blockEnergy < 0.000001) ++silentBlocks;
+            if (windowFrames >= static_cast<size_t>(kSampleRate)) {
+                const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - processStart).count();
+                std::cout << "[quality] seconds=" << elapsed
+                    << " rms_l=" << std::sqrt(windowEnergy[0] / windowFrames)
+                    << " rms_r=" << std::sqrt(windowEnergy[1] / windowFrames)
+                    << " hz_l=" << crossings[0] * kSampleRate / windowFrames
+                    << " hz_r=" << crossings[1] * kSampleRate / windowFrames
+                    << " silent_blocks=" << silentBlocks << " blocks=" << windowBlocks
+                    << " nonfinite=" << nonfinite << " callback_max_us=" << callbackMaxUs << std::endl;
+                windowEnergy[0] = windowEnergy[1] = 0; crossings[0] = crossings[1] = 0;
+                windowFrames = windowBlocks = silentBlocks = nonfinite = 0; callbackMaxUs = 0;
+            }
+        }
         context.projectTimeSamples += kBlockSize;
-        if (blockSleepMs > 0) {
+        if (precisePacing) {
+            std::this_thread::sleep_until(processStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>((iteration + 1) * kBlockSize / kSampleRate)));
+        } else if (blockSleepMs > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(blockSleepMs));
         }
         ++iteration;

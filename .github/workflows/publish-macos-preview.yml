@@ -1,0 +1,94 @@
+name: Verify And Publish Signed Mac Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Mac-only draft release containing both signed ZIPs (mac-vX.Y.Z)
+        required: true
+        type: string
+      arm64_sha256:
+        description: SHA-256 of the signed Apple Silicon ZIP
+        required: true
+        type: string
+      x86_64_sha256:
+        description: SHA-256 of the signed Intel ZIP
+        required: true
+        type: string
+      publish:
+        description: Publish after verification and VirusTotal submission (otherwise keep the draft private)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-macos-assets
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      ARM64_SHA256: ${{ inputs.arm64_sha256 }}
+      X86_64_SHA256: ${{ inputs.x86_64_sha256 }}
+    steps:
+      - name: Verify the draft, hashes, signatures and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^mac-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$ARM64_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$X86_64_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ $(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft) == true ]]
+          version=${RELEASE_TAG#mac-v}
+          mkdir assets
+          for arch in arm64 x86_64; do
+            name="webrtc_vst-v$version-macos-$arch-signed.zip"
+            gh release download "$RELEASE_TAG" --pattern "$name" --dir assets
+            expected=$ARM64_SHA256
+            if [[ "$arch" == x86_64 ]]; then expected=$X86_64_SHA256; fi
+            printf '%s  %s\n' "$expected" "assets/$name" | shasum -a 256 --check
+            ditto -x -k "assets/$name" "verify-$arch"
+            bundle="verify-$arch/webrtc_vst.vst3"
+            codesign --verify --strict --verbose=2 "$bundle"
+            signature=$(codesign -dvv "$bundle" 2>&1)
+            [[ "$signature" == *"Authority=Developer ID Application:"* ]]
+            [[ "$signature" == *"TeamIdentifier=H3CKR5XB3J"* ]]
+            [[ "$signature" == *"Timestamp="* ]]
+            [[ "$signature" == *"(runtime)"* ]]
+            [[ $(lipo -archs "$bundle/Contents/MacOS/webrtc_vst") == "$arch" ]]
+            [[ $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$bundle/Contents/Info.plist") == "$version" ]]
+          done
+
+      - name: Submit both verified ZIPs to VirusTotal before publication
+        shell: bash
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY || secrets.VT_API_KEY }}
+        run: |
+          set -euo pipefail
+          : "${VIRUSTOTAL_API_KEY:?Missing VirusTotal API key}"
+          version=${RELEASE_TAG#mac-v}
+          for arch in arm64 x86_64; do
+            file="assets/webrtc_vst-v$version-macos-$arch-signed.zip"
+            response=$(curl --fail-with-body --silent --show-error \
+              --request POST --url https://www.virustotal.com/api/v3/files \
+              --header "x-apikey: $VIRUSTOTAL_API_KEY" --form "file=@$file")
+            analysis_id=$(jq -er '.data.id' <<< "$response")
+            # Keep analysis URLs in workflow logs, not public release notes.
+            echo "Submitted $arch: https://www.virustotal.com/gui/file-analysis/$analysis_id"
+          done
+
+      - name: Publish as a Mac preview without changing the latest Windows release
+        if: inputs.publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft) == true ]]
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
