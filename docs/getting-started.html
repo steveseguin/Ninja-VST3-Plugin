@@ -48,8 +48,8 @@
     </p>
     <div class="hero-actions">
       <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/latest/download/webrtc_vst-windows-setup.exe">Download for Windows</a>
-      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/v0.2.4/webrtc_vst-v0.2.4-macos-arm64-signed.zip">Mac &mdash; Apple Silicon</a>
-      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/v0.2.4/webrtc_vst-v0.2.4-macos-x86_64-signed.zip">Mac &mdash; Intel</a>
+      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-arm64-notarized.dmg">Mac &mdash; Apple Silicon</a>
+      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-x86_64-notarized.dmg">Mac &mdash; Intel</a>
       <a class="btn btn-ghost" href="./index.html">Back To Main Page</a>
     </div>
   </header>
@@ -78,18 +78,18 @@
       <div class="steps">
         <article class="step">
           <p class="step-index">A</p>
-          <p>Download the Apple Silicon ZIP for a native Apple Silicon DAW, or the Intel ZIP for an Intel Mac or a DAW running under Rosetta. Requires macOS 11 or later.</p>
+          <p>Download the Apple Silicon DMG for a native Apple Silicon DAW, or the Intel DMG for an Intel Mac or a DAW running under Rosetta. Requires macOS 11 or later.</p>
         </article>
         <article class="step">
           <p class="step-index">B</p>
-          <p>Extract the ZIP. In Finder, use <code>Go &gt; Go to Folder</code> and enter <code>~/Library/Audio/Plug-Ins/VST3/</code>. Create the folder if needed and copy the entire <code>webrtc_vst.vst3</code> bundle into it.</p>
+          <p>Open the DMG. In Finder, use <code>Go &gt; Go to Folder</code> and enter <code>~/Library/Audio/Plug-Ins/VST3/</code>. Create the folder if needed and copy the entire <code>webrtc_vst.vst3</code> bundle into it, then eject the disk image.</p>
         </article>
         <article class="step">
           <p class="step-index">C</p>
           <p>Restart your DAW and rescan its VST3 plugins. Add <strong>VDO.Ninja WebRTC Bridge</strong> to a track. Logic Pro and GarageBand cannot load VST3 plugins.</p>
         </article>
       </div>
-      <p class="hero-meta">These Mac previews are signed with Developer ID but are not yet notarized. If macOS blocks loading, see <a href="https://support.apple.com/en-us/102445">Apple's instructions for approving trusted software</a>, then restart your DAW. Manual Mac DAW validation is still in progress.</p>
+      <p class="hero-meta">The v0.2.5 Mac DMGs are Developer ID signed, Apple-notarized, and carry stapled approval tickets. REAPER send/receive and saved-project reopening have been validated on Mac. Other Mac DAWs and macOS 11 still need manual validation. Do not disable Gatekeeper to install the plugin.</p>
     </section>
 
     <section class="panel">
