@@ -1,5 +1,18 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
+
+if(CMAKE_HOST_APPLE AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+endif()
 project(WebRTC_VST VERSION 0.2.4 LANGUAGES CXX)
+
+if(APPLE)
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 20)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    # Deployment is explicit; configuring/building must not install a plugin.
+    set(SMTG_CREATE_PLUGIN_LINK OFF CACHE BOOL "Install SDK plugin symlinks")
+    set(SMTG_CODE_SIGN_IDENTITY_MAC "-" CACHE STRING "Local macOS build signing identity")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -69,6 +82,12 @@ set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "Skip running the VST3 validator durin
 add_subdirectory(${vst3sdk_SOURCE_DIR} ${CMAKE_BINARY_DIR}/vst3sdk)
 smtg_enable_vst3_sdk()
 
+if(APPLE)
+    # SDK 3.8's VSTGUI uses codecvt, deprecated by recent Apple libc++.
+    # Keep other upstream warnings as errors, but permit this deprecation.
+    target_compile_options(vstgui PRIVATE -Wno-error=deprecated-declarations)
+endif()
+
 # OpenSSL is required by both this project and libdatachannel's libsrtp dependency.
 # Resolve it before FetchContent to avoid nested dependency configure failures.
 if(MSVC)
@@ -92,12 +111,25 @@ if(MSVC)
     set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Prefer static OpenSSL" FORCE)
 endif()
 
+if(APPLE)
+    # A distributed bundle must not depend on a developer's Homebrew dylibs.
+    set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Prefer static OpenSSL" FORCE)
+    if(NOT OPENSSL_ROOT_DIR AND NOT DEFINED ENV{OPENSSL_ROOT_DIR})
+        find_program(_brew brew)
+        if(_brew)
+            execute_process(COMMAND "${_brew}" --prefix openssl@3
+                OUTPUT_VARIABLE OPENSSL_ROOT_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+        endif()
+    endif()
+endif()
+
 find_package(OpenSSL REQUIRED)
 
 FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG v3.11.2
+    GIT_SHALLOW TRUE
 )
 
 # libdatachannel (WebRTC implementation)
@@ -105,6 +137,7 @@ FetchContent_Declare(
     libdatachannel
     GIT_REPOSITORY https://github.com/paullouisageneau/libdatachannel.git
     GIT_TAG v0.22.1
+    GIT_SHALLOW TRUE
 )
 
 # ixwebsocket for signaling transport
@@ -112,12 +145,14 @@ FetchContent_Declare(
     ixwebsocket
     GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
     GIT_TAG master
+    GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
     opus
     GIT_REPOSITORY https://github.com/xiph/opus.git
     GIT_TAG v1.5.2
+    GIT_SHALLOW TRUE
 )
 
 set(LIBDATACHANNEL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -132,6 +167,11 @@ set(NO_EXAMPLES ON CACHE BOOL "Disable libdatachannel examples" FORCE)
 set(NO_TESTS ON CACHE BOOL "Disable libdatachannel tests" FORCE)
 set(USE_TLS ON CACHE BOOL "Enable TLS support in IXWebSocket" FORCE)
 set(USE_OPEN_SSL ON CACHE BOOL "Enable OpenSSL backend in IXWebSocket" FORCE)
+if(APPLE)
+    # Use the macOS trust store for signaling; OpenSSL remains the DTLS/crypto backend.
+    set(USE_OPEN_SSL OFF CACHE BOOL "Use native macOS TLS for signaling" FORCE)
+    set(USE_SECURE_TRANSPORT ON CACHE BOOL "Use macOS certificate verification" FORCE)
+endif()
 set(USE_MBED_TLS OFF CACHE BOOL "Disable mbedTLS backend in IXWebSocket" FORCE)
 set(USE_ZLIB OFF CACHE BOOL "Disable zlib dependency in IXWebSocket" FORCE)
 
@@ -139,7 +179,22 @@ set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 
+if(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" OR
+        (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")))
+    # NEON is mandatory on Apple Silicon. Opus 1.5.2 only recognizes the
+    # equivalent "aarch64" name and otherwise requests unavailable runtime detection.
+    set(OPUS_MAY_HAVE_NEON OFF CACHE BOOL "No runtime NEON probe on Apple Silicon" FORCE)
+    set(OPUS_PRESUME_NEON ON CACHE BOOL "Apple Silicon always has NEON" FORCE)
+    set(_webrtc_apple_arm64 TRUE)
+endif()
+
 FetchContent_MakeAvailable(nlohmann_json libdatachannel ixwebsocket opus)
+
+if(_webrtc_apple_arm64)
+    # Opus 1.5.2's NEON declarations also need these flags when runtime
+    # dispatch is disabled and OPUS_ARM_PRESUME_NEON is used instead.
+    target_compile_definitions(opus PRIVATE OPUS_ARM_MAY_HAVE_NEON OPUS_ARM_MAY_HAVE_NEON_INTR)
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -214,9 +269,24 @@ endif()
 
 
 if(SMTG_MAC)
+    target_sources(${PLUGIN_NAME} PRIVATE src/MacPlatform.mm)
+    target_link_libraries(${PLUGIN_NAME} PRIVATE "-framework AppKit")
+    configure_file(resources/Info.plist ${CMAKE_CURRENT_BINARY_DIR}/Info.plist @ONLY)
     smtg_target_set_bundle(${PLUGIN_NAME}
-        INFOPLIST ${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist
+        INFOPLIST ${CMAKE_CURRENT_BINARY_DIR}/Info.plist
+        BUNDLE_IDENTIFIER "ninja.vdo.webrtc-vst"
+        COMPANY_NAME "VDO.Ninja"
     )
+    set_target_properties(${PLUGIN_NAME} PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_BINARY_DIR}/Info.plist)
+    # Plist-only changes must relink/re-sign the bundle as well.
+    set_property(TARGET ${PLUGIN_NAME} APPEND PROPERTY LINK_DEPENDS
+        ${CMAKE_CURRENT_BINARY_DIR}/Info.plist)
+    # Sign after SDK resource/moduleinfo generation, including with Ninja.
+    # Distribution signing is handled separately by package_macos.sh.
+    add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
+        COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:${PLUGIN_NAME}>"
+        VERBATIM)
 endif()
 
 install(TARGETS ${PLUGIN_NAME}
@@ -262,9 +332,17 @@ if(WIN32)
     target_sources(webrtc_vst_cli_host PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp)
 elseif(APPLE)
     target_sources(webrtc_vst_cli_host PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_mac.mm)
+    target_link_libraries(webrtc_vst_cli_host PRIVATE "-framework Cocoa")
+    target_compile_options(webrtc_vst_cli_host PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
 else()
     target_sources(webrtc_vst_cli_host PRIVATE ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp)
 endif()
+
+# Embed the actual bundle path so hosts/tests work with any build directory or generator.
+get_target_property(WEBRTC_VST_PLUGIN_BUNDLE ${PLUGIN_NAME} SMTG_PLUGIN_PACKAGE_PATH)
+target_compile_definitions(webrtc_vst_cli_host PRIVATE
+    WEBRTC_VST_DEFAULT_PLUGIN_PATH="${WEBRTC_VST_PLUGIN_BUNDLE}")
+add_dependencies(webrtc_vst_cli_host ${PLUGIN_NAME})
 
 if(MSVC)
     foreach(tgt ${PLUGIN_NAME} webrtc_vst_cli_host LibDataChannel::LibDataChannel ixwebsocket opus)

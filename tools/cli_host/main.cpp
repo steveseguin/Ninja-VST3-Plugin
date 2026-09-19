@@ -75,6 +75,9 @@ struct BusBuffers {
 };
 
 std::string defaultPluginPath() {
+#if defined(WEBRTC_VST_DEFAULT_PLUGIN_PATH)
+    return WEBRTC_VST_DEFAULT_PLUGIN_PATH;
+#else
 #if defined(_WIN32)
     const auto candidate = std::filesystem::path("build") /
                            "webrtc_vst_win" /
@@ -89,10 +92,7 @@ std::string defaultPluginPath() {
                            "webrtc_vst_mac" /
                            "VST3" /
                            "Release" /
-                           "webrtc_vst.vst3" /
-                           "Contents" /
-                           "MacOS" /
-                           "webrtc_vst";
+                           "webrtc_vst.vst3";
 #else
     const auto candidate = std::filesystem::path("build") /
                            "webrtc_vst_linux" /
@@ -101,6 +101,7 @@ std::string defaultPluginPath() {
                            "webrtc_vst.vst3";
 #endif
     return candidate.string();
+#endif
 }
 
 int parseIntEnv(const char* value, int fallback) {

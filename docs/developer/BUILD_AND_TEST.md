@@ -4,8 +4,8 @@ This project targets a cross-platform VST3 plugin build and integration validati
 
 ## Prerequisites
 
-- Windows + Visual Studio 2022 C++ toolchain OR Linux + GCC 11+
-- CMake 3.24+
+- Windows + Visual Studio 2022 C++ toolchain, macOS + Xcode, or Linux + GCC 11+
+- CMake 3.25+
 - A local VST3 SDK checkout at 3.8+ (MIT), recommended path: `./vst3sdk` (not committed)
 - OpenSSL development libs (Windows: vcpkg static is supported out of the box. Linux: `libssl-dev`)
 - Linux specific GUI dependencies: `sudo apt install libxcb-util-dev libxcb-cursor-dev libxcb-keysyms1-dev libxcb-xkb-dev libxkbcommon-dev libxkbcommon-x11-dev libpango1.0-dev libglib2.0-dev libcairo2-dev libgtkmm-3.0-dev`
@@ -45,6 +45,17 @@ cmake -S webrtc_vst -B build/webrtc_vst_linux \
 
 cmake --build build/webrtc_vst_linux --config Release --target webrtc_vst webrtc_vst_cli_host
 ```
+
+## Configure + build (macOS)
+
+```bash
+brew install cmake ninja node
+bash scripts/build_macos.sh
+```
+
+This builds the native architecture and runs the native suites, including a Cocoa
+editor smoke test. See [MACOS.md](MACOS.md) for Intel builds, dependency packaging,
+installation, signing/notarization, CI and manual host checks.
 
 ## Test commands
 

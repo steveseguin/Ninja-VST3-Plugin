@@ -1,0 +1,55 @@
+name: macOS Build And Test
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install build tools
+        run: brew install cmake ninja
+      - name: Build and run native suites
+        run: bash scripts/build_macos.sh '${{ matrix.arch }}'
+      - name: Install JavaScript test dependencies
+        run: npm ci
+      - name: SDK and signaling security tests
+        run: npm run test:security && npm run test:sdk
+      - name: WebRTC publish and receive tests
+        run: npm run test:play-request-audio-only && npm run test:integration:local
+      - name: Package development bundle
+        run: bash scripts/package_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-development
+          path: build/release/*-development.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: macos-${{ matrix.arch }}-test-logs
+          path: build/webrtc_vst_mac/Testing/Temporary/*.log

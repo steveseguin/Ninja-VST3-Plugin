@@ -24,6 +24,9 @@
 #include <windows.h>
 #include <shellapi.h>
 #endif
+#if SMTG_OS_MACOS
+#include "MacPlatform.h"
+#endif
 
 namespace webrtc_vst {
 
@@ -359,6 +362,8 @@ bool openExternalUrl(const std::string& url) {
                                                                  nullptr,
                                                                  SW_SHOWNORMAL));
     return result > 32;
+#elif SMTG_OS_MACOS
+    return openMacExternalUrl(url);
 #elif SMTG_OS_LINUX
     std::string escapedUrl;
     escapedUrl.reserve(url.size());

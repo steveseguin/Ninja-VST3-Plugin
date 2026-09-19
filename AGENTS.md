@@ -61,6 +61,10 @@ Current version macro: `0.1.4` (`webrtc_vst/src/Version.h`).
   - VST3 SDK 3.8+ (MIT)
   - OpenSSL dev libs
   - Additional GUI/system libs listed in `docs/developer/BUILD_AND_TEST.md`
+- macOS:
+  - Xcode/Command Line Tools, CMake 3.25+, Ninja; Node.js 22+ for JS tests
+  - `bash scripts/build_macos.sh` builds static dependencies and the native VST3
+  - Apple Silicon and Intel, deployment target macOS 11; see `docs/developer/MACOS.md`
 - Node.js is required for JS integration tests in `tools/tests`.
 
 Recommended SDK checkout:
@@ -96,7 +100,18 @@ Key CMake toggle:
 
 - `-DWEBRTC_VST_BUILD_TESTS=ON|OFF` (default ON)
 
+macOS (build + native tests, including Cocoa editor):
+
+```bash
+bash scripts/build_macos.sh
+bash scripts/install_macos.sh
+```
+
 ## 7) Artifacts
+
+- macOS bundle: `build/webrtc_vst_mac/VST3/Release/webrtc_vst.vst3`
+- macOS CLI/tests: `build/webrtc_vst_mac/bin/Release/`
+- macOS packaging: `bash scripts/package_macos.sh` (see macOS guide for signing/notarization)
 
 - Windows plugin bundle:
   - `build/webrtc_vst_win/VST3/Release/webrtc_vst.vst3`
@@ -329,7 +344,9 @@ Current state:
   - `VIRUSTOTAL_API_KEY` (preferred) or `VT_API_KEY` (fallback)
 - Optional repository variable:
   - `WINDOWS_SIGN_TIMESTAMP_URL` (defaults to `http://timestamp.digicert.com`)
-- No macOS notarization pipeline exists yet.
+- macOS builds/tests run in `.github/workflows/macos.yml` on Apple Silicon and Intel.
+  CI uploads development artifacts only. `scripts/package_macos.sh` supports
+  Developer ID signing and notarized/stapled DMGs using an existing keychain profile.
 
 For local/manual releases, apply the same policy: sign first, verify signature, then submit artifact(s) to VirusTotal before distribution.
 If `Get-AuthenticodeSignature` shows trust-chain `UnknownError` on a machine without your root cert, rely on `signtool sign` success + `signtool verify` output + signer identity/timestamp.
@@ -364,8 +381,9 @@ UX/observability:
 
 Platform/release gaps:
 
-- CI release automation is Windows only.
-- No first-class macOS build/sign/notarize pipeline.
+- Public release publishing automation is Windows only; macOS CI builds/tests both architectures.
+- macOS public releases still require signing credentials, notarization, VirusTotal submission,
+  and manual DAW validation; the local packaging script handles signing/notarization.
 
 ## 14) Nice-To-Haves / Backlog
 
@@ -380,7 +398,7 @@ Platform/release gaps:
 7. Make jitter pre-fill and buffering tunable.
 8. Expose bitrate and transport tuning controls.
 9. Implement or remove currently-unused `enableAec` config field.
-10. Add macOS release pipeline with signing/notarization.
+10. Automate macOS public release publishing after signing/notarization and manual host validation.
 
 ## 15) Threading Notes
 

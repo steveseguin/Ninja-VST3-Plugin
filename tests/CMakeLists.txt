@@ -149,6 +149,15 @@ endif()
 # CTest integration
 get_target_property(_plugin_bundle webrtc_vst SMTG_PLUGIN_PACKAGE_PATH)
 
+foreach(tgt webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test)
+    add_dependencies(${tgt} webrtc_vst)
+    target_compile_definitions(${tgt} PRIVATE WEBRTC_VST_DEFAULT_PLUGIN_PATH="${_plugin_bundle}")
+    if(APPLE)
+        target_link_libraries(${tgt} PRIVATE "-framework Cocoa")
+        target_compile_options(${tgt} PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    endif()
+endforeach()
+
 add_test(NAME IntegrationTest
     COMMAND webrtc_vst_integration_test
         "${_plugin_bundle}"
@@ -179,3 +188,18 @@ set_tests_properties(FuzzTest PROPERTIES
     TIMEOUT 300
     LABELS "fuzz"
 )
+
+if(APPLE)
+    add_executable(webrtc_vst_mac_editor_test mac_editor_smoke.mm
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_mac.mm
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/connectionproxy.cpp)
+    target_include_directories(webrtc_vst_mac_editor_test PRIVATE ${vst3sdk_SOURCE_DIR})
+    target_link_libraries(webrtc_vst_mac_editor_test PRIVATE sdk sdk_common sdk_hosting "-framework Cocoa")
+    target_compile_options(webrtc_vst_mac_editor_test PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+    target_compile_definitions(webrtc_vst_mac_editor_test PRIVATE WEBRTC_VST_DEFAULT_PLUGIN_PATH="${_plugin_bundle}")
+    add_dependencies(webrtc_vst_mac_editor_test webrtc_vst)
+    add_test(NAME MacEditorSmoke COMMAND webrtc_vst_mac_editor_test "${_plugin_bundle}")
+    set_tests_properties(MacEditorSmoke PROPERTIES TIMEOUT 30 LABELS "macos;ui")
+endif()

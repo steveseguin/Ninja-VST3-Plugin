@@ -735,8 +735,7 @@ int main(int argc, char** argv) {
     } else if (const char* env = std::getenv("WEBRTC_VST_PLUGIN_PATH")) {
         pluginPath = env;
     } else {
-        // Try default location
-        pluginPath = "build/webrtc_vst_win/VST3/Release/webrtc_vst.vst3";
+        pluginPath = WEBRTC_VST_DEFAULT_PLUGIN_PATH;
     }
 
     std::cout << "Plugin path: " << pluginPath << std::endl;

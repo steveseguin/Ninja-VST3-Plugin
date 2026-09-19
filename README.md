@@ -9,7 +9,7 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 - **Opus codec** - 48 kHz stereo encoding/decoding with automatic sample rate conversion
 - **End-to-end encryption** - Password-based AES encryption compatible with VDO.Ninja E2EE
 - **Room support** - Join rooms with automatic peer discovery and hashed room/stream IDs
-- **Cross-platform** - Windows (x64) and Linux (x64), VST3 format
+- **Cross-platform** - Windows (x64), macOS (Apple Silicon and Intel), and Linux (x64), VST3 format
 
 ## What this repo provides
 
@@ -23,6 +23,7 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 ## Build and test quick start
 
 - Build/test doc: [docs/developer/BUILD_AND_TEST.md](./docs/developer/BUILD_AND_TEST.md)
+- macOS build, install and signing: [docs/developer/MACOS.md](./docs/developer/MACOS.md)
 - SDK policy: Steinberg VST3 SDK 3.8+ (MIT) only
 - Primary automation tests: `npm run test:integration`
 - Live room smoke test: `npm run test:integration:live`

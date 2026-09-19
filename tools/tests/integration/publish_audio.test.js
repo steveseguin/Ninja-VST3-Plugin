@@ -5,16 +5,10 @@ const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
 
-const rootDir = path.resolve(__dirname, "../../..");
+const { rootDir, cliExecutable, pluginBundle } = require("./build_paths");
 process.chdir(rootDir);
 
-const isWin = process.platform === "win32";
-const buildDir = isWin ? "webrtc_vst_win" : "webrtc_vst_linux";
-const cliExeName = isWin ? "webrtc_vst_cli_host.exe" : "webrtc_vst_cli_host";
-const cliExecutable = path.join(rootDir, "build", buildDir, "bin", "Release", cliExeName);
-const pluginExt = isWin ? "webrtc_vst.vst3" : "webrtc_vst.so";
-const pluginArch = isWin ? "x86_64-win" : "x86_64-linux";
-const pluginBinary = path.join(rootDir, "build", buildDir, "VST3", "Release", "webrtc_vst.vst3", "Contents", pluginArch, pluginExt);
+const pluginBinary = pluginBundle;
 
 if (!fs.existsSync(cliExecutable)) {
     console.error("[ERROR] CLI host not found at " + cliExecutable + ". Build the project first.");
@@ -50,7 +44,7 @@ const cliEnv = {
 
 console.log("[INFO] Launching CLI host with stream ID '" + streamId + "'");
 console.log("[INFO] Encryption disabled: " + disableEncryption);
-const cli = spawn(cliExecutable, [], {
+const cli = spawn(cliExecutable, [pluginBundle], {
     env: cliEnv,
     stdio: ["ignore", "pipe", "pipe"]
 });
