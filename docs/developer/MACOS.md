@@ -89,6 +89,38 @@ checks; they do not certify a particular DAW or the oldest supported OS.
 
 ## Packaging, signing and notarization
 
+For the complete local release flow (both architectures, sequential resource
+guards, native tests, Developer ID signing, Apple notarization and stapling):
+Building/testing both architectures locally requires Apple Silicon with
+Rosetta 2. Intel hosts can use the single-architecture scripts above.
+
+```bash
+# One-time setup: interactive prompts; credentials stay in macOS Keychain.
+bash scripts/setup_macos_notary.sh vdoninja-notary
+bash mac.sh
+# To package already-built/tested bundles without rebuilding:
+bash mac.sh --package-only
+```
+
+The default profile is `vdoninja-notary`; override `MACOS_NOTARY_PROFILE` and
+`MACOS_SIGNING_IDENTITY` for another account. Do not put Apple passwords into
+scripts or Git. This uses the same notarytool/Keychain approach as SSN's
+`afterSign.js`, but staples a signed DMG containing the VST3 bundle.
+
+Submission receipts, final status and Apple's detailed scan log are retained
+under `build/release/notary-*`. The packager requires Apple's `Accepted` status,
+then validates the staple and Gatekeeper assessment before moving the DMG into
+its final release filename. An error preserves the staging directory for
+diagnosis/resuming; it never silently falls back to a signed-only public build.
+`MACOS_NOTARY_TIMEOUT` defaults to `20m`. For an interrupted submission, inspect
+the saved ID with `xcrun notarytool info <id> --keychain-profile vdoninja-notary`
+before retrying; don't blindly resubmit a pending job.
+
+The packaging commands do not upload or publish GitHub releases. Final DMGs
+must pass artifact tests and VirusTotal submission. The Mac release workflow
+verifies their hashes, stapled Apple tickets, Gatekeeper acceptance, bundle
+identity, version and architecture before it can publish a private draft.
+
 ```bash
 bash scripts/package_macos.sh
 ```

@@ -1,8 +1,14 @@
-# v0.2.5 — macOS preview
+# v0.2.5 — notarized macOS VST3
 
-Developer ID–signed VST3 builds for Apple Silicon and Intel, targeting macOS 11+.
-These ZIPs are **not notarized**. This is a Mac-only preview; the Windows release
-and its download remain unchanged.
+Developer ID–signed and **Apple-notarized** VST3 builds for Apple Silicon and
+Intel, targeting macOS 11+. Both disk images carry a validated stapled ticket
+and pass Gatekeeper assessment. This is a Mac-only release; Windows downloads
+remain unchanged. It remains marked as a prerelease while the compatibility
+limitations below are outstanding.
+
+- [Download for Apple Silicon](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-arm64-notarized.dmg)
+- [Download for Intel / Rosetta](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-x86_64-notarized.dmg)
+- [SHA-256 checksums](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-SHA256SUMS.txt)
 
 ## Changes
 
@@ -29,11 +35,13 @@ A separate five-minute stereo soak had zero silent blocks after warmup despite
 two signaling interruptions. Measured local one-way latency was about 68 ms;
 that excludes audio-interface and WAN latency and does not promise zero jitter
 or distortion. Native and extracted-artifact smoke tests are repeated for the
-versioned, signed release artifacts.
+versioned, notarized release artifacts. Both clean GitHub architecture builds
+and CodeQL checks also passed. Apple reported no notarization issues for either
+disk image; final DMGs are submitted to VirusTotal before publication.
 
 ## Install and limitations
 
-Extract the ZIP for your DAW's architecture and copy the entire
+Open the DMG for your DAW's architecture and copy the entire
 `webrtc_vst.vst3` bundle into `~/Library/Audio/Plug-Ins/VST3/`. Restart your DAW
 and rescan. Use the Intel build for a DAW running under Rosetta.
 
@@ -42,5 +50,5 @@ Units and are not supported. Physical Intel hardware, macOS 11, other Mac DAWs
 (including Audacity), remote WAN/restrictive NAT, independent device-clock drift
 and full-stack sanitizers remain outside this validation. No TURN relay is
 configured. See the [testing report](https://github.com/steveseguin/Ninja-VST3-Plugin/blob/mac-v0.2.5/docs/developer/HARDENING_VALIDATION.md) for
-scope and remaining gaps. Signing does not replace notarization; see the
+scope and remaining gaps. See the
 [installation guide](https://steveseguin.github.io/Ninja-VST3-Plugin/getting-started.html#mac-install).

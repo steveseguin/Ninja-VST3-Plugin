@@ -30,7 +30,15 @@ if [[ -n ${MACOS_NOTARY_PROFILE:-} && "$identity" == - ]]; then
 fi
 mkdir -p "$root/build/release"
 work=$(mktemp -d "$root/build/release/macos-stage.XXXXXX")
-trap 'rm -r "$work"' EXIT
+cleanup() {
+    result=$?
+    if [[ $result == 0 ]]; then
+        rm -r "$work"
+    else
+        echo "Packaging failed; preserved diagnostic staging directory: $work" >&2
+    fi
+}
+trap cleanup EXIT
 stage="$work/payload"
 mkdir "$stage"
 ditto "$bundle" "$stage/webrtc_vst.vst3"
@@ -73,9 +81,29 @@ if [[ -n ${MACOS_NOTARY_PROFILE:-} ]]; then
     candidate="$work/$name.dmg"
     hdiutil create -volname "VDO.Ninja VST3" -srcfolder "$stage" -format UDZO "$candidate"
     codesign --force --sign "$identity" --timestamp "$candidate"
-    xcrun notarytool submit "$candidate" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    records=$(mktemp -d "$root/build/release/notary-v$version-$arch.XXXXXX")
+    echo "Notarization records: $records"
+    # Persist the submission ID before waiting, so interrupted jobs can resume
+    # with notarytool wait rather than uploading the same artifact again.
+    xcrun notarytool submit "$candidate" --keychain-profile "$MACOS_NOTARY_PROFILE" \
+        --no-wait --output-format json > "$records/submission.json"
+    submission_id=$(/usr/bin/plutil -extract id raw -o - "$records/submission.json")
+    echo "Apple notarization submission: $submission_id"
+    if ! xcrun notarytool wait "$submission_id" --keychain-profile "$MACOS_NOTARY_PROFILE" \
+        --timeout "${MACOS_NOTARY_TIMEOUT:-20m}" --output-format json > "$records/status.json"; then
+        xcrun notarytool log "$submission_id" --keychain-profile "$MACOS_NOTARY_PROFILE" "$records/log.json" || true
+        echo "Notarization did not finish successfully; see $records" >&2
+        exit 1
+    fi
+    xcrun notarytool log "$submission_id" --keychain-profile "$MACOS_NOTARY_PROFILE" "$records/log.json"
+    [[ $(/usr/bin/plutil -extract status raw -o - "$records/status.json") == Accepted ]] || {
+        echo "Apple did not accept this artifact; see $records/log.json" >&2
+        exit 1
+    }
     xcrun stapler staple "$candidate"
     xcrun stapler validate "$candidate"
+    codesign --verify --strict --verbose=2 "$candidate"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$candidate"
     mv "$candidate" "$artifact.dmg"
     echo "$artifact.dmg"
 else
