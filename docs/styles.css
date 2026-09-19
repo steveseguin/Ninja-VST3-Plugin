@@ -261,6 +261,7 @@ p {
 }
 
 code {
+  overflow-wrap: anywhere;
   font-family: "IBM Plex Mono", Consolas, monospace;
   font-size: 0.88em;
   background: #f2ede2;

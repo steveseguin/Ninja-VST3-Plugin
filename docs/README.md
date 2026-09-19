@@ -3,7 +3,7 @@
 This folder is intended for GitHub Pages (`/docs` source) and contains:
 
 - Marketing landing page for the audio-only VDO.Ninja VST plugin.
-- Direct links to latest installer and all GitHub releases.
+- Direct links to the latest Windows installer, signed Mac previews for Apple Silicon and Intel, and all GitHub releases.
 
 ## Files
 
@@ -18,6 +18,8 @@ This folder is intended for GitHub Pages (`/docs` source) and contains:
 - Keep favicon set to `https://vdo.ninja/media/favicon.png`.
 - Keep Open Graph and Twitter metadata aligned with VDO.Ninja branding.
 - Keep primary installer link fixed to `releases/latest/download/webrtc_vst-windows-setup.exe`.
+- Keep Mac links versioned to the uploaded signed ZIPs; update both pages when replacing them.
+- State whether Mac builds are notarized, and keep architecture/install guidance accurate.
 
 ## Publish
 

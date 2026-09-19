@@ -48,10 +48,13 @@
       Purpose-built for low-friction remote collaboration workflows.
     </p>
     <div class="hero-actions">
-      <a id="downloadLatest" class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/latest/download/webrtc_vst-windows-setup.exe">Download Latest Release</a>
+      <a id="downloadLatest" class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/latest/download/webrtc_vst-windows-setup.exe">Download for Windows</a>
+      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/v0.2.4/webrtc_vst-v0.2.4-macos-arm64-signed.zip">Mac &mdash; Apple Silicon</a>
+      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/v0.2.4/webrtc_vst-v0.2.4-macos-x86_64-signed.zip">Mac &mdash; Intel</a>
       <a class="btn btn-ghost" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases">Browse All Releases</a>
       <a class="btn btn-ghost" href="./getting-started.html">Getting Started Guide</a>
     </div>
+    <p class="hero-meta">Mac preview: macOS 11+, signed with Developer ID; not yet notarized. <a href="./getting-started.html#mac-install">Mac installation steps</a>.</p>
   </header>
 
   <main class="content">
@@ -97,7 +100,7 @@
       <div class="steps">
         <article class="step">
           <p class="step-index">1</p>
-          <p>Download the latest Windows installer (<code>webrtc_vst-windows-setup.exe</code>). Use the versioned <code>.zip</code> only for manual install.</p>
+          <p>Download the Windows installer or the Mac ZIP for your DAW's architecture. On Mac, copy <code>webrtc_vst.vst3</code> to <code>~/Library/Audio/Plug-Ins/VST3/</code>.</p>
         </article>
         <article class="step">
           <p class="step-index">2</p>
@@ -115,15 +118,15 @@
       <div class="compat-grid">
         <div class="compat-item">
           <strong>Platforms</strong>
-          <p>Windows (x64), Linux (x64)</p>
+          <p>Windows (x64), macOS 11+ (Apple Silicon / Intel preview), Linux (x64, source build)</p>
         </div>
         <div class="compat-item">
           <strong>Plugin format</strong>
-          <p>VST3</p>
+          <p>VST3. Logic Pro and GarageBand require Audio Units and are not supported.</p>
         </div>
         <div class="compat-item">
           <strong>Tested DAWs</strong>
-          <p>REAPER, Studio One</p>
+          <p>REAPER, Studio One on Windows. Mac DAW validation is still in progress.</p>
         </div>
         <div class="compat-item">
           <strong>Sample rates</strong>
