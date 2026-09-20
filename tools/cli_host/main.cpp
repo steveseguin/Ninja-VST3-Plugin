@@ -25,6 +25,13 @@
 #include <pluginterfaces/vst/vsttypes.h>
 
 #include "../../webrtc_vst/src/ParameterIDs.h"
+#include "../../webrtc_vst/src/EnvironmentSettings.h"
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -186,6 +193,49 @@ int resolveWallclockRuntimeMs() {
     return parseIntEnv(runtimeEnv, 0);
 }
 
+// Only the opt-in real-time test mode needs a DAW-like callback clock.
+// Windows sleep_until can round 5.3 ms blocks to 15.6 ms, then deliver bursts.
+// A private high-resolution timer avoids changing the system timer period.
+class HostPacing {
+public:
+    explicit HostPacing(bool enabled) {
+#if defined(_WIN32)
+        if (enabled) {
+            timer_ = CreateWaitableTimerExW(nullptr, nullptr,
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
+            if (!timer_) std::cerr << "[warning] High-resolution host timer unavailable; using sleep_until\n";
+        }
+#else
+        (void)enabled;
+#endif
+    }
+    ~HostPacing() {
+#if defined(_WIN32)
+        if (timer_) CloseHandle(timer_);
+#endif
+    }
+    HostPacing(const HostPacing&) = delete;
+    HostPacing& operator=(const HostPacing&) = delete;
+    void waitUntil(std::chrono::steady_clock::time_point deadline) {
+#if defined(_WIN32)
+        if (timer_) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                deadline - std::chrono::steady_clock::now()).count() / 100;
+            if (remaining <= 0) return;
+            LARGE_INTEGER due;
+            due.QuadPart = -remaining;
+            if (SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE) &&
+                WaitForSingleObject(timer_, INFINITE) == WAIT_OBJECT_0) return;
+        }
+#endif
+        std::this_thread::sleep_until(deadline);
+    }
+private:
+#if defined(_WIN32)
+    HANDLE timer_ = nullptr;
+#endif
+};
+
 class ScopedTimeoutGuard {
 public:
     explicit ScopedTimeoutGuard(int timeoutMs) {
@@ -324,7 +374,7 @@ std::string buildPluginStateJson() {
     for (const auto& [environment, field] : {
         std::pair{"WEBRTC_CLI_HOST_MODE", "mode"}, {"WEBRTC_CLI_HOST_STREAM_ID", "streamId"},
         {"WEBRTC_CLI_HOST_ROOM", "roomName"}, {"WEBRTC_CLI_HOST_PASSWORD", "password"}})
-        if (const auto* value = std::getenv(environment)) state[field] = value;
+        if (const auto value = webrtc_vst::environmentSetting(environment)) state[field] = *value;
     return state.empty() ? "" : state.dump();
 }
 
@@ -520,6 +570,7 @@ int main(int argc, char** argv) {
     size_t outputSamples = 0;
     const bool qualityMonitor = std::getenv("WEBRTC_CLI_HOST_QUALITY") != nullptr;
     const bool precisePacing = std::getenv("WEBRTC_CLI_HOST_REALTIME_PACING") != nullptr;
+    HostPacing hostPacing(precisePacing);
     const bool probeEnvelope = std::getenv("WEBRTC_CLI_HOST_PROBE_ENVELOPE") != nullptr;
     std::ofstream capture;
     if (const char* path = std::getenv("WEBRTC_CLI_HOST_CAPTURE")) {
@@ -615,7 +666,7 @@ int main(int argc, char** argv) {
         }
         context.projectTimeSamples += kBlockSize;
         if (precisePacing) {
-            std::this_thread::sleep_until(processStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            hostPacing.waitUntil(processStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>((iteration + 1) * kBlockSize / kSampleRate)));
         } else if (blockSleepMs > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(blockSleepMs));

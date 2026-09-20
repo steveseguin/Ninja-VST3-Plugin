@@ -12,12 +12,12 @@ const { cliExecutable, pluginBundle } = require("./build_paths");
 
 const hash = (s, length) => createHash("sha256").update(s).digest("hex").slice(0, length);
 
-async function runCase(name, saltOverride, web, expectedSalt, room = "") {
+async function runCase(name, saltOverride, web, expectedSalt, room = "", password = "secret", injectPassword = false) {
     const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     await once(server, "listening");
     const env = { ...process.env,
         WEBRTC_VST_MODE: "seed", WEBRTC_VST_STREAM_ID: "advancedtest",
-        WEBRTC_VST_ROOM_NAME: room, WEBRTC_VST_PASSWORD: "secret",
+        WEBRTC_VST_ROOM_NAME: room, WEBRTC_VST_PASSWORD: password,
         WEBRTC_VST_HANDSHAKE_URL: `ws://127.0.0.1:${server.address().port}/custom/socket?test=1`,
         WEBRTC_VST_WEB_BASE_URL: web,
         WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS: "1800",
@@ -28,6 +28,10 @@ async function runCase(name, saltOverride, web, expectedSalt, room = "") {
     }
     if (saltOverride === undefined) delete env.WEBRTC_VST_SALT;
     else env.WEBRTC_VST_SALT = saltOverride;
+    if (injectPassword) {
+        env.WEBRTC_VST_PASSWORD = "replaced-by-state";
+        env.WEBRTC_CLI_HOST_PASSWORD = password;
+    }
     let child;
     let timer;
     let logs = "";
@@ -40,10 +44,10 @@ async function runCase(name, saltOverride, web, expectedSalt, room = "") {
                     const message = JSON.parse(data);
                     if (room) {
                         assert.equal(message.request, "joinroom");
-                        assert.equal(message.roomid, hash(room + "secret" + expectedSalt, 16));
+                        assert.equal(message.roomid, hash(room + encodeURIComponent(password) + expectedSalt, 16));
                     } else {
                         assert.equal(message.request, "seed");
-                        assert.equal(message.streamID, "advancedtest" + hash("secret" + expectedSalt, 6));
+                        assert.equal(message.streamID, "advancedtest" + hash(encodeURIComponent(password) + expectedSalt, 6));
                     }
                     resolve();
                 } catch (error) { reject(error); }
@@ -73,4 +77,6 @@ async function runCase(name, saltOverride, web, expectedSalt, room = "") {
     await runCase("official subdomain retains official salt", undefined, "https://beta.vdo.ninja/", "vdo.ninja");
     await runCase("room hashing uses custom salt", "room-salt", "https://other.test/", "room-salt", "testroom");
     await runCase("Unicode salt reaches hashing unchanged", "café + salt", "https://other.test/", "café + salt");
+    await runCase("Unicode room and password reach hashing unchanged", "café 🔊", "https://other.test/", "café 🔊", "salle-é🔊", "clé-é🔊");
+    await runCase("CLI state preserves Unicode passwords", "vdo.ninja", "https://vdo.ninja/", "vdo.ninja", "", "clé-é🔊", true);
 })().catch(error => { console.error(error); process.exitCode = 1; });

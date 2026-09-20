@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "ConfigState.h"
+#include "EnvironmentSettings.h"
 
 #include "StreamIdGenerator.h"
 #include "ParameterIDs.h"
@@ -183,28 +184,28 @@ tresult PLUGIN_API WebRTCProcessor::setupProcessing(ProcessSetup& setup) {
 
 void WebRTCProcessor::updateConfigFromEnvironment() {
     std::lock_guard<std::mutex> lock(configMutex_);
-    if (const char* stream = std::getenv("WEBRTC_VST_STREAM_ID")) {
-        config_.streamId = stream;
+    if (const auto stream = environmentSetting("WEBRTC_VST_STREAM_ID")) {
+        config_.streamId = *stream;
     }
 
-    if (const char* room = std::getenv("WEBRTC_VST_ROOM_NAME")) {
-        config_.roomName = room;
-    } else if (const char* roomLegacy = std::getenv("WEBRTC_VST_ROOM_ID")) {
-        config_.roomName = roomLegacy;
+    if (const auto room = environmentSetting("WEBRTC_VST_ROOM_NAME")) {
+        config_.roomName = *room;
+    } else if (const auto roomLegacy = environmentSetting("WEBRTC_VST_ROOM_ID")) {
+        config_.roomName = *roomLegacy;
     }
 
-    if (const char* url = std::getenv("WEBRTC_VST_HANDSHAKE_URL")) {
-        config_.handshakeUrl = url;
-    } else if (const char* urlLegacy = std::getenv("WEBRTC_VST_SIGNALING_URL")) {
-        config_.handshakeUrl = urlLegacy;
+    if (const auto url = environmentSetting("WEBRTC_VST_HANDSHAKE_URL")) {
+        config_.handshakeUrl = *url;
+    } else if (const auto urlLegacy = environmentSetting("WEBRTC_VST_SIGNALING_URL")) {
+        config_.handshakeUrl = *urlLegacy;
     }
 
-    if (const char* password = std::getenv("WEBRTC_VST_PASSWORD")) {
-        config_.password = password;
+    if (const auto password = environmentSetting("WEBRTC_VST_PASSWORD")) {
+        config_.password = *password;
     }
 
-    if (const char* web = std::getenv("WEBRTC_VST_WEB_BASE_URL")) config_.webBaseUrl = web;
-    if (const char* salt = std::getenv("WEBRTC_VST_SALT")) config_.salt = salt;
+    if (const auto web = environmentSetting("WEBRTC_VST_WEB_BASE_URL")) config_.webBaseUrl = *web;
+    if (const auto salt = environmentSetting("WEBRTC_VST_SALT")) config_.salt = *salt;
     else if (!std::getenv("WEBRTC_VST_WEB_BASE_URL") &&
              (std::getenv("WEBRTC_VST_HANDSHAKE_URL") || std::getenv("WEBRTC_VST_SIGNALING_URL")))
         config_.salt = saltForUrl(config_.handshakeUrl);

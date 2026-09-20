@@ -1,14 +1,16 @@
-# v0.2.5 — notarized macOS VST3
+# v0.2.5 — Windows and notarized macOS VST3
 
 Developer ID–signed and **Apple-notarized** VST3 builds for Apple Silicon and
 Intel, targeting macOS 11+. Both disk images carry a validated stapled ticket
-and pass Gatekeeper assessment. This is a Mac-only release; Windows downloads
-remain unchanged. It remains marked as a prerelease while the compatibility
-limitations below are outstanding.
+and pass Gatekeeper assessment. A signed **Windows x64 VST3 ZIP** is now
+available at the same version. Existing Mac downloads are unchanged. This
+remains a prerelease while the compatibility limitations below are outstanding.
 
 - [Download for Apple Silicon](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-arm64-notarized.dmg)
 - [Download for Intel / Rosetta](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-x86_64-notarized.dmg)
-- [SHA-256 checksums](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-SHA256SUMS.txt)
+- [macOS SHA-256 checksums](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-macos-SHA256SUMS.txt)
+- [Download for Windows x64](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-windows-vst3.zip)
+- [Windows SHA-256 checksum](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.5/webrtc_vst-v0.2.5-windows-SHA256SUMS.txt)
 
 ## Changes
 
@@ -22,7 +24,25 @@ limitations below are outstanding.
 - Bounded and validated saved state, signaling input and peer/candidate queues;
   improved lifecycle handling and regression coverage.
 
-## Validation
+## Windows validation
+
+REAPER 7.62 send/receive audio, bypass, repeated native-editor opening/closing
+and saved-project reopening passed. All four native suites, the full JS
+integration gate, live-room audio, signaling/crypto hardening and real Chrome
+audio in both directions passed. Browser coverage includes custom and Unicode
+salts and wrong-salt rejection. A five-minute stereo soak had zero silent
+blocks despite two signaling interruptions. Strict local playback measurement
+had zero silent, clipped or non-finite blocks and median one-way latency of
+66.77 ms, excluding audio-interface and WAN latency.
+
+Windows packaging uses static OpenSSL and MSVC runtime libraries. A Windows
+Unicode environment-setting regression was fixed and tested. The ZIP contains
+the signed, timestamped plugin and was submitted to VirusTotal with zero
+detections. The installer is withheld because one VirusTotal engine flagged
+it, despite a clean local Defender scan. See the
+[Windows validation report](https://github.com/steveseguin/Ninja-VST3-Plugin/blob/main/docs/developer/WINDOWS_RELEASE_0.2.5.md).
+
+## macOS validation
 
 REAPER send/receive, bypass/editor cycling and saved-project reopening passed.
 Real Chrome/VDO.Ninja browser audio passed in both directions, including custom
@@ -41,6 +61,17 @@ disk image; final DMGs are submitted to VirusTotal before publication.
 
 ## Install and limitations
 
+**Windows:** Extract the ZIP and copy the entire `webrtc_vst.vst3` folder to
+`%LOCALAPPDATA%\Programs\Common\VST3\`, then restart/rescan your DAW. For hosts
+that only scan the system folder, use `C:\Program Files\Common Files\VST3\`
+(administrator permission required). The signing certificate is not publicly
+trusted on the validation machine; a signer and timestamp are present, but
+Windows may still show an untrusted-publisher/SmartScreen warning. REAPER was
+validated; Studio One and Audacity playback were not validated for this build.
+The Windows ZIP was built from `main` with the Windows fixes documented above;
+the original `mac-v0.2.5` source tag continues to identify the Mac build.
+
+**macOS:**
 Open the DMG for your DAW's architecture and copy the entire
 `webrtc_vst.vst3` bundle into `~/Library/Audio/Plug-Ins/VST3/`. Restart your DAW
 and rescan. Use the Intel build for a DAW running under Rosetta.

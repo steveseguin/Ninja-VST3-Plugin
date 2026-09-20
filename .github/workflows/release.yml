@@ -17,6 +17,10 @@ jobs:
       SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
       VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY || secrets.VT_API_KEY }}
       SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGN_TIMESTAMP_URL }}
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      VCPKG_MAX_CONCURRENCY: "2"
+      # SDK builds add /MP; cap each compiler as well as MSBuild itself.
+      _CL_: "/MP1"
 
     steps:
       - name: Checkout repository
@@ -48,6 +52,12 @@ jobs:
         run: |
           git clone --branch v3.8.0_build_66 --recurse-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
 
+      - name: Install static OpenSSL
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openssl:x64-windows-static
+          if ($LASTEXITCODE -ne 0) { throw "Static OpenSSL installation failed" }
+
       - name: Configure CMake
         shell: pwsh
         run: |
@@ -55,6 +65,9 @@ jobs:
             -G "Visual Studio 17 2022" `
             -DCMAKE_BUILD_TYPE=Release `
             -DVST3_SDK_ROOT="${{ github.workspace }}\\vst3sdk" `
+            -DOPENSSL_ROOT_DIR="$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-static" `
+            -DSMTG_USE_STATIC_CRT=ON `
+            -DSMTG_CREATE_PLUGIN_LINK=OFF `
             -DWEBRTC_VST_BUILD_TESTS=ON
 
       - name: Build plugin
@@ -72,11 +85,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Integration tests failed" }
           & "build/webrtc_vst_win/bin/Release/webrtc_vst_stress_test.exe"
           if ($LASTEXITCODE -ne 0) { throw "Stress tests failed" }
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: |
-          .\scripts\build_windows_installer.ps1 -Version "${{ github.ref_name }}"
 
       - name: Prepare code-signing certificate
         id: signing-cert
@@ -112,13 +120,6 @@ jobs:
           }
           $targets += (Resolve-Path $pluginBinary).Path
 
-          # Sign installer artifacts as part of release outputs.
-          $installerCandidates = Get-ChildItem -Path build -Recurse -File -Include *.exe,*.msi |
-            Where-Object { $_.Name -match '(?i)(setup|installer)' }
-          foreach ($candidate in $installerCandidates) {
-            $targets += $candidate.FullName
-          }
-
           $targets = $targets | Sort-Object -Unique
           if ($targets.Count -eq 0) {
             throw "No release binaries found to sign"
@@ -137,8 +138,9 @@ jobs:
             }
 
             $signature = Get-AuthenticodeSignature -FilePath $target
-            if ($signature.Status -eq "NotSigned" -or -not $signature.SignerCertificate) {
-              throw "Signature missing after signing for $target. Status: $($signature.Status) $($signature.StatusMessage)"
+            if ($signature.Status -eq "NotSigned" -or $signature.Status -eq "HashMismatch" -or
+                -not $signature.SignerCertificate -or -not $signature.TimeStamperCertificate) {
+              throw "Signature or timestamp verification failed for $target. Status: $($signature.Status) $($signature.StatusMessage)"
             }
             if ($signature.Status -ne "Valid") {
               Write-Warning "Non-Valid signature status for $target on runner trust store: $($signature.Status) $($signature.StatusMessage)"
@@ -147,6 +149,28 @@ jobs:
           }
 
           "signed_count=$($targets.Count)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # The installer must embed the already-signed plugin.
+      - name: Build and sign Windows installer
+        shell: pwsh
+        env:
+          CERT_PATH: ${{ steps.signing-cert.outputs.cert_path }}
+        run: |
+          .\scripts\build_windows_installer.ps1 -Version "${{ github.ref_name }}"
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:SIGNING_TIMESTAMP_URL)) {
+            "http://timestamp.digicert.com"
+          } else { $env:SIGNING_TIMESTAMP_URL }
+          $installer = "build/release/webrtc_vst-windows-setup.exe"
+          & $signtool.FullName sign /fd SHA256 /f "$env:CERT_PATH" /p "$env:SIGNING_CERT_PASSWORD" `
+            /tr "$timestampUrl" /td SHA256 $installer
+          if ($LASTEXITCODE -ne 0) { throw "Installer signing failed" }
+          $signature = Get-AuthenticodeSignature $installer
+          if (-not $signature.SignerCertificate -or -not $signature.TimeStamperCertificate -or
+              $signature.Status -eq "NotSigned" -or $signature.Status -eq "HashMismatch") {
+            throw "Installer signature or timestamp verification failed"
+          }
 
       - name: Package VST3 artifact
         id: package
