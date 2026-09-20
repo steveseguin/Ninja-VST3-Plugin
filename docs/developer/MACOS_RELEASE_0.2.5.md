@@ -42,3 +42,8 @@ credentials held in the local `vdoninja-notary` Keychain profile. Submission IDs
 status and scan logs are retained under `build/release/notary-*`; no passwords
 are stored in this repository. The runtime source tag remains `mac-v0.2.5`;
 the later packaging/website updates do not modify plugin code.
+
+The subsequent [public-download smoke test](MACOS_DOWNLOAD_SMOKE_0.2.5.md)
+checks the live website downloads, quarantined isolated installations, real
+REAPER/browser journeys and measured playback quality. It leaves the user's
+normal installation unchanged while their REAPER session is open.

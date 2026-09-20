@@ -2,9 +2,12 @@
 -- Creates a NEW test project tab. Uses generated tone only; does not record a mic.
 -- The test project's master is silent. Results/projects go under build/reaper-validation.
 local source = debug.getinfo(1, "S").source:sub(2):gsub("\\", "/")
-local root = assert(source:match("^(.*)/tools/tests/")) .. "/build/reaper-validation/"
+local root = os.getenv('WEBRTC_REAPER_TEST_OUTPUT_DIR') or
+  (assert(source:match("^(.*)/tools/tests/")) .. "/build/reaper-validation/")
+if root:sub(-1) ~= '/' then root = root .. '/' end
 reaper.RecursiveCreateDirectory(root, 0)
-local log = assert(io.open(root .. "result.txt", "w"))
+local coldReopen = os.getenv('WEBRTC_REAPER_TEST_REOPEN') == '1'
+local log = assert(io.open(root .. (coldReopen and "result-restart.txt" or "result.txt"), "w"))
 local function report(text) log:write(text .. "\n"); log:flush() end
 local function base64(data)
   local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -35,6 +38,15 @@ local function value(track, fx, label)
     end
   end
 end
+local function checkIdentity(track, fx)
+  local _, ident = reaper.TrackFX_GetNamedConfigParm(track, fx, 'fx_ident')
+  report('Loaded FX identifier: ' .. tostring(ident))
+  local expected = os.getenv('WEBRTC_TEST_PLUGIN_BUNDLE')
+  if expected then
+    assert(ident and ident:sub(1, #expected) == expected and ident:sub(#expected+1, #expected+1) == '<',
+      'REAPER loaded a different plugin installation: ' .. tostring(ident))
+  end
+end
 
 local function runJourney()
 reaper.Main_OnCommand(40859, 0) -- new tab
@@ -44,6 +56,19 @@ reaper.GetSetProjectInfo(project, 'PROJECT_SRATE', 48000, true)
 reaper.GetSetProjectInfo(project, 'PROJECT_SRATE_USE', 1, true)
 local id = 'reapertest' .. os.time()
 local tracks, effects = {}, {}
+if coldReopen then
+  reaper.Main_openProject('noprompt:' .. root .. 'loopback.rpp')
+  project = reaper.EnumProjects(-1)
+  tracks, effects = {reaper.GetTrack(project, 0), reaper.GetTrack(project, 1)}, {1, 0}
+  for i=1,2 do
+    assert(tracks[i], 'Missing saved track')
+    checkIdentity(tracks[i], effects[i])
+    assert(value(tracks[i], effects[i], 'Custom salt') == 'reaper-custom-salt', 'Saved salt changed')
+    assert(value(tracks[i], effects[i], 'Web domain / URL') == 'https://studio.example.test/', 'Saved URL changed')
+  end
+  reaper.SetMediaTrackInfo_Value(reaper.GetMasterTrack(project), 'D_VOL', 0)
+  report('PASS: saved project loaded in a fresh host process with settings intact')
+else
 for i=1,2 do
   reaper.InsertTrackAtIndex(i-1, true)
   local track = reaper.GetTrack(project, i-1)
@@ -57,16 +82,18 @@ for i=1,2 do
   local fx = reaper.TrackFX_AddByName(track, 'VST3: VDO.Ninja WebRTC Bridge (Open Source)', false, -1)
   assert(fx >= 0, 'VDO.Ninja VST3 not found; rescan plugins first')
   effects[i] = fx
+  checkIdentity(track, fx)
   setState(track, fx, i == 1 and 'seed' or 'play', id)
   assert(value(track, fx, 'Custom salt') == 'reaper-custom-salt', 'Salt not restored')
   assert(value(track, fx, 'Web domain / URL') == 'https://studio.example.test/', 'Web URL not restored')
   report('PASS: instance ' .. i .. ' loaded with custom salt/domain')
 end
+end
 reaper.Main_SaveProjectEx(project, root .. 'loopback.rpp', 8)
 reaper.SetEditCurPos(0, false, false)
 reaper.OnPlayButton()
 local start, peak, ticks = reaper.time_precise(), 0, 0
-local phase, windowStart, windowPeak, windows = 1, 0, 0, 0
+local phase, windowStart, windowPeak, windows = coldReopen and 2 or 1, 0, 0, 0
 local bypassed, restoredBypass, cycled = false, false, false
 local function poll()
   if reaper.EnumProjects(-1) ~= project then
@@ -124,6 +151,7 @@ local function poll()
   project = reaper.EnumProjects(-1)
   tracks = {reaper.GetTrack(project, 0), restored}
   effects = {1, 0}
+  for i=1,2 do checkIdentity(tracks[i], effects[i]) end
   phase, start, peak, windowStart, windowPeak = 2, reaper.time_precise(), 0, 0, 0
   reaper.SetEditCurPos(0, false, false)
   reaper.OnPlayButton()

@@ -17,7 +17,7 @@ const { chromium } = require(process.env.WEBRTC_TEST_PLAYWRIGHT ||
 
 const webBase = process.env.WEBRTC_TEST_WEB_BASE_URL || "https://backup.vdo.ninja/";
 const wss = process.env.WEBRTC_TEST_WSS || "wss://apibackup.vdo.ninja/";
-const password = process.env.WEBRTC_TEST_BROWSER_PASSWORD || "browser-test-password"; // Synthetic test credential only.
+const password = process.env.WEBRTC_TEST_BROWSER_PASSWORD ?? "browser-test-password"; // Empty explicitly tests the normal VDO.Ninja default.
 const uiLink = process.env.WEBRTC_TEST_UI_LINK ? new URL(JSON.parse(fs.readFileSync(process.env.WEBRTC_TEST_UI_LINK, "utf8")).link) : null;
 const outDir = path.join(rootDir, "build/browser-advanced-validation");
 fs.mkdirSync(outDir, { recursive: true });
@@ -62,10 +62,10 @@ function makeLink(mode, stream, salt, effectiveSalt, includeHash = true) {
     // wss2 overrides the endpoint without switching the browser to its separate
     // generic-relay protocol (which is what the wss parameter does).
     url.searchParams.set("wss2", wss);
-    if (includeHash) url.searchParams.set("hash", crypto.createHash("sha256")
+    if (includeHash && password) url.searchParams.set("hash", crypto.createHash("sha256")
         .update(encodeURIComponent(password) + effectiveSalt).digest("hex").slice(0, 4));
     // Supply the test password instead of automating the site's password dialog.
-    url.searchParams.set("password", password);
+    if (password) url.searchParams.set("password", password);
     url.searchParams.set("novideo", "");
     if (mode === "push") {
         url.searchParams.set("webcam", "");
