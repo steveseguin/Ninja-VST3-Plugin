@@ -1,4 +1,5 @@
 #include "WebRTCSession.h"
+#include "PeerAudioBufferSizing.h"
 #include "BrowserCryptoCompat.h"
 #include "StreamIdGenerator.h"
 
@@ -36,9 +37,7 @@ namespace {
 constexpr size_t kFrameSizeSamples = 960; // 20ms at 48kHz
 constexpr int kOpusPayloadType = 111;
 constexpr uint32_t kAudioSsrc = 0x11ECACA; // Arbitrary but stable
-constexpr size_t kPeerBufferFrames = 2048; // ~42ms at 48kHz
 constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
-constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
 constexpr size_t kMaxPeerSessions = 16;
 constexpr auto kPlayRefreshCooldown = std::chrono::seconds(30);
 
@@ -802,7 +801,9 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         session.audioContext->decoder = nullptr;
     }
     session.audioContext->resampler.configure(48000.0, sampleRate_, channelCount_);
-    session.audioContext->buffer = std::make_shared<AudioRingBuffer>(kPeerBufferFrames, channelCount_);
+    const auto bufferSizing = peerAudioBufferSizing(sampleRate_);
+    session.audioContext->preFillFrames = bufferSizing.preFillFrames;
+    session.audioContext->buffer = std::make_shared<AudioRingBuffer>(bufferSizing.capacityFrames, channelCount_);
 
     rtc::Configuration configuration;
     // createDataChannel can otherwise negotiate synchronously while mutex_ is
@@ -1078,7 +1079,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
 
             // Mark pre-fill ready once buffer has enough data for smooth playback
             if (!ctx->preFillReady.load(std::memory_order_relaxed)) {
-                if (ctx->buffer->availableFrames(peerChannels) >= kJitterPreFillFrames) {
+                if (ctx->buffer->availableFrames(peerChannels) >= ctx->preFillFrames) {
                     ctx->preFillReady.store(true, std::memory_order_release);
                 }
             }

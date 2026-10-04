@@ -92,6 +92,7 @@ private:
         std::shared_ptr<AudioRingBuffer> buffer;
         std::atomic<bool> active{true};
         std::atomic<bool> preFillReady{false}; // true once buffer has enough data
+        size_t preFillFrames{960}; // Set before peer callbacks; measured in host frames.
         uint64_t frameCount{0};
         uint64_t decodeErrorCount{0};
         uint64_t plcFrameCount{0};

@@ -210,3 +210,10 @@ if(APPLE)
     add_test(NAME MacEditorSmoke COMMAND webrtc_vst_mac_editor_test "${_plugin_bundle}")
     set_tests_properties(MacEditorSmoke PROPERTIES TIMEOUT 30 LABELS "macos;ui")
 endif()
+
+add_executable(webrtc_vst_peer_audio_buffer_test peer_audio_buffer_test.cpp
+    ../webrtc_vst/src/AudioRingBuffer.cpp)
+target_link_libraries(webrtc_vst_peer_audio_buffer_test PRIVATE Threads::Threads)
+target_compile_features(webrtc_vst_peer_audio_buffer_test PRIVATE cxx_std_20)
+add_test(NAME PeerAudioBufferUnitTest COMMAND webrtc_vst_peer_audio_buffer_test)
+set_tests_properties(PeerAudioBufferUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;audio")

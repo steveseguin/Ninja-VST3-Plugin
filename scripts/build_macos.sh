@@ -41,5 +41,5 @@ cmake --build "$build_dir" --config Release --parallel "${CMAKE_BUILD_PARALLEL_L
     --target webrtc_vst webrtc_vst_cli_host webrtc_vst_settings_test webrtc_vst_integration_test \
         webrtc_vst_stress_test webrtc_vst_fuzz_test
 cmake --build "$build_dir" --config Release --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-4}" \
-    --target webrtc_vst_mac_editor_test
+    --target webrtc_vst_mac_editor_test webrtc_vst_peer_audio_buffer_test
 ctest --test-dir "$build_dir" -C Release --output-on-failure --parallel 1
