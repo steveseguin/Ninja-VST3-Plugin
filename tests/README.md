@@ -1,5 +1,19 @@
 # WebRTC VST Plugin - Test Suite
 
+## Dependency-free resampler regression
+
+From the repository root, run this CPU-only test without a VST3 SDK, audio host,
+network connection, or microphone:
+
+```sh
+c++ -std=c++20 -Wall -Wextra -Werror -O2 tests/resampler_unit_test.cpp -o /tmp/webrtc_resampler_test
+/tmp/webrtc_resampler_test
+```
+
+It checks planar and interleaved block-boundary continuity, passthrough and
+resampled frame counts, and reset behavior. The same test is registered as
+`ResamplerUnitTest` in CTest and included in the macOS native test build.
+
 Comprehensive automated testing that simulates real VST3 host behavior (like Audacity) to catch real-world issues that unit tests might miss.
 
 ## Why These Tests Are Needed

@@ -2,6 +2,12 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+# Dependency-free DSP regression; also runnable directly with a C++20 compiler.
+add_executable(webrtc_vst_resampler_test resampler_unit_test.cpp)
+target_compile_features(webrtc_vst_resampler_test PRIVATE cxx_std_20)
+add_test(NAME ResamplerUnitTest COMMAND webrtc_vst_resampler_test)
+set_tests_properties(ResamplerUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;audio")
+
 add_executable(webrtc_vst_settings_test settings_unit_test.cpp)
 target_include_directories(webrtc_vst_settings_test PRIVATE ${vst3sdk_SOURCE_DIR})
 target_link_libraries(webrtc_vst_settings_test PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
