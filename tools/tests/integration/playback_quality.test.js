@@ -58,14 +58,17 @@ function analyze(seed,play) {
  const nonfinite=steady.reduce((s,b)=>s+b.nonfinite,0), clipped=steady.filter(b=>b.peak>=1).length;
  const silent=steady.filter(b=>b.rms[0]<0.001||b.rms[1]<0.001).length;
  const all=[[],[]];for(const b of steady)for(let ch=0;ch<2;ch++)all[ch].push(...b.data[ch]);
- const distortions=[[],[]];
+ const distortions=[[],[]], expectedLevelWindows=[0,0];
  for(let ch=0;ch<2;ch++) for(let i=0;i+480<=all[ch].length;i+=480){
   const samples=all[ch].slice(i,i+480), level=Math.sqrt(samples.reduce((s,v)=>s+v*v,0)/480);
   // Known steady plateau, excluding intentional amplitude steps. Otherwise
   // a 10 ms window spanning a probe edge incorrectly counts that step as THD.
   const time=steady[0].time+i/48000;
-  if(rx.some(edge=>time>edge+0.1&&time+0.01<edge+0.4)&&level>0.13&&level<0.21)
+  if(rx.some(edge=>time>edge+0.1&&time+0.01<edge+0.4)) {
+      // Preserve reference-level coverage without hiding distorted plateaus.
+      if(level>0.13&&level<0.21) expectedLevelWindows[ch]++;
       distortions[ch].push(distortion(samples,ch?1500:1000));
+  }
  }
  const result={scope:"48 kHz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
   latencyMs:{median:quantile(latencies,.5),p95:quantile(latencies,.95),min:Math.min(...latencies),max:Math.max(...latencies),spread:Math.max(...latencies)-Math.min(...latencies),markers:latencies.length},
@@ -74,7 +77,7 @@ function analyze(seed,play) {
  assert.equal(nonfinite,0);assert.equal(clipped,0);assert.equal(silent,0,"Playback had fully silent blocks after warmup");
  assert.ok(result.latencyMs.p95<100,"Local one-way latency exceeds 100 ms");
  assert.ok(result.latencyMs.spread<25,"Latency spread exceeds 25 ms");
- for(const d of result.thdnPercent){assert.ok(d.windows>50);assert.ok(d.median<1&&d.p95<3,"Tone residual distortion exceeds 1% median / 3% p95");}
+ for(const [ch,d] of result.thdnPercent.entries()){assert.ok(expectedLevelWindows[ch]>50,"Insufficient expected-level plateau windows");assert.ok(d.windows>50);assert.ok(d.median<1&&d.p95<3,"Tone residual distortion exceeds 1% median / 3% p95");}
  console.log("PASS: measured local playback latency, level-marker variation, tone residual, finite/unclipped uninterrupted output; "+out);
 }
 for(const signal of ["SIGINT","SIGTERM"])process.on(signal,()=>{for(const child of children)child.kill();process.exitCode=1;});
