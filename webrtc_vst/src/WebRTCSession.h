@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -123,6 +124,7 @@ private:
                                    const std::string& session,
                                    bool createLocalTracks);
     void closePeerSession(const PeerKey& key);
+    void peerCleanupMain();
 
     void handleSignalingMessage(const nlohmann::json& message);
     void handleOfferRequest(const nlohmann::json& message);
@@ -175,6 +177,7 @@ private:
     mutable SpinLock mutex_;
     std::atomic<bool> shuttingDown_{false};
     bool started_{false};
+    bool publishRejected_{false}; // Guarded by mutex_; status only, not audio routing.
     size_t maxHostBlock_{512};
     std::atomic<bool> intentionalDisconnect_{false};
 
@@ -189,6 +192,12 @@ private:
     std::atomic<bool> publishingAudio_{false};
     mutable std::mutex signalingLogMutex_;
 
+    std::mutex peerCleanupMutex_;
+    std::condition_variable peerCleanupReady_;
+    std::deque<PeerSession> retiredPeers_;
+    std::thread peerCleanupThread_;
+    bool peerCleanupStopping_{false};
+    std::atomic<size_t> pendingPeerCleanup_{0};
     std::unordered_map<PeerKey, PeerSession> peerSessions_;
     std::unordered_map<std::string, PeerKey> sessionByUuid_;
     std::vector<PendingIce> pendingGlobalIce_;

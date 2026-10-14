@@ -2,6 +2,13 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+add_executable(webrtc_vst_callback_assignment_test callback_assignment_test.cpp)
+target_include_directories(webrtc_vst_callback_assignment_test PRIVATE ${libdatachannel_SOURCE_DIR}/include)
+target_link_libraries(webrtc_vst_callback_assignment_test PRIVATE Threads::Threads)
+target_compile_features(webrtc_vst_callback_assignment_test PRIVATE cxx_std_20)
+add_test(NAME CallbackAssignmentTest COMMAND webrtc_vst_callback_assignment_test)
+set_tests_properties(CallbackAssignmentTest PROPERTIES TIMEOUT 15 LABELS "unit;threading")
+
 add_executable(webrtc_vst_audio_worker_wait_probe audio_worker_wait_probe.cpp)
 target_link_libraries(webrtc_vst_audio_worker_wait_probe PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
 target_compile_features(webrtc_vst_audio_worker_wait_probe PRIVATE cxx_std_20)

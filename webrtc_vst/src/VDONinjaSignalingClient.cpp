@@ -1,3 +1,4 @@
+#include "DiagnosticLog.h"
 #include "VDONinjaSignalingClient.h"
 #include "BoundedJson.h"
 
@@ -64,7 +65,7 @@ void VDONinjaSignalingClient::configureCallbacks() {
                     auto jsonMsg = parseBoundedJson(msg->str, 256 * 1024);
                     if (!jsonMsg.is_object()) throw std::invalid_argument("Signaling message must be an object");
                     if (rawSignalingLoggingEnabled()) {
-                        std::cout << "[raw signaling] " << msg->str << std::endl;
+                        writeDiagnosticLine("[raw signaling] " + msg->str);
                     }
 
                     std::function<void(const nlohmann::json&)> onMessage;
@@ -209,7 +210,7 @@ void VDONinjaSignalingClient::disconnect() {
 void VDONinjaSignalingClient::send(const nlohmann::json& message) {
     const auto payload = message.dump();
     if (rawSignalingLoggingEnabled()) {
-        std::cout << "[raw signaling >>] " << payload << std::endl;
+        writeDiagnosticLine("[raw signaling >>] " + payload);
     }
     std::lock_guard<SpinLock> lock(mutex_);
     if (!socket_) {

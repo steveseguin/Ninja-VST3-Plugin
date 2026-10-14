@@ -1,6 +1,8 @@
 # macOS follow-up: short fault and concurrency tests
 
 This follows [the initial macOS validation](MACOS_VALIDATION_2026_10_14.md).
+The subsequent [fuzz and click-focused round](MACOS_FUZZ_AUDIO_2026_10_14.md)
+found additional teardown/status issues and records the newer tested artifact.
 Short checks ran first; the 30-minute audio soak completed last.
 Local logs are in `build/test-tools/quick-validation/`.
 The [machine-readable results](validation/2026-10-14-macos-followup.json) include

@@ -1,0 +1,390 @@
+{
+  "baseCommit": "4bacf07",
+  "binarySha256": {
+    "webrtc_vst_mac": "d44ae6b1f01a37c8bdc0a5e1683d2622bf923bd0c3762fb7f8fc915fd9db1e4d",
+    "webrtc_vst_mac_asan": "41b113b6e0a1b8da399a7074fa3d492839ab1b86ad74ed9488ff7c21006cc335",
+    "webrtc_vst_mac_tsan": "1f0e2e5d9ccd49e38e7bff8a2ea45298d1d93542e6a9dcce897c3c498809e40c"
+  },
+  "stateFuzz": {
+    "seeds": [
+      1,
+      42,
+      5653583,
+      3735928559,
+      4294967295
+    ],
+    "loadedPluginCases": 15070,
+    "parserMutations": 50000,
+    "results": [
+      {
+        "seed": 1,
+        "test": "fuzz",
+        "passed": true
+      },
+      {
+        "seed": 1,
+        "test": "settings",
+        "passed": true
+      },
+      {
+        "seed": 42,
+        "test": "fuzz",
+        "passed": true
+      },
+      {
+        "seed": 42,
+        "test": "settings",
+        "passed": true
+      },
+      {
+        "seed": 5653583,
+        "test": "fuzz",
+        "passed": true
+      },
+      {
+        "seed": 5653583,
+        "test": "settings",
+        "passed": true
+      },
+      {
+        "seed": 3735928559,
+        "test": "fuzz",
+        "passed": true
+      },
+      {
+        "seed": 3735928559,
+        "test": "settings",
+        "passed": true
+      },
+      {
+        "seed": 4294967295,
+        "test": "fuzz",
+        "passed": true
+      },
+      {
+        "seed": 4294967295,
+        "test": "settings",
+        "passed": true
+      }
+    ]
+  },
+  "signalingFuzz": {
+    "release": {
+      "seed": 5653583,
+      "results": [
+        {
+          "mode": "seed",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": true,
+          "qualityWindows": 14
+        },
+        {
+          "mode": "play",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": false,
+          "qualityWindows": 14
+        }
+      ]
+    },
+    "asan": {
+      "seed": 5653583,
+      "results": [
+        {
+          "mode": "seed",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": true,
+          "qualityWindows": 14
+        },
+        {
+          "mode": "play",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": false,
+          "qualityWindows": 14
+        }
+      ]
+    },
+    "tsan": {
+      "seed": 42,
+      "results": [
+        {
+          "mode": "seed",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": true,
+          "qualityWindows": 14
+        },
+        {
+          "mode": "play",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": false,
+          "qualityWindows": 14
+        }
+      ]
+    }
+  },
+  "audioImpairment": {
+    "partitionCases": 126,
+    "scenarios": 21,
+    "checks": [
+      {
+        "name": "clean decode equals independent Opus decoder",
+        "passed": true
+      },
+      {
+        "name": "arrival during partially consumed concealment",
+        "passed": true
+      },
+      {
+        "name": "independent peer concealment",
+        "passed": true
+      },
+      {
+        "name": "concurrent receive and pull remain finite and bounded",
+        "passed": true
+      },
+      {
+        "name": "5000 malformed Opus payloads remain bounded and recover",
+        "passed": true
+      }
+    ],
+    "failedChecks": 0
+  },
+  "clickCapture": {
+    "path": "/Users/steveseguin/Code/Ninja-VST3-Plugin/build/test-tools/audio-soak-1791998857632",
+    "analysis": {
+      "rate": 48000,
+      "block": 256,
+      "results": [
+        {
+          "frames": 1007872,
+          "nonfinite": 0,
+          "peak": 0.25404900312423706,
+          "maxStep": 0.03317738324403763,
+          "maxResidual": 9.67521508693503e-06,
+          "maxBoundaryResidual": 6.152622505334326e-06,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        },
+        {
+          "frames": 1007872,
+          "nonfinite": 0,
+          "peak": 0.25572094321250916,
+          "maxStep": 0.04993002116680145,
+          "maxResidual": 2.2134790681790917e-05,
+          "maxBoundaryResidual": 1.475495441688457e-05,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    "summary": {
+      "seconds": 32,
+      "windows": 31,
+      "steadyWindows": 22,
+      "worstCallbackUs": 25.5,
+      "silentBlocks": 0,
+      "totalBlocks": 4136,
+      "minRms": 0.177708,
+      "maxFrequencyError": 0.6649999999999636
+    }
+  },
+  "mediaFaults": {
+    "release": {
+      "counts": {
+        "clean": {
+          "received": 401,
+          "dropped": 0,
+          "delayed": 0
+        },
+        "loss5pct": {
+          "received": 300,
+          "dropped": 15,
+          "delayed": 0
+        },
+        "jitter15ms": {
+          "received": 300,
+          "dropped": 0,
+          "delayed": 300
+        },
+        "outage3s": {
+          "received": 149,
+          "dropped": 149,
+          "delayed": 0
+        },
+        "recovery": {
+          "received": 669,
+          "dropped": 0,
+          "delayed": 0
+        }
+      },
+      "nonfinite": 0,
+      "recoverySilentBlocks": 0
+    },
+    "tsan": {
+      "counts": {
+        "clean": {
+          "received": 400,
+          "dropped": 0,
+          "delayed": 0
+        },
+        "loss5pct": {
+          "received": 300,
+          "dropped": 15,
+          "delayed": 0
+        },
+        "jitter15ms": {
+          "received": 300,
+          "dropped": 0,
+          "delayed": 300
+        },
+        "outage3s": {
+          "received": 150,
+          "dropped": 150,
+          "delayed": 0
+        },
+        "recovery": {
+          "received": 673,
+          "dropped": 0,
+          "delayed": 0
+        }
+      },
+      "nonfinite": 0,
+      "recoverySilentBlocks": 0
+    }
+  },
+  "nativeSuites": 10,
+  "offlineChecks": 21,
+  "steinbergValidatorChecks": 537,
+  "pluginval": {
+    "strictness": 10,
+    "repeats": 2
+  },
+  "tsanLifecycle": {
+    "seconds": 42.463,
+    "suites": 4
+  },
+  "reaper": {
+    "instances": 8,
+    "pairs": 4,
+    "windows": {
+      "result.txt": {
+        "1": 21,
+        "2": 21,
+        "3": 21,
+        "4": 21
+      },
+      "result-restart.txt": {
+        "1": 13,
+        "2": 13,
+        "3": 13,
+        "4": 13
+      }
+    }
+  },
+  "playbackQuality": {
+    "performance": {
+      "play": {
+        "wallSeconds": 27.1,
+        "cpuSeconds": 0.73,
+        "peakRssBytes": 23478272
+      },
+      "seed": {
+        "wallSeconds": 34.09,
+        "cpuSeconds": 1.13,
+        "peakRssBytes": 23756800
+      }
+    },
+    "medianResidualLimit": 1,
+    "continuousWarmup": true,
+    "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+    "latencyMs": {
+      "median": 63.71054099872708,
+      "p95": 64.2207907512784,
+      "min": 62.44983337819576,
+      "max": 64.80225035920739,
+      "spread": 2.352416981011629,
+      "markers": 8
+    },
+    "thdnPercent": [
+      {
+        "median": 0.30912210044645433,
+        "p95": 0.47404803566227594,
+        "windows": 232
+      },
+      {
+        "median": 0.758218831340027,
+        "p95": 0.990699054174061,
+        "windows": 232
+      }
+    ],
+    "maxAdjacentStep": [
+      0.0331801138818264,
+      0.04992705583572388
+    ],
+    "silentBlocks": 0,
+    "totalBlocks": 3000,
+    "nonfinite": 0,
+    "clippedBlocks": 0
+  },
+  "baselinePlaybackQuality": {
+    "performance": {
+      "play": {
+        "wallSeconds": 27.1,
+        "cpuSeconds": 0.77,
+        "peakRssBytes": 23478272
+      },
+      "seed": {
+        "wallSeconds": 34.1,
+        "cpuSeconds": 1.22,
+        "peakRssBytes": 23625728
+      }
+    },
+    "medianResidualLimit": 1,
+    "continuousWarmup": true,
+    "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+    "latencyMs": {
+      "median": 61.71745806932449,
+      "p95": 61.945208348333836,
+      "min": 61.22524989768863,
+      "max": 62.431832775473595,
+      "spread": 1.2065828777849674,
+      "markers": 7
+    },
+    "thdnPercent": [
+      {
+        "median": 0.43861814232103574,
+        "p95": 0.5994535458719445,
+        "windows": 232
+      },
+      {
+        "median": 0.6687242742569705,
+        "p95": 1.0696847122178756,
+        "windows": 232
+      }
+    ],
+    "maxAdjacentStep": [
+      0.03304569981992245,
+      0.0499405600130558
+    ],
+    "silentBlocks": 0,
+    "totalBlocks": 3000,
+    "nonfinite": 0,
+    "clippedBlocks": 0
+  },
+  "sanitizerScope": {
+    "builtDependencies": true,
+    "prebuiltOpenSsl": false,
+    "suppressions": false,
+    "asanLeakDetection": false
+  },
+  "limitations": [
+    "Synthetic same-machine measurements, no subjective listening or physical device/clock validation",
+    "Tone predictor is not a perceptual model for arbitrary content",
+    "No full WAN/NAT or network-loss inaudibility guarantee"
+  ]
+}

@@ -193,3 +193,35 @@ Run it under `node tools/tests/guarded_run.js npm run test:media-faults`.
 instances in four independent live Seed/Play pairs. Every pair must have audio
 in each measured window, including after bypass and project reload. The default
 remains one pair; use the same count when checking a fresh-process reopen.
+
+## Seeded fuzz and individual click checks
+
+`npm run test:signaling-fuzz` sends 2,004 seeded mutations/boundary inputs to each
+mode through an owned loopback signaling server. It checks subsequent valid
+negotiation, reconnect, controller error status, finite audio and normal teardown.
+Peer identities are constrained so the separate limits test remains responsible
+for peer-cap exhaustion. Set `WEBRTC_FUZZ_SEED` to replay another corpus. This
+test is also part of `test:hardening`. No malformed traffic reaches public servers.
+`WEBRTC_CLI_HOST_MONITOR_STATUS=1` makes the headless host poll status outside
+`process()`, using the same message as the editor's GUI timer.
+
+The native fuzz test adds 3,014 actual saved-state cases, asserting atomic
+rejection and canonical save/restore for both VST interfaces. Use
+`WEBRTC_FUZZ_STATE_ONLY=1` for just that short corpus. The audio impairment suite
+also feeds 5,000 mutated/random Opus payloads to the production decoder, checking
+finite output, bounded queues and recovery with valid packets. This is after the
+SRTP authentication boundary, not a test that corrupted network packets bypass
+authentication.
+
+`npm run test:audio-clicks` runs a 32-second captured stereo tone with signaling
+interruption. After startup it examines every sample, including host block
+boundaries, using the sinusoid's second-order prediction residual to detect
+isolated spikes and phase jumps. Its offline tests inject deliberate defects to
+verify sensitivity. Captures, `clicks.json` and a five-second `received-stereo.wav`
+remain in the reported `build/test-tools/audio-soak-*` directory. This objective
+test does not replace listening to speech/music or testing physical audio devices.
+
+```bash
+node tools/tests/guarded_run.js npm run test:signaling-fuzz
+node tools/tests/guarded_run.js npm run test:audio-clicks
+```

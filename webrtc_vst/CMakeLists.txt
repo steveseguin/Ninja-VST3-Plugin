@@ -189,6 +189,7 @@ if(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" OR
 endif()
 
 FetchContent_MakeAvailable(nlohmann_json libdatachannel ixwebsocket opus)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PatchDatachannelCallbacks.cmake")
 
 if(_webrtc_apple_arm64)
     # Opus 1.5.2's NEON declarations also need these flags when runtime

@@ -612,6 +612,10 @@ int main(int argc, char** argv) {
         capture.open(path, std::ios::binary | std::ios::out | std::ios::trunc);
         if (!capture) { std::cerr << "Cannot open owned capture file\n"; return 1; }
     }
+    const bool monitorStatus = std::getenv("WEBRTC_CLI_HOST_MONITOR_STATUS") != nullptr;
+    Steinberg::FUnknownPtr<Steinberg::Vst::IConnectionPoint> statusConnection(component);
+    auto nextStatusPoll = std::chrono::steady_clock::now();
+    std::string lastStatus;
     double windowEnergy[2]{}, previousSample[2]{}, callbackMaxUs = 0;
     size_t crossings[2]{}, windowFrames = 0, windowBlocks = 0, silentBlocks = 0, nonfinite = 0;
 
@@ -660,6 +664,20 @@ int main(int argc, char** argv) {
             std::cerr << "process call failed at iteration " << iteration << "\n";
             processingFailed = true;
             break;
+        }
+        if (monitorStatus && controller && statusConnection && std::chrono::steady_clock::now() >= nextStatusPoll) {
+            // Headless hosts have no GUI timer loop. Poll on the host thread,
+            // outside process(), using the same message as the editor timer.
+            Steinberg::Vst::HostMessage poll;
+            poll.setMessageID("PollStatus");
+            statusConnection->notify(&poll);
+            Steinberg::Vst::String128 text{};
+            const auto normalized = controller->getParamNormalized(webrtc_vst::kParamStatus);
+            if (controller->getParamStringByValue(webrtc_vst::kParamStatus, normalized, text) == Steinberg::kResultOk) {
+                const auto status = string128ToAscii(text);
+                if (status != lastStatus) { std::cout << "[status] " << status << std::endl; lastStatus = status; }
+            }
+            nextStatusPoll = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
         }
         if (capture && iteration < static_cast<int>(kSampleRate * 120 / kBlockSize) && !outputBuses.empty()) {
             // Native-endian records: double monotonic block timestamp (seconds),

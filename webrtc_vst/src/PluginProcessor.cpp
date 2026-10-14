@@ -1,3 +1,4 @@
+#include "DiagnosticLog.h"
 #include "PluginProcessor.h"
 #include "AudioWorkerWait.h"
 #include "ConfigState.h"
@@ -86,7 +87,7 @@ WebRTCProcessor::WebRTCProcessor()
                [logToStdout = shouldLogToStdout()](const std::string& line) {
                    SMTG_DBPRT1("[WebRTC] %s\n", line.c_str());
                    if (logToStdout) {
-                       std::cout << "[WebRTC] " << line << std::endl;
+                       writeDiagnosticLine("[WebRTC] " + line);
                    }
                },
                [this](const PluginConfig& sanitized) {
@@ -246,9 +247,8 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
     }
 
     if (shouldLogToStdout()) {
-        std::cout << "[WebRTC] startSession requested"
-                  << " mode=" << (config.mode == ConnectionMode::Publish ? "Publish" : "Play")
-                  << std::endl;
+        writeDiagnosticLine(std::string("[WebRTC] startSession requested mode=") +
+                            (config.mode == ConnectionMode::Publish ? "Publish" : "Play"));
     }
 
     const double sampleRate = activeSampleRate_;
@@ -265,7 +265,7 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
     session_.start(config, sampleRate, channels, static_cast<size_t>(activeMaxHostBlock_));
     sessionActive_.store(true, std::memory_order_release);
     if (shouldLogToStdout()) {
-        std::cout << "[WebRTC] sessionActive=true" << std::endl;
+        writeDiagnosticLine("[WebRTC] sessionActive=true");
     }
     configDirty_.store(false, std::memory_order_release);
 }
@@ -273,7 +273,7 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
 void WebRTCProcessor::stopSession() {
     sessionActive_.store(false, std::memory_order_release);
     if (shouldLogToStdout()) {
-        std::cout << "[WebRTC] sessionActive=false (stopSession)" << std::endl;
+        writeDiagnosticLine("[WebRTC] sessionActive=false (stopSession)");
     }
     std::lock_guard<std::mutex> workLock(audioWorkMutex_);
     session_.stop();

@@ -59,7 +59,15 @@ public:
         if (numBytesRead) *numBytesRead = toRead;
         return kResultOk;
     }
-    tresult PLUGIN_API write(void*, int32, int32*) override { return kNotImplemented; }
+    tresult PLUGIN_API write(void* buffer, int32 count, int32* written) override {
+        if (count < 0 || pos_ < 0) return kInvalidArgument;
+        data_.resize(std::max(data_.size(), static_cast<size_t>(pos_ + count)));
+        if (count) std::memcpy(data_.data() + pos_, buffer, static_cast<size_t>(count));
+        pos_ += count;
+        if (written) *written = count;
+        return kResultOk;
+    }
+    const std::string& contents() const { return data_; }
     tresult PLUGIN_API seek(int64 pos, int32 mode, int64* result) override {
         if (mode == kIBSeekSet) pos_ = static_cast<int32>(pos);
         else if (mode == kIBSeekCur) pos_ += static_cast<int32>(pos);
@@ -228,6 +236,31 @@ public:
         }
     }
 
+    bool exerciseState(const std::string& text, bool mustReject, size_t& accepted) {
+        // Test the exported VST interfaces, including rollback on rejection and
+        // canonical save/restore, independently for processor and controller.
+        auto exercise = [&](auto* target, auto apply) {
+            StringStream before("");
+            if (target->getState(&before) != kResultOk) return false;
+            StringStream input(text);
+            const bool ok = apply(&input) == kResultOk;
+            if (mustReject && ok) return false;
+            StringStream after("");
+            if (target->getState(&after) != kResultOk) return false;
+            if (!ok && after.contents() != before.contents()) return false;
+            if (ok) {
+                ++accepted;
+                StringStream restore(after.contents());
+                if (apply(&restore) != kResultOk) return false;
+                StringStream roundTrip("");
+                if (target->getState(&roundTrip) != kResultOk || roundTrip.contents() != after.contents()) return false;
+            }
+            return true;
+        };
+        return exercise(component_.get(), [&](IBStream* s) { return component_->setState(s); }) &&
+            exercise(controller_.get(), [&](IBStream* s) { return controller_->setComponentState(s); });
+    }
+
     // Process one block, optionally injecting parameter changes.
     bool processBlock(ParamChanges* changes = nullptr) {
         if (!processor_ || !active_) {
@@ -276,6 +309,9 @@ public:
         if (result != kResultOk) {
             err_ = "process() failed";
             return false;
+        }
+        for (const auto& channel : outputBufs_) for (float value : channel) {
+            if (!std::isfinite(value)) { err_ = "Nonfinite audio output"; return false; }
         }
         return true;
     }
@@ -691,6 +727,53 @@ TestResult test_setup_processing_storm(const std::string& path) {
             true, "", dt};
 }
 
+// Seeded byte/structure mutations through the real loaded plugin. No session is
+// activated: malformed saved state must never cause network traffic.
+TestResult test_saved_state_mutations(const std::string& pluginPath) {
+    const auto start = std::chrono::steady_clock::now();
+    FuzzHost host(pluginPath);
+    if (!host.load()) return {"SavedStateMutation", false, host.err(), 0};
+    const uint32_t seed = std::getenv("WEBRTC_FUZZ_SEED")
+        ? static_cast<uint32_t>(std::stoul(std::getenv("WEBRTC_FUZZ_SEED"))) : 0x56444f;
+    std::mt19937 rng(seed);
+    size_t accepted = 0, cases = 0;
+    const std::vector<std::string> rejected = {
+        "null", "[]", "true", "42", "{", std::string(16385, ' '),
+        std::string(40, '[') + "0" + std::string(40, ']'),
+        R"({"streamId":"changed","password":[]})",
+        R"({"mode":"play","modeNormalized":1})",
+        R"({"mode":"seed","modeNormalized":-1})",
+        R"({"modeNormalized":1e999})", R"({"password":"\ud800"})",
+        R"({"streamId":"bad\u0000id"})", R"({"handshakeUrl":"file:///tmp/test"})"
+    };
+    for (const auto& input : rejected) {
+        if (!host.exerciseState(input, true, accepted))
+            return {"SavedStateMutation", false, "Invalid-state rejection/rollback failed case " + std::to_string(cases), 0};
+        ++cases;
+    }
+    const std::vector<std::string> corpus = {
+        R"({"mode":"play","modeNormalized":0,"streamId":"owned","password":"off"})",
+        R"({"mode":"seed","modeNormalized":1,"roomName":"owned","salt":"salt"})",
+        R"({"webBaseUrl":"https://vdo.ninja/","handshakeUrl":"ws://127.0.0.1:9/"})",
+        R"({"password":"é🔊","streamId":"owned"})", "{}"
+    };
+    for (size_t n = 0; n < 3000; ++n) {
+        auto input = corpus[rng() % corpus.size()];
+        // Retain unmutated cases to exercise successful restores too.
+        if (n % 10) for (size_t k = 1 + rng() % 12; k; --k) {
+            const auto at = rng() % (input.size() + 1);
+            if (at < input.size() && rng() % 2) input.erase(at, 1);
+            else input.insert(input.begin() + at, static_cast<char>(rng() & 255));
+        }
+        if (!host.exerciseState(input, false, accepted))
+            return {"SavedStateMutation", false, "Rollback/round-trip failed seed=" + std::to_string(seed) + " case=" + std::to_string(n), 0};
+        ++cases;
+    }
+    return {"SavedStateMutation", true, std::to_string(cases) + " cases, " + std::to_string(accepted) +
+        " accepted interface calls; seed=" + std::to_string(seed),
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()};
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -734,13 +817,18 @@ int main(int argc, char** argv) {
         results.push_back(r);
     };
 
-    constexpr int kTotal = 6;
+    if (std::getenv("WEBRTC_FUZZ_STATE_ONLY")) {
+        run(test_saved_state_mutations, 1, 1);
+        return failed ? 1 : 0;
+    }
+    constexpr int kTotal = 7;
     run(test_mode_toggle_while_streaming, 1, kTotal);
     run(test_mode_toggle_every_block, 2, kTotal);
     run(test_reconnect_during_streaming, 3, kTotal);
     run(test_duplicate_stream_id, 4, kTotal);
     run(test_mode_toggle_live, 5, kTotal);
     run(test_setup_processing_storm, 6, kTotal);
+    run(test_saved_state_mutations, 7, kTotal);
 
     std::cout << "\n" << std::string(60, '=') << std::endl;
     std::cout << "FUZZ TEST SUMMARY" << std::endl;

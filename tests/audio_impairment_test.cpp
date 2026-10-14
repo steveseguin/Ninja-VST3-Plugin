@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <numbers>
+#include <random>
 #include <stdexcept>
 
 namespace webrtc_vst {
@@ -215,6 +216,34 @@ void checkConcurrentReceiveAndPull() {
     require(valid, "Concurrent receive/pull produced invalid audio or exceeded the buffer bound");
 }
 
+void checkMalformedOpusRecovery() {
+    Receiver receiver;
+    const auto valid = encode(2, 100);
+    std::mt19937 random(0x56444f);
+    for (size_t i=0; i<5000; ++i) {
+        Packet bytes = i % 2 ? valid[i % valid.size()] : Packet(random() % 1501);
+        for (size_t n=0; n<bytes.size(); ++n)
+            if (i % 2 == 0 || random() % 8 == 0) bytes[n] = static_cast<unsigned char>(random());
+        if (i % 7 == 0) bytes.resize(bytes.size() / 2);
+        // Either rejection or a finite decode is valid; arbitrary bytes can
+        // encode legal Opus. This boundary is after SRTP authentication.
+        (void)Access::deliver(receiver.session, "a", bytes);
+        for (float value : receiver.pull(256)) require(std::isfinite(value), "Malformed Opus produced nonfinite output");
+        require(Access::available(receiver.session,"a") <= 2048, "Malformed Opus exceeded ring bound");
+    }
+    double energy = 0;
+    size_t samples = 0;
+    for (size_t i=0; i<valid.size(); ++i) {
+        receiver.deliver(valid[i]);
+        const auto audio = receiver.pull(960);
+        if (i >= 80) for (float value : audio) {
+            require(std::isfinite(value) && std::abs(value)<.5f,"Malformed Opus poisoned subsequent valid audio");
+            energy += value*value; ++samples;
+        }
+    }
+    require(std::sqrt(energy/samples)>.08,"Audio did not recover after malformed Opus");
+}
+
 nlohmann::json simulate(const std::string& scenario, size_t block) {
     constexpr int count = 500;
     const auto packets = encode(2, count);
@@ -280,6 +309,7 @@ int main(int argc, char** argv) {
     check("arrival during partially consumed concealment", checkRecoveryTail);
     check("independent peer concealment", checkPeerIsolation);
     check("concurrent receive and pull remain finite and bounded", checkConcurrentReceiveAndPull);
+    check("5000 malformed Opus payloads remain bounded and recover", checkMalformedOpusRecovery);
     for (double rate : {8000., 16000., 22050., 44100., 48000., 88200., 96000., 192000., 384000.})
         for (int channels : {1, 2})
             for (size_t block : {32, 64, 128, 256, 512, 1024, 4096}) {

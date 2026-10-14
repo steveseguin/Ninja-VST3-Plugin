@@ -95,6 +95,23 @@ client out under lock, then stops and joins its worker outside the lock. Peer
 callbacks are detached, audio contexts marked inactive, peers closed, and codecs
 released. Shared audio-context captures keep decoder storage alive while held.
 
+Peer retirement removes routing entries and marks audio inactive under the
+session lock. A joined cleanup worker resets RTC/track/datachannel callbacks and
+closes peers outside that lock and outside RTC callbacks. Resetting a synchronized
+callback under the session lock can deadlock against an ICE callback waiting for
+that same lock; seeded signaling fuzz reproduced this during rapid replacement.
+New peer creation is refused temporarily when 16 retirements are outstanding,
+bounding retained resources while active peers continue. Shutdown drains and
+joins cleanup before permitting another session or destroying its owner.
+
+The pinned libdatachannel stored-callback wrapper also needs synchronized
+assignment: its implicit derived assignment otherwise copies pending-event
+storage outside the base lock during concurrent reset. CMake applies the narrow,
+idempotent patch in `webrtc_vst/cmake/PatchDatachannelCallbacks.cmake`.
+`CallbackAssignmentTest` and seeded signaling fuzz exercise this under TSan.
+Optional plugin console diagnostics use one stdio write per line so they do not
+mutate the host's shared `std::cout` formatting state from worker threads.
+
 An early shutdown-flag check does not cancel callbacks already in flight.
 Likewise, copying a raw codec pointer and releasing its lock does not make later
 use safe. Changes to callback ownership need live teardown stress and sanitizer

@@ -551,71 +551,54 @@ WebRTCSession::PeerKey WebRTCSession::makePeerKey(const std::string& uuid, const
     return uuid + ":" + session;
 }
 
+// Caller holds mutex_. Remove peers from routing immediately, but never reset
+// synchronized RTC callbacks under that lock or from one of those callbacks.
 void WebRTCSession::resetAllPeerConnections() {
-    log("resetAllPeerConnections() - closing " + std::to_string(peerSessions_.size()) + " peer connections");
-
-    for (auto& [key, session] : peerSessions_) {
-        if (session.audioContext) {
-            session.audioContext->active.store(false, std::memory_order_release);
-        }
-        if (session.connection) {
-            try {
-                // Clear all callbacks before closing to prevent use-after-free
-                session.connection->onStateChange(nullptr);
-                session.connection->onGatheringStateChange(nullptr);
-                session.connection->onLocalDescription(nullptr);
-                session.connection->onLocalCandidate(nullptr);
-                session.connection->onTrack(nullptr);
-                session.connection->onDataChannel(nullptr);
-                session.connection->close();
-            } catch (...) {
-                // Ignore exceptions during cleanup
-            }
-        }
-        // Clear track references
-        session.localAudioTrack.reset();
-        session.remoteAudioTrack.reset();
-        session.dataChannel.reset();
-        session.rtpConfig.reset();
-    }
-    peerSessions_.clear();
+    while (!peerSessions_.empty()) closePeerSession(peerSessions_.begin()->first);
     sessionByUuid_.clear();
     pendingGlobalIce_.clear();
-
-    log("resetAllPeerConnections() - complete");
 }
 
 void WebRTCSession::closePeerSession(const PeerKey& key) {
     auto it = peerSessions_.find(key);
-    if (it == peerSessions_.end()) {
-        return;
-    }
-
-    if (it->second.audioContext) {
+    if (it == peerSessions_.end()) return;
+    if (it->second.audioContext)
         it->second.audioContext->active.store(false, std::memory_order_release);
-    }
-
-    if (it->second.connection) {
-        try {
-            // Prevent re-entrant callbacks while tearing down under session lock.
-            it->second.connection->onStateChange(nullptr);
-            it->second.connection->onGatheringStateChange(nullptr);
-            it->second.connection->onLocalDescription(nullptr);
-            it->second.connection->onLocalCandidate(nullptr);
-            it->second.connection->onTrack(nullptr);
-            it->second.connection->onDataChannel(nullptr);
-            it->second.connection->close();
-        } catch (...) {
-            // Ignore teardown exceptions.
-        }
-    }
-
-    it->second.localAudioTrack.reset();
-    it->second.remoteAudioTrack.reset();
-    it->second.dataChannel.reset();
-    it->second.rtpConfig.reset();
     sessionByUuid_.erase(it->second.uuid);
+    {
+        std::lock_guard<std::mutex> lock(peerCleanupMutex_);
+        retiredPeers_.push_back(std::move(it->second));
+        pendingPeerCleanup_.fetch_add(1, std::memory_order_relaxed);
+    }
     peerSessions_.erase(it);
+    peerCleanupReady_.notify_one();
+}
+
+void WebRTCSession::peerCleanupMain() {
+    for (;;) {
+        PeerSession retired;
+        {
+            std::unique_lock<std::mutex> lock(peerCleanupMutex_);
+            peerCleanupReady_.wait(lock, [this] { return peerCleanupStopping_ || !retiredPeers_.empty(); });
+            if (retiredPeers_.empty()) return;
+            retired = std::move(retiredPeers_.front());
+            retiredPeers_.pop_front();
+        }
+        // No session/queue lock is held. Reset waits for in-flight callbacks,
+        // which can now acquire mutex_, observe the removed peer and return.
+        if (retired.connection) {
+            retired.connection->resetCallbacks();
+            try { retired.connection->close(); }
+            catch (...) { log("Peer close failed during cleanup"); }
+        }
+        for (const auto& track : {retired.localAudioTrack, retired.remoteAudioTrack}) if (track) {
+            track->onFrame(nullptr);
+            track->resetCallbacks();
+        }
+        if (retired.dataChannel) retired.dataChannel->resetCallbacks();
+        retired = {};
+        pendingPeerCleanup_.fetch_sub(1, std::memory_order_relaxed);
+    }
 }
 
 WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& uuid,
@@ -627,6 +610,13 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
     auto mapIt = peerSessions_.find(key);
     if (mapIt != peerSessions_.end()) {
         return &mapIt->second;
+    }
+
+    // Bound retired resources during hostile replacement bursts. Existing active
+    // peers continue processing while the cleanup worker catches up.
+    if (pendingPeerCleanup_.load(std::memory_order_relaxed) >= kMaxPeerSessions) {
+        emitStatus("Peer cleanup busy; retrying");
+        return nullptr;
     }
 
     auto existing = sessionByUuid_.find(uuid);
@@ -1241,11 +1231,13 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                 log("Signaling connection closed");
                 bool notifyDisconnect = false;
                 bool preservePeers = false;
+                bool connectedPeer = false;
                 {
                     std::lock_guard<SpinLock> innerLock(mutex_);
                     notifyDisconnect = started_;
                     const bool hadPeers = !peerSessions_.empty();
                     preservePeers = hadPeers;
+                    connectedPeer = isConnectedLocked();
                     if (!preservePeers) {
                         resetAllPeerConnections();
                         roomJoined_ = false;
@@ -1257,9 +1249,10 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
                     receivingAudio_.store(false, std::memory_order_relaxed);
                 }
                 if (preservePeers) {
-                    log("Preserving active peer sessions after signaling disconnect");
+                    log("Preserving peer sessions after signaling disconnect");
                     if (notifyDisconnect) {
-                        emitStatus("Peer active; signaling disconnected");
+                        emitStatus(connectedPeer ? "Peer active; signaling disconnected" :
+                            (config_.enableAutoReconnect ? "Signaling disconnected; retrying" : "Signaling disconnected"));
                     }
 
                 } else if (notifyDisconnect) {
@@ -1283,6 +1276,8 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
 
         signalingClient_->connectAsync();
         started_ = true;
+        peerCleanupStopping_ = false;
+        peerCleanupThread_ = std::thread(&WebRTCSession::peerCleanupMain, this);
         shouldEmitConnecting = true;
         if (sanitizedStream.changed && configUpdateSink_) {
             sanitizedForCallback = config_;
@@ -1368,6 +1363,13 @@ void WebRTCSession::stop() {
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
     }
+
+    {
+        std::lock_guard<std::mutex> lock(peerCleanupMutex_);
+        peerCleanupStopping_ = true;
+    }
+    peerCleanupReady_.notify_one();
+    if (peerCleanupThread_.joinable()) peerCleanupThread_.join();
 
     log("WebRTCSession::stop() - complete");
 
@@ -1467,7 +1469,11 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 if (config_.mode == ConnectionMode::Publish &&
                     lowered.find("already in use") != std::string::npos) {
-                    publishingAudio_.store(false, std::memory_order_relaxed);
+                    {
+                        std::lock_guard<SpinLock> lock(mutex_);
+                        publishRejected_ = true;
+                        publishingAudio_.store(false, std::memory_order_relaxed);
+                    }
                     emitStatus("Error: Stream ID already in use");
                     log("Stream ID conflict — another publisher is already using this stream ID");
                 } else {
@@ -1812,6 +1818,7 @@ void WebRTCSession::announceRoleIfReady() {
     }
 
     if (config_.mode == ConnectionMode::Publish) {
+        publishRejected_ = false;
         log("announceRoleIfReady: sending publish request");
         nlohmann::json publishMessage = {
             {"request", "seed"},
@@ -1885,7 +1892,9 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
         return;
     }
 
-    if (!publishingAudio_.exchange(true, std::memory_order_acq_rel)) {
+    // Preserve a rejected-publish error until a fresh announcement. Preparing
+    // outgoing frames alone must not overwrite it with a success status.
+    if (!publishRejected_ && !publishingAudio_.exchange(true, std::memory_order_acq_rel)) {
         emitStatus("Publishing audio");
     }
 
