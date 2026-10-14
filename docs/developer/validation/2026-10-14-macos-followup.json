@@ -1,0 +1,154 @@
+{
+  "baseCommit": "523dc61",
+  "releaseBinarySha256": "52f6fb12ce43b7b58cc1828cf6b273e9834e10c16aa82a43ee4a0bef2c112a92",
+  "fixes": [
+    "SDK factory release atomic-result return",
+    "Test-host enumeration serialization; instance lifecycle remains concurrent"
+  ],
+  "nativeSuitesPassed": 9,
+  "steinbergExtensiveValidatorPassed": 537,
+  "pluginval": {
+    "strictness": 10,
+    "repeats": 2
+  },
+  "threadSanitizer": {
+    "instrumented": "Plugin, host, tests, built dependencies; prebuilt OpenSSL excluded",
+    "suppressions": false,
+    "lifecycleSeconds": 42.663,
+    "lifecycleSuites": 4,
+    "pluginSha256": "19dccff1f23e3027a7714328f9f2061e40dce36e773e3c8bcf391f3744b206e4",
+    "impairment": {
+      "partitionCases": 126,
+      "scenarios": 21,
+      "failedChecks": 0,
+      "checks": [
+        {
+          "name": "clean decode equals independent Opus decoder",
+          "passed": true
+        },
+        {
+          "name": "arrival during partially consumed concealment",
+          "passed": true
+        },
+        {
+          "name": "independent peer concealment",
+          "passed": true
+        },
+        {
+          "name": "concurrent receive and pull remain finite and bounded",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "mediaFaults": {
+    "release": {
+      "counts": {
+        "clean": {
+          "received": 401,
+          "dropped": 0,
+          "delayed": 0
+        },
+        "loss5pct": {
+          "received": 299,
+          "dropped": 14,
+          "delayed": 0
+        },
+        "jitter15ms": {
+          "received": 301,
+          "dropped": 0,
+          "delayed": 301
+        },
+        "outage3s": {
+          "received": 149,
+          "dropped": 149,
+          "delayed": 0
+        },
+        "recovery": {
+          "received": 669,
+          "dropped": 0,
+          "delayed": 0
+        }
+      },
+      "recoveryWindows": 8,
+      "recoverySilentBlocks": 0,
+      "recoveryMinRms": 0.177712,
+      "nonfinite": 0
+    },
+    "threadSanitizer": {
+      "counts": {
+        "clean": {
+          "received": 400,
+          "dropped": 0,
+          "delayed": 0
+        },
+        "loss5pct": {
+          "received": 300,
+          "dropped": 15,
+          "delayed": 0
+        },
+        "jitter15ms": {
+          "received": 301,
+          "dropped": 0,
+          "delayed": 301
+        },
+        "outage3s": {
+          "received": 149,
+          "dropped": 149,
+          "delayed": 0
+        },
+        "recovery": {
+          "received": 619,
+          "dropped": 0,
+          "delayed": 0
+        }
+      },
+      "recoveryWindows": 7,
+      "recoverySilentBlocks": 0,
+      "recoveryMinRms": 0.177722,
+      "nonfinite": 0
+    }
+  },
+  "reaper": {
+    "instances": 8,
+    "pairs": 4,
+    "initialWindowsPerPair": 21,
+    "restartWindowsPerPair": 13
+  },
+  "soak": {
+    "summary": {
+      "seconds": 1800,
+      "windows": 1795,
+      "steadyWindows": 1786,
+      "worstCallbackUs": 636.041,
+      "silentBlocks": 0,
+      "totalBlocks": 335768,
+      "minRms": 0.177708,
+      "maxFrequencyError": 0.665,
+      "nonfinite": 0,
+      "sampleRate": 48000,
+      "blockFrames": 256
+    },
+    "memory": [
+      {
+        "pid": 73928,
+        "settledKiB": 19744,
+        "lastKiB": 17216,
+        "peakKiB": 19760,
+        "mode": "seed"
+      },
+      {
+        "pid": 73933,
+        "settledKiB": 19440,
+        "lastKiB": 15584,
+        "peakKiB": 19456,
+        "mode": "play"
+      }
+    ]
+  },
+  "limitations": [
+    "Same-machine media; no independent physical audio clocks or WAN/NAT validation",
+    "RTP outage only; no complete ICE-network outage or bandwidth cap",
+    "Soak measures level/pitch/silence/nonfinite/callback time, not every waveform click"
+  ]
+}

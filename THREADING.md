@@ -100,8 +100,15 @@ Likewise, copying a raw codec pointer and releasing its lock does not make later
 use safe. Changes to callback ownership need live teardown stress and sanitizer
 coverage; do not infer safety merely from short smoke tests. The October macOS validation instruments the plugin and built dependencies
 with ASan/UBSan (prebuilt OpenSSL excluded), including repeated live signaling
-teardown. Full-stack TSan remains an explicit gap. See
-[the macOS report](docs/developer/MACOS_VALIDATION_2026_10_14.md).
+teardown. The follow-up also instruments the plugin and built dependencies with
+TSan for concurrent lifecycle and real relayed-media faults; prebuilt OpenSSL
+remains outside instrumentation. See [the initial macOS report](docs/developer/MACOS_VALIDATION_2026_10_14.md)
+and [the follow-up](docs/developer/MACOS_FOLLOWUP_2026_10_14.md).
+
+The plugin factory overrides SDK 3.8's `release()` to return the atomic decrement
+result. A second, plain refcount read can race another release, including one
+that destroys the factory. Test-host class enumeration is serialized because the
+SDK's UTF converter is shared; plugin instance lifecycle remains concurrent.
 
 ## Regression commands
 

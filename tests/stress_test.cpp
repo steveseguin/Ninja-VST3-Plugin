@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -49,7 +50,14 @@ public:
         }
 
         const VST3::Hosting::PluginFactory& factory = module_->getFactory();
-        auto classInfos = factory.classInfos();
+        // SDK enumeration uses a process-global mutable UTF converter. Keep
+        // that host bookkeeping serialized, while instance creation, init and
+        // teardown below remain concurrent (the behavior this test stresses).
+        static std::mutex enumerationMutex;
+        auto classInfos = [&] {
+            std::lock_guard<std::mutex> lock(enumerationMutex);
+            return factory.classInfos();
+        }();
         if (classInfos.empty()) {
             return false;
         }

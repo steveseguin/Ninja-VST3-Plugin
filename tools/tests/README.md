@@ -178,3 +178,18 @@ shutdown-race seed found during macOS sanitizer validation:
 WEBRTC_FUZZ_SEED=5653587 WEBRTC_EXTENDED_SECONDS=600 WEBRTC_GUARD_SECONDS=720 \
   node tools/tests/guarded_run.js npm run test:extended
 ```
+
+## Short transport and multi-instance checks
+
+`npm run test:media-faults` rewrites only its owned endpoints' IPv4 UDP ICE
+candidates to loopback relays. The relay passes STUN/DTLS/RTCP and impairs actual
+encrypted RTP: 5% packet loss, up to 15 ms jitter, then a three-second media
+outage. Counters require traffic in every phase, and measured stereo audio must
+recover after the outage. Signaling password encryption is off for candidate
+rewriting; DTLS/SRTP remains active. It does not modify system routing or firewalls.
+Run it under `node tools/tests/guarded_run.js npm run test:media-faults`.
+
+`WEBRTC_REAPER_TEST_PAIRS=4` makes `reaper_smoke.lua` exercise eight plugin
+instances in four independent live Seed/Play pairs. Every pair must have audio
+in each measured window, including after bypass and project reload. The default
+remains one pair; use the same count when checking a fresh-process reopen.

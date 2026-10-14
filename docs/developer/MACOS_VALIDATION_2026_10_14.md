@@ -2,7 +2,9 @@
 
 Tested on an Apple M1 MacBook Air, macOS 26.4.1, 8 GiB RAM. Changes build on
 `a077a60` / version 0.2.6, including its existing resampler and packet-loss fixes.
-This is development-build validation, not a new public release.
+This records the initial development-build validation, not a public release.
+A subsequent [short-test follow-up](MACOS_FOLLOWUP_2026_10_14.md) fixes a factory
+reference-count race and records the newer installed artifact.
 [Machine-readable measurements](validation/2026-10-14-macos-audio.json) include
 the retained failure metrics and the final artifact identities.
 

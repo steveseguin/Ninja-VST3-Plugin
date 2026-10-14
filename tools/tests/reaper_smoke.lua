@@ -6,6 +6,9 @@ local root = os.getenv('WEBRTC_REAPER_TEST_OUTPUT_DIR') or
   (assert(source:match("^(.*)/tools/tests/")) .. "/build/reaper-validation/")
 if root:sub(-1) ~= '/' then root = root .. '/' end
 reaper.RecursiveCreateDirectory(root, 0)
+local pairCount = tonumber(os.getenv('WEBRTC_REAPER_TEST_PAIRS') or '1')
+assert(pairCount and pairCount >= 1 and pairCount <= 8 and pairCount % 1 == 0, 'Use 1..8 pairs')
+local instanceCount = pairCount * 2
 local coldReopen = os.getenv('WEBRTC_REAPER_TEST_REOPEN') == '1'
 local log = assert(io.open(root .. (coldReopen and "result-restart.txt" or "result.txt"), "w"))
 local function report(text) log:write(text .. "\n"); log:flush() end
@@ -59,8 +62,11 @@ local tracks, effects = {}, {}
 if coldReopen then
   reaper.Main_openProject('noprompt:' .. root .. 'loopback.rpp')
   project = reaper.EnumProjects(-1)
-  tracks, effects = {reaper.GetTrack(project, 0), reaper.GetTrack(project, 1)}, {1, 0}
-  for i=1,2 do
+  for i=1,instanceCount do
+    tracks[i] = reaper.GetTrack(project, i-1)
+    effects[i] = tracks[i] and reaper.TrackFX_GetCount(tracks[i])-1 or -1
+  end
+  for i=1,instanceCount do
     assert(tracks[i], 'Missing saved track')
     checkIdentity(tracks[i], effects[i])
     assert(value(tracks[i], effects[i], 'Custom salt') == 'reaper-custom-salt', 'Saved salt changed')
@@ -69,21 +75,21 @@ if coldReopen then
   reaper.SetMediaTrackInfo_Value(reaper.GetMasterTrack(project), 'D_VOL', 0)
   report('PASS: saved project loaded in a fresh host process with settings intact')
 else
-for i=1,2 do
+for i=1,instanceCount do
   reaper.InsertTrackAtIndex(i-1, true)
   local track = reaper.GetTrack(project, i-1)
   tracks[i] = track
-  reaper.GetSetMediaTrackInfo_String(track, 'P_NAME', i == 1 and 'Seed tone' or 'Play return', true)
+  reaper.GetSetMediaTrackInfo_String(track, 'P_NAME', i % 2 == 1 and 'Seed tone' or 'Play return', true)
   -- Keep the real-time graph active throughout the test.
   reaper.CreateNewMIDIItemInProj(track, 0, 65, false)
-  if i == 1 then
+  if i % 2 == 1 then
     assert(reaper.TrackFX_AddByName(track, 'JS: synthesis/tonegenerator', false, -1) >= 0, 'Missing tone generator')
   end
   local fx = reaper.TrackFX_AddByName(track, 'VST3: VDO.Ninja WebRTC Bridge (Open Source)', false, -1)
   assert(fx >= 0, 'VDO.Ninja VST3 not found; rescan plugins first')
   effects[i] = fx
   checkIdentity(track, fx)
-  setState(track, fx, i == 1 and 'seed' or 'play', id)
+  setState(track, fx, i % 2 == 1 and 'seed' or 'play', id .. 'p' .. math.ceil(i/2))
   assert(value(track, fx, 'Custom salt') == 'reaper-custom-salt', 'Salt not restored')
   assert(value(track, fx, 'Web domain / URL') == 'https://studio.example.test/', 'Web URL not restored')
   report('PASS: instance ' .. i .. ' loaded with custom salt/domain')
@@ -95,6 +101,7 @@ reaper.OnPlayButton()
 local start, peak, ticks = reaper.time_precise(), 0, 0
 local phase, windowStart, windowPeak, windows = coldReopen and 2 or 1, 0, 0, 0
 local bypassed, restoredBypass, cycled = false, false, false
+local pairPeaks = {}
 local function poll()
   if reaper.EnumProjects(-1) ~= project then
     if reaper.ValidatePtr(project, 'ReaProject*') then reaper.Main_OnCommandEx(1016, 0, project) end
@@ -103,20 +110,23 @@ local function poll()
   local elapsed = reaper.time_precise() - start
   peak = math.max(peak, reaper.Track_GetPeakInfo(tracks[2], 0))
   windowPeak = math.max(windowPeak, reaper.Track_GetPeakInfo(tracks[2], 0))
+  for pair=1,pairCount do
+    pairPeaks[pair] = math.max(pairPeaks[pair] or 0, reaper.Track_GetPeakInfo(tracks[pair*2], 0))
+  end
   ticks = ticks + 1
   if ticks % 100 == 0 then report(string.format('elapsed=%.1f position=%.1f seed_peak=%.6f return_peak=%.6f seed_status=%s play_status=%s', elapsed, reaper.GetPlayPosition(), reaper.Track_GetPeakInfo(tracks[1],0), peak, tostring(value(tracks[1],effects[1],'Status')),tostring(value(tracks[2],effects[2],'Status')))) end
   if phase == 1 and elapsed >= 15 and not bypassed then
     bypassed = true
-    for i=1,2 do reaper.TrackFX_SetEnabled(tracks[i], effects[i], false) end
+    for i=1,instanceCount do reaper.TrackFX_SetEnabled(tracks[i], effects[i], false) end
   end
   if phase == 1 and elapsed >= 17 and not restoredBypass then
     restoredBypass = true
-    for i=1,2 do reaper.TrackFX_SetEnabled(tracks[i], effects[i], true) end
+    for i=1,instanceCount do reaper.TrackFX_SetEnabled(tracks[i], effects[i], true) end
     report('PASS: live bypass/reenable calls completed')
   end
   if elapsed >= 26 and not cycled then
     cycled = true
-    for i=1,2 do for cycle=1,5 do
+    for i=1,instanceCount do for cycle=1,5 do
       reaper.TrackFX_Show(tracks[i], effects[i], 3)
       reaper.TrackFX_Show(tracks[i], effects[i], 2)
     end end
@@ -127,9 +137,14 @@ local function poll()
     if windowStart >= 8 and (phase == 2 or windowStart >= 24 or elapsed < 15) then
       report(string.format('%s: phase=%d window=%.1f..%.1f peak=%.6f', windowPeak > 0.01 and 'PASS' or 'FAIL', phase, windowStart, elapsed, windowPeak))
       if windowPeak <= 0.01 then reaper.OnStopButton(); log:close(); error('Silent sustained DAW return window') end
+      for pair=1,pairCount do
+        report(string.format('Pair %d: window peak=%.6f', pair, pairPeaks[pair] or 0))
+        assert((pairPeaks[pair] or 0) > 0.01, 'Silent sustained DAW return for pair ' .. pair)
+      end
       windows = windows + 1
     end
     windowStart, windowPeak = elapsed, 0
+    pairPeaks = {}
   end
   if elapsed < 35 then reaper.defer(poll); return end
   reaper.OnStopButton()
@@ -149,9 +164,12 @@ local function poll()
   assert(value(restored, 0, 'Web domain / URL') == 'https://studio.example.test/', 'Saved URL changed')
   report('PASS: saved project reopened with custom settings intact')
   project = reaper.EnumProjects(-1)
-  tracks = {reaper.GetTrack(project, 0), restored}
-  effects = {1, 0}
-  for i=1,2 do checkIdentity(tracks[i], effects[i]) end
+  for i=1,instanceCount do
+    tracks[i] = reaper.GetTrack(project, i-1)
+    effects[i] = reaper.TrackFX_GetCount(tracks[i])-1
+    assert(value(tracks[i], effects[i], 'Custom salt') == 'reaper-custom-salt', 'Saved pair salt changed')
+  end
+  for i=1,instanceCount do checkIdentity(tracks[i], effects[i]) end
   phase, start, peak, windowStart, windowPeak = 2, reaper.time_precise(), 0, 0, 0
   reaper.SetEditCurPos(0, false, false)
   reaper.OnPlayButton()
