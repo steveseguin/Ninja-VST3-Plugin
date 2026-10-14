@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       publish:
-        description: Publish after verification and VirusTotal submission (otherwise keep the draft private)
+        description: Publish after verification and clean completed VirusTotal scans (otherwise keep the draft private)
         required: true
         default: false
         type: boolean
@@ -31,7 +31,7 @@ concurrency:
 jobs:
   publish:
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -80,7 +80,7 @@ jobs:
             trap - EXIT
           done
 
-      - name: Submit both verified notarized DMGs to VirusTotal before publication
+      - name: Require completed clean VirusTotal scans for both verified DMGs
         shell: bash
         env:
           VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY || secrets.VT_API_KEY }}
@@ -96,6 +96,26 @@ jobs:
             analysis_id=$(jq -er '.data.id' <<< "$response")
             # Keep analysis URLs in workflow logs, not public release notes.
             echo "Submitted $arch: https://www.virustotal.com/gui/file-analysis/$analysis_id"
+            completed=false
+            for attempt in {1..30}; do
+              sleep 20
+              analysis=$(curl --fail-with-body --silent --show-error --max-time 60 \
+                --retry 4 --retry-delay 20 \
+                --url "https://www.virustotal.com/api/v3/analyses/$analysis_id" \
+                --header "x-apikey: $VIRUSTOTAL_API_KEY")
+              status=$(jq -er '.data.attributes.status' <<< "$analysis")
+              echo "$arch analysis: $status"
+              if [[ "$status" == completed ]]; then
+                jq '.data.attributes.stats' <<< "$analysis"
+                # Fail closed on detections, missing results or no engines
+                # actually classifying the artifact. Do not publish on upload alone.
+                jq -e '.data.attributes.stats | .malicious == 0 and .suspicious == 0 and
+                  ((.harmless // 0) + (.undetected // 0) > 0)' <<< "$analysis" >/dev/null
+                completed=true
+                break
+              fi
+            done
+            [[ "$completed" == true ]] || { echo "VirusTotal scan did not complete for $arch" >&2; exit 1; }
           done
 
       - name: Publish the notarized Mac release without changing the latest Windows release
