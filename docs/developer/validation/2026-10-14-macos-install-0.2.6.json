@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-14T23:38:32.587050+00:00",
+  "releaseTag": "mac-v0.2.6",
+  "host": "REAPER 7.80 on Apple M1, macOS 26.4.1",
+  "installationPath": "~/Library/Audio/Plug-Ins/VST3/webrtc_vst.vst3",
+  "source": "Public website browser downloads; SHA-256 matched published release",
+  "gatekeeper": "Both DMGs accepted: Notarized Developer ID",
+  "quarantine": "Explicitly set on owned downloads and bundles, preserved through installation",
+  "architectures": {
+    "arm64": {
+      "execution": "native",
+      "dmgSha256": "02c54d5e74dddc136b5e241a8b6f727972e68116e0b1aa390bb436d7f0a531b9",
+      "signedBinarySha256": "b5b9431bf90a95b7802e2ed32566c51acdab1d16f3868f0fc7577448bd1d9a4b",
+      "journeys": {
+        "install": {
+          "passed": true,
+          "sustainedAudioWindows": 21,
+          "exactInstalledPathChecked": true,
+          "peakOwnedRssMiB": 253,
+          "minimumMemoryHeadroomPercent": 45
+        },
+        "freshHostReopen": {
+          "passed": true,
+          "sustainedAudioWindows": 13,
+          "exactInstalledPathChecked": true,
+          "peakOwnedRssMiB": 211,
+          "minimumMemoryHeadroomPercent": 43
+        }
+      }
+    },
+    "x86_64": {
+      "execution": "Rosetta",
+      "dmgSha256": "db0bea2dd04da47e131f80317f2d389053cc8461ed0aedad29c83333b3caedd3",
+      "signedBinarySha256": "2fec0608d6f8f2a6b34af15b38cba2e5fde32a27ed98e182a4f51ac3e985c431",
+      "journeys": {
+        "install": {
+          "passed": true,
+          "sustainedAudioWindows": 21,
+          "exactInstalledPathChecked": true,
+          "peakOwnedRssMiB": 191,
+          "minimumMemoryHeadroomPercent": 41
+        },
+        "freshHostReopen": {
+          "status": "not run",
+          "reason": "Admission wait stopped after five minutes below startup memory headroom; no host workload launched"
+        }
+      }
+    }
+  },
+  "installerFailures": {
+    "missingSource": "rejected; current installed binary unchanged",
+    "tamperedSignature": "rejected; current installed binary unchanged"
+  },
+  "emptyDestinationInstall": "passed; signed native ARM bundle left installed",
+  "backups": "Original local build and subsequently replaced signed builds preserved",
+  "dependencies": {
+    "arm64": [
+      "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+      "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+      "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa",
+      "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore",
+      "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate",
+      "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers",
+      "/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",
+      "/usr/lib/libexpat.1.dylib",
+      "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+      "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+      "/usr/lib/libSystem.B.dylib",
+      "/usr/lib/libc++.1.dylib",
+      "/System/Library/Frameworks/ColorSync.framework/Versions/A/ColorSync",
+      "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+      "/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText",
+      "/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO",
+      "/usr/lib/libobjc.A.dylib"
+    ],
+    "x86_64": [
+      "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+      "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+      "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa",
+      "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore",
+      "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate",
+      "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers",
+      "/System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL",
+      "/usr/lib/libexpat.1.dylib",
+      "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+      "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+      "/usr/lib/libSystem.B.dylib",
+      "/usr/lib/libc++.1.dylib",
+      "/System/Library/Frameworks/ColorSync.framework/Versions/A/ColorSync",
+      "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+      "/System/Library/Frameworks/CoreText.framework/Versions/A/CoreText",
+      "/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO",
+      "/usr/lib/libobjc.A.dylib"
+    ]
+  },
+  "limitations": [
+    "Intel tested under Rosetta, not a physical Intel Mac",
+    "Copy/install script tested, not Finder drag-and-drop",
+    "Existing Mac, not a fresh OS or oldest-supported-macOS test",
+    "Objective generated-tone audio checks, not physical speaker listening"
+  ]
+}

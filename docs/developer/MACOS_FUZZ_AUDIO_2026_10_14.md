@@ -225,6 +225,41 @@ which waited when concurrent work reduced startup memory headroom.
 | Apple Silicon | `02c54d5e74dddc136b5e241a8b6f727972e68116e0b1aa390bb436d7f0a531b9` |
 | Intel | `db0bea2dd04da47e131f80317f2d389053cc8461ed0aedad29c83333b3caedd3` |
 
+## Installation from public v0.2.6 downloads
+
+The DMGs downloaded through the public website were checked against the released
+SHA-256 manifest, mounted read-only and copied into the normal user VST3 folder
+using `scripts/install_macos.sh`. Both downloaded images passed signature,
+stapled-ticket and Gatekeeper checks. Quarantine was applied explicitly to the
+owned downloads and copied bundles, and preserved through installation.
+
+Apple Silicon and Intel were installed sequentially at
+`~/Library/Audio/Plug-Ins/VST3/webrtc_vst.vst3`. Fresh private REAPER profiles
+scanned only the standard plugin folders; every loaded instance asserted that
+exact installation path. Both builds passed the editor, bypass, encrypted
+Seed/Play audio and saved-project reload journey with 21 sustained audio windows
+each. Intel ran under Rosetta on the M1 Mac; this is not a separate Intel-machine
+or clean-Mac certification. The normal REAPER preferences were not modified.
+
+The installer also rejected a missing source and an intentionally modified signed
+bundle before replacing the installed plugin. Hashes confirmed the current
+installation was unchanged in both failure cases. Previous installations were
+preserved in the user's VDO.Ninja backup folder. Both binaries link only Apple
+system libraries, with no Homebrew runtime dependency. These checks used the
+copy/install script rather than Finder drag-and-drop.
+
+The Apple Silicon saved project also passed a full host quit/restart with its
+settings intact and 13 sustained audio windows. The additional Intel cold-restart
+run was not launched: its admission wait was stopped after five minutes below
+the startup memory threshold. The completed Intel journey includes an in-process
+saved-project reload. Resource guard limits were not relaxed.
+
+Finally, the Intel installation was moved into the backup folder and the signed
+Apple Silicon release was installed into the now-empty destination. Its binary
+hash, signature and preserved quarantine were verified. The native release is
+left installed. See the [installation record](validation/2026-10-14-macos-install-0.2.6.json);
+local logs and test projects are under `build/test-tools/install-026/`.
+
 ## Scope
 
 These are objective synthetic audio checks, not a subjective speaker/headphone
