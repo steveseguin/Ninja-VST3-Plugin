@@ -52,13 +52,27 @@ static NSView* nativeEditor(NSView* view) {
     return nil;
 }
 
+static void pumpEvents(NSTimeInterval seconds) {
+    NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    do {
+        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:deadline
+            inMode:NSDefaultRunLoopMode dequeue:YES];
+        if (event) [NSApp sendEvent:event];
+    } while ([deadline timeIntervalSinceNow] > 0);
+    [NSApp updateWindows];
+}
+
 static void clickEditor(NSWindow* window, NSPoint point) {
+    // Cocoa controls may track a mouse-down synchronously until mouse-up.
+    // Queue both events before dispatching either, as a real host would.
+    static NSInteger eventNumber = 0;
     for (const auto type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp}) {
         NSEvent* event = [NSEvent mouseEventWithType:type location:point modifierFlags:0
-            timestamp:0 windowNumber:[window windowNumber] context:nil eventNumber:1 clickCount:1 pressure:1];
-        [window sendEvent:event];
+            timestamp:[NSProcessInfo processInfo].systemUptime windowNumber:[window windowNumber]
+            context:nil eventNumber:++eventNumber clickCount:1 pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+        [NSApp postEvent:event atStart:NO];
     }
-    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    pumpEvents(0.05);
 }
 
 static NSString* fieldEditorText(NSWindow* window) {
@@ -69,8 +83,25 @@ static NSString* fieldEditorText(NSWindow* window) {
     return editor.string;
 }
 
+static bool waitForFieldEditor(NSWindow* window, NSString* expected = nil) {
+    NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:1];
+    bool waited = false;
+    do {
+        NSString* text = fieldEditorText(window);
+        if (text && (!expected || [text isEqualToString:expected])) {
+            if (waited) std::cout << "Waited for asynchronous Cocoa field-editor focus\n";
+            return true;
+        }
+        // VSTGUI creates/focuses Cocoa text editors with dispatch_after().
+        pumpEvents(0.01);
+        waited = true;
+    } while ([deadline timeIntervalSinceNow] > 0);
+    return false;
+}
+
 static bool typeField(NSWindow* window, NSPoint point, NSString* value) {
     clickEditor(window, point);
+    if (!waitForFieldEditor(window)) return false;
     id responder = [window firstResponder];
     if (![responder respondsToSelector:@selector(insertText:replacementRange:)]) return false;
     NSString* old = [fieldEditorText(window) copy];
@@ -80,10 +111,10 @@ static bool typeField(NSWindow* window, NSPoint point, NSString* value) {
     // Deliver Return through Cocoa so the field editor synchronizes its owning
     // NSTextField before VSTGUI reads it (direct mouse dispatch skips that step).
     NSEvent* enter = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
-        timestamp:0 windowNumber:[window windowNumber] context:nil characters:@"\r"
+        timestamp:[NSProcessInfo processInfo].systemUptime windowNumber:[window windowNumber] context:nil characters:@"\r"
         charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36];
     [window sendEvent:enter];
-    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    pumpEvents(0.05);
     return true;
 }
 
@@ -132,15 +163,20 @@ int main(int argc, char** argv) {
             }
             view->onSize(&rect);
             [window makeKeyAndOrderFront:nil];
+            NSDate* focusDeadline = [NSDate dateWithTimeIntervalSinceNow:5];
+            while ((!NSApp.active || !window.keyWindow) && [focusDeadline timeIntervalSinceNow] > 0)
+                pumpEvents(0.03);
+            if (!NSApp.active || !window.keyWindow) {
+                std::cerr << "Test host could not activate its Cocoa window\n";
+                return 1;
+            }
             [window makeFirstResponder:nativeEditor([window contentView])];
             view->onFocus(true); // Hosts must activate the VSTGUI frame for text commits.
-            [[NSNotificationCenter defaultCenter] postNotificationName:NSWindowDidBecomeKeyNotification object:window];
-            for (int tick = 0; tick < 10; ++tick) {
-                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.03]];
-            }
+            pumpEvents(0.3);
             for (int toggle = 0; toggle < 4; ++toggle) {
                 clickEditor(window, NSMakePoint(650, 310));
                 clickEditor(window, NSMakePoint(450, 222)); // web domain field
+                waitForFieldEditor(window, @"https://vdo.ninja/");
                 NSResponder* responder = [window firstResponder];
                 NSString* inputMethodText = nil;
                 if ([responder respondsToSelector:@selector(attributedSubstringForProposedRange:actualRange:)]) {
@@ -186,7 +222,7 @@ int main(int argc, char** argv) {
                         controller->setParamNormalized(tag, 0.0);
                     }
                 }
-                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+                pumpEvents(0.05);
                 method_setImplementation(opener, original);
                 const bool hostActionsInert = qrOpenRequests == 0 && [pasteboard changeCount] == pasteboardVersion;
                 if (!hostActionsInert) {

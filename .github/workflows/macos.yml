@@ -37,8 +37,8 @@ jobs:
         run: brew install cmake ninja
       - name: Build and run native suites
         run: bash scripts/build_macos.sh '${{ matrix.arch }}'
-      - name: Compare original and candidate Cocoa event loops
-        if: always()
+      - name: Compare original and candidate Cocoa editor checks
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -50,7 +50,7 @@ jobs:
           cmake --build "$build_dir" --target webrtc_vst_mac_editor_test
           baseline_failures=0
           for attempt in {1..5}; do
-            if "$test_bin" > "$build_dir/Testing/Temporary/editor-baseline-$attempt.log" 2>&1; then
+            if ctest --test-dir "$build_dir" -C Release -R '^MacEditorSmoke$' --output-on-failure > "$build_dir/Testing/Temporary/editor-baseline-$attempt.log" 2>&1; then
               echo "Baseline $attempt: PASS"
             else
               baseline_failures=$((baseline_failures + 1))
@@ -62,7 +62,7 @@ jobs:
           cp build/mac_editor_candidate.mm tests/mac_editor_smoke.mm
           cmake --build "$build_dir" --target webrtc_vst_mac_editor_test
           for attempt in {1..20}; do
-            if "$test_bin" > "$build_dir/Testing/Temporary/editor-candidate-$attempt.log" 2>&1; then
+            if ctest --test-dir "$build_dir" -C Release -R '^MacEditorSmoke$' --output-on-failure > "$build_dir/Testing/Temporary/editor-candidate-$attempt.log" 2>&1; then
               echo "Candidate $attempt: PASS"
             else
               cat "$build_dir/Testing/Temporary/editor-candidate-$attempt.log"
