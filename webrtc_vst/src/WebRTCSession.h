@@ -58,6 +58,8 @@ public:
     bool isConnected() const;
 
 private:
+    // Offline impairment tests exercise the same decoder and pull path as a track.
+    friend struct WebRTCSessionTestAccess;
     struct PendingIce {
         std::string type;
         nlohmann::json payload;
@@ -110,6 +112,10 @@ private:
     };
 
     using PeerKey = std::string;
+
+    bool decodeAndQueueAudio(const std::shared_ptr<PeerAudioContext>& ctx,
+                             int peerChannels, const uint8_t* encoded, size_t encodedSize,
+                             bool fromFrame, const char* sourceTag);
 
     void resetAllPeerConnections();
     PeerKey makePeerKey(const std::string& uuid, const std::string& session) const;

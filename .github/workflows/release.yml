@@ -77,6 +77,7 @@ jobs:
             webrtc_vst `
             webrtc_vst_resampler_test `
             webrtc_vst_peer_audio_buffer_test `
+            webrtc_vst_audio_impairment_test `
             webrtc_vst_settings_test `
             webrtc_vst_windows_editor_test `
             webrtc_vst_fuzz_test `

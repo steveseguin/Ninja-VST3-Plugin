@@ -9,6 +9,36 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+void checkInterleavedPush() {
+    for (int channels : {1, 2}) for (size_t capacity : {1, 2, 17, 2048}) {
+        webrtc_vst::AudioRingBuffer planar(capacity, channels), interleaved(capacity, channels);
+        size_t cursor = 0;
+        for (size_t count : {1, 5, 3, 0, 4096, 7, 11, 23}) {
+            std::vector<float> packed(count * channels), left(count), right(count);
+            for (size_t i = 0; i < count; ++i) {
+                left[i] = static_cast<float>(cursor + i);
+                right[i] = -left[i];
+                packed[i * channels] = left[i];
+                if (channels == 2) packed[i * channels + 1] = right[i];
+            }
+            cursor += count;
+            const float* source[] = {left.data(), right.data()};
+            planar.push(source, count, channels);
+            interleaved.pushInterleaved(packed.data(), count, channels);
+            require(planar.availableFrames(channels) == interleaved.availableFrames(channels),
+                    "Interleaved push retained a different frame count");
+            const size_t read = count % 13 + 1;
+            std::vector<float> aLeft(read), aRight(read), bLeft(read), bRight(read);
+            float* a[] = {aLeft.data(), aRight.data()};
+            float* b[] = {bLeft.data(), bRight.data()};
+            require(planar.pop(a, read, channels) == interleaved.pop(b, read, channels),
+                    "Interleaved ring returned a different frame count");
+            require(aLeft == bLeft && aRight == bRight,
+                    "Interleaved push changed sample order during wrap or overflow");
+        }
+    }
+}
+
 void checkRate(double rate) {
     const auto sizing = webrtc_vst::peerAudioBufferSizing(rate);
     const auto packetFrames = static_cast<size_t>(std::ceil(rate / 50.0));
@@ -50,6 +80,7 @@ void checkRate(double rate) {
 
 int main() {
     try {
+        checkInterleavedPush();
         for (double rate : {8000., 16000., 22050., 44100., 48000., 88200., 96000., 192000., 384000.})
             checkRate(rate);
         std::cout << "PASS: receive packet retention, stereo continuity, pre-fill and reset across host rates\n";

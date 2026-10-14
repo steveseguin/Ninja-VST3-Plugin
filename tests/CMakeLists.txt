@@ -2,6 +2,18 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+# Real Opus + production receive/pull code, with a deterministic packet clock.
+add_executable(webrtc_vst_audio_impairment_test audio_impairment_test.cpp
+    ../webrtc_vst/src/WebRTCSession.cpp
+    ../webrtc_vst/src/VDONinjaSignalingClient.cpp
+    ../webrtc_vst/src/AudioRingBuffer.cpp)
+target_link_libraries(webrtc_vst_audio_impairment_test PRIVATE
+    LibDataChannel::LibDataChannel ixwebsocket nlohmann_json::nlohmann_json
+    opus Threads::Threads OpenSSL::Crypto)
+target_compile_features(webrtc_vst_audio_impairment_test PRIVATE cxx_std_20)
+add_test(NAME AudioImpairmentTest COMMAND webrtc_vst_audio_impairment_test)
+set_tests_properties(AudioImpairmentTest PROPERTIES TIMEOUT 60 LABELS "unit;audio;network")
+
 add_executable(webrtc_vst_peer_audio_buffer_test peer_audio_buffer_test.cpp
     ../webrtc_vst/src/AudioRingBuffer.cpp)
 target_link_libraries(webrtc_vst_peer_audio_buffer_test PRIVATE Threads::Threads)

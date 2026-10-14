@@ -23,6 +23,23 @@ It requires a macOS GUI session. CTest enforces a 30-second process timeout.
 
 ## Receive-buffer and analyzer regressions
 
+`AudioImpairmentTest` feeds real Opus packets into the production session decoder
+and calls its production audio pull function on a virtual clock. Build target
+`webrtc_vst_audio_impairment_test`, then run it directly with an optional JSON
+output path, or use `ctest -C Release -R AudioImpairment --output-on-failure`.
+It checks 126 concealment partitions (8-384 kHz, mono/stereo, 32-4096 sample
+callbacks), clean output against an independent Opus decoder, arrival during
+a partly consumed concealed frame, independent peers, and concurrent receive
+and playback. Twenty-one ten-second scenarios cover loss, bursts, jitter,
+reordering, duplicates, and recovery after an outage. They check finite,
+unclipped output and recovery level; fixed-cadence loss cases also bound the
+amount of concealment generated. They do not certify fidelity under reordering.
+This is a media-boundary simulation, without ICE, SRTP, signaling, a DAW, or
+an operating-system packet scheduler. Both platform build workflows include it.
+
+The peer buffer test also compares interleaved and planar writes through wrap,
+overflow, and empty writes, preserving the policy of keeping the newest frames.
+
 `PeerAudioBufferUnitTest` checks production ring-buffer packet retention, stereo
 continuity, pre-fill and reset across 8–384 kHz. Build it with the
 `webrtc_vst_peer_audio_buffer_test` target. `npm run test:offline` exercises the

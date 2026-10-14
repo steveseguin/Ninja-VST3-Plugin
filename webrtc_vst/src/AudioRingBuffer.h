@@ -18,6 +18,9 @@ public:
     // Push planar input data into the buffer. `inputs` is an array of pointers to channel data.
     void push(const float* const* inputs, size_t frames, int channels);
 
+    // Queue decoded or concealed interleaved audio without a planar allocation.
+    void pushInterleaved(const float* input, size_t frames, int channels);
+
     // Copy interleaved frames out into planar output buffers. Returns frames actually written.
     size_t pop(float* const* outputs, size_t frames, int channels);
 

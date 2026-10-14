@@ -61,6 +61,29 @@ void AudioRingBuffer::push(const float* const* inputs, size_t frames, int channe
     size_ += totalSamples;
 }
 
+void AudioRingBuffer::pushInterleaved(const float* input, size_t frames, int channels) {
+    if (channels <= 0 || frames == 0) return;
+    std::lock_guard<SpinLock> lock(mutex_);
+    if (channelCount_ != channels) resetLocked(frameCapacity_, channels);
+    const size_t capacity = buffer_.size();
+    if (capacity == 0) return;
+
+    // Keep the newest complete frames, matching the planar push policy.
+    if (frames > frameCapacity_) {
+        input += (frames - frameCapacity_) * static_cast<size_t>(channels);
+        frames = frameCapacity_;
+    }
+    const size_t samples = frames * static_cast<size_t>(channels);
+    const size_t dropped = size_ + samples > capacity ? size_ + samples - capacity : 0;
+    readPos_ = (readPos_ + dropped) % capacity;
+    size_ -= dropped;
+    const size_t first = std::min(samples, capacity - writePos_);
+    std::copy_n(input, first, buffer_.data() + writePos_);
+    std::copy_n(input + first, samples - first, buffer_.data());
+    writePos_ = (writePos_ + samples) % capacity;
+    size_ += samples;
+}
+
 size_t AudioRingBuffer::pop(float* const* outputs, size_t frames, int channels) {
     if (channels <= 0 || frames == 0) {
         return 0;

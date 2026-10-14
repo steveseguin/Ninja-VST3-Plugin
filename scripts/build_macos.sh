@@ -39,7 +39,7 @@ cmake -S webrtc_vst -B "$build_dir" -G Ninja \
     -DWEBRTC_VST_BUILD_TESTS=ON "${dependency_args[@]}"
 cmake --build "$build_dir" --config Release --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-4}" \
     --target webrtc_vst webrtc_vst_cli_host webrtc_vst_settings_test webrtc_vst_resampler_test webrtc_vst_integration_test \
-        webrtc_vst_stress_test webrtc_vst_fuzz_test webrtc_vst_peer_audio_buffer_test
+        webrtc_vst_stress_test webrtc_vst_fuzz_test webrtc_vst_peer_audio_buffer_test webrtc_vst_audio_impairment_test
 cmake --build "$build_dir" --config Release --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-4}" \
     --target webrtc_vst_mac_editor_test
 ctest --test-dir "$build_dir" -C Release --output-on-failure --parallel 1

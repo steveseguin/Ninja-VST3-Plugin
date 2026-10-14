@@ -845,99 +845,8 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         int peerChannels = channelCount_;
 
         auto decodeAndQueue = [this, ctx, peerChannels](const uint8_t* encoded,
-                                     size_t encodedSize,
-                                     bool fromFrame,
-                                     const char* sourceTag) -> bool {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return false;
-            }
-            if (!ctx->active.load(std::memory_order_acquire)) {
-                return false;
-            }
-
-            int frameSamples = 0;
-            std::vector<float> decodeBuffer;
-            std::optional<std::string> telemetryLog;
-            {
-                std::lock_guard<SpinLock> lock(ctx->mutex);
-                if (!ctx->decoder) {
-                    return false;
-                }
-
-                if (!fromFrame && ctx->onFrameDecodeSeen) {
-                    return false;
-                }
-                decodeBuffer.resize(kFrameSizeSamples * static_cast<size_t>(peerChannels));
-                frameSamples = opus_decode_float(ctx->decoder,
-                                                 encoded,
-                                                 static_cast<opus_int32>(encodedSize),
-                                                 decodeBuffer.data(),
-                                                 static_cast<int>(kFrameSizeSamples),
-                                                 0);
-                if (frameSamples > 0) {
-                    ++ctx->frameCount;
-                    if (fromFrame) {
-                        ctx->onFrameDecodeSeen = true;
-                    }
-                    if (!ctx->loggedFirstFrame) {
-                        ctx->loggedFirstFrame = true;
-                        telemetryLog = std::string("First decoded audio frame received via ") + sourceTag;
-                    } else if ((ctx->frameCount % 1000) == 0) {
-                        telemetryLog = "Decoded audio frame count: " + std::to_string(ctx->frameCount);
-                    }
-                } else {
-                    ++ctx->decodeErrorCount;
-                    if (ctx->decodeErrorCount <= 3 || (ctx->decodeErrorCount % 100) == 0) {
-                        telemetryLog = std::string("Opus decode error ") + std::to_string(frameSamples) +
-                                       " via " + sourceTag +
-                                       ", total decode errors: " + std::to_string(ctx->decodeErrorCount);
-                    }
-                }
-            }
-            if (telemetryLog) {
-                log(*telemetryLog);
-            }
-            if (frameSamples <= 0) {
-                return false;
-            }
-            if (!receivingAudio_.exchange(true, std::memory_order_acq_rel)) {
-                emitStatus("Receiving audio");
-            }
-
-            std::vector<float> resampled;
-            size_t outFrames;
-            {
-                std::lock_guard<SpinLock> lock(ctx->mutex);
-                outFrames = ctx->resampler.processInterleaved(decodeBuffer.data(),
-                                                              static_cast<size_t>(frameSamples),
-                                                              peerChannels,
-                                                              resampled);
-            }
-            if (outFrames == 0 || resampled.empty()) {
-                return false;
-            }
-
-            std::vector<std::vector<float>> planar(peerChannels, std::vector<float>(outFrames));
-            for (size_t frame = 0; frame < outFrames; ++frame) {
-                for (int ch = 0; ch < peerChannels; ++ch) {
-                    planar[ch][frame] = resampled[frame * static_cast<size_t>(peerChannels) + ch];
-                }
-            }
-
-            std::vector<const float*> channelPtrs(peerChannels);
-            for (int ch = 0; ch < peerChannels; ++ch) {
-                channelPtrs[ch] = planar[ch].data();
-            }
-
-            ctx->buffer->push(channelPtrs.data(), outFrames, peerChannels);
-
-            // Mark pre-fill ready once buffer has enough data for smooth playback
-            if (!ctx->preFillReady.load(std::memory_order_relaxed)) {
-                if (ctx->buffer->availableFrames(peerChannels) >= ctx->preFillFrames) {
-                    ctx->preFillReady.store(true, std::memory_order_release);
-                }
-            }
-            return true;
+                                     size_t encodedSize, bool fromFrame, const char* sourceTag) {
+            return decodeAndQueueAudio(ctx, peerChannels, encoded, encodedSize, fromFrame, sourceTag);
         };
 
         track->onFrame([decodeAndQueue](rtc::binary data, rtc::FrameInfo) {
@@ -2062,6 +1971,58 @@ void WebRTCSession::pushOutgoingAudio(const float* const* inputs, size_t frames,
     }
 }
 
+bool WebRTCSession::decodeAndQueueAudio(const std::shared_ptr<PeerAudioContext>& ctx,
+                                         int peerChannels, const uint8_t* encoded,
+                                         size_t encodedSize, bool fromFrame, const char* sourceTag) {
+    if (shuttingDown_.load(std::memory_order_acquire) ||
+        !ctx->active.load(std::memory_order_acquire)) return false;
+
+    std::vector<float> decoded(kFrameSizeSamples * static_cast<size_t>(peerChannels));
+    std::vector<float> resampled;
+    std::optional<std::string> telemetryLog;
+    bool queued = false;
+    {
+        // Keep decoder state, resampler state and FIFO order together. Otherwise
+        // an underrun can advance PLC between decoding a packet and queuing it.
+        std::lock_guard<SpinLock> lock(ctx->mutex);
+        if (!ctx->decoder || !ctx->active.load(std::memory_order_acquire) ||
+            (!fromFrame && ctx->onFrameDecodeSeen)) return false;
+
+        const int frameSamples = opus_decode_float(ctx->decoder, encoded,
+            static_cast<opus_int32>(encodedSize), decoded.data(),
+            static_cast<int>(kFrameSizeSamples), 0);
+        if (frameSamples > 0) {
+            ++ctx->frameCount;
+            if (fromFrame) ctx->onFrameDecodeSeen = true;
+            if (!ctx->loggedFirstFrame) {
+                ctx->loggedFirstFrame = true;
+                telemetryLog = std::string("First decoded audio frame received via ") + sourceTag;
+            } else if ((ctx->frameCount % 1000) == 0) {
+                telemetryLog = "Decoded audio frame count: " + std::to_string(ctx->frameCount);
+            }
+            const size_t outFrames = ctx->resampler.processInterleaved(decoded.data(),
+                static_cast<size_t>(frameSamples), peerChannels, resampled);
+            if (outFrames > 0) {
+                ctx->buffer->pushInterleaved(resampled.data(), outFrames, peerChannels);
+                if (!ctx->preFillReady.load(std::memory_order_relaxed) &&
+                    ctx->buffer->availableFrames(peerChannels) >= ctx->preFillFrames) {
+                    ctx->preFillReady.store(true, std::memory_order_release);
+                }
+                queued = true;
+            }
+        } else {
+            ++ctx->decodeErrorCount;
+            if (ctx->decodeErrorCount <= 3 || (ctx->decodeErrorCount % 100) == 0) {
+                telemetryLog = std::string("Opus decode error ") + std::to_string(frameSamples) +
+                    " via " + sourceTag + ", total decode errors: " + std::to_string(ctx->decodeErrorCount);
+            }
+        }
+    }
+    if (telemetryLog) log(*telemetryLog);
+    if (queued && !receivingAudio_.exchange(true, std::memory_order_acq_rel)) emitStatus("Receiving audio");
+    return queued;
+}
+
 size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, int channels) {
     // Zero output buffers
     for (int ch = 0; ch < channels; ++ch) {
@@ -2101,84 +2062,50 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
     size_t maxFramesRead = 0;
 
     for (auto& source : peerSources) {
-        std::fill_n(pullTempSamplesScratch_.data(), tempSampleCount, 0.0f);
-
-        size_t peerFramesMixed = source.buffer->pop(pullTempChannelPtrsScratch_.data(), frames, channels);
-
-        // Sum buffered audio into output
-        for (int ch = 0; ch < channels; ++ch) {
-            for (size_t i = 0; i < peerFramesMixed; ++i) {
-                outputs[ch][i] += pullTempChannelPtrsScratch_[static_cast<size_t>(ch)][i];
-            }
-        }
-
-        // Generate Opus PLC on underrun to avoid abrupt silence.
-        if (peerFramesMixed < frames && source.context) {
-            size_t framesNeeded = frames - peerFramesMixed;
-            size_t mixOffset = peerFramesMixed;
-
-            while (framesNeeded > 0) {
-                int plcSamples = 0;
-                size_t plcOutFrames = 0;
-                bool plcLogged = false;
-                {
-                    std::lock_guard<SpinLock> ctxLock(source.context->mutex);
-                    if (!source.context->decoder || !source.context->active.load(std::memory_order_acquire)) {
-                        break;
-                    }
-
+        size_t peerFramesMixed = 0;
+        while (peerFramesMixed < frames) {
+            size_t framesRead = 0;
+            bool plcLogged = false;
+            {
+                std::lock_guard<SpinLock> ctxLock(source.context->mutex);
+                if (!source.context->active.load(std::memory_order_acquire)) break;
+                framesRead = source.buffer->pop(pullTempChannelPtrsScratch_.data(),
+                    frames - peerFramesMixed, channels);
+                if (framesRead == 0) {
+                    if (!source.context->decoder) break;
                     const size_t decodeSamples = kFrameSizeSamples * static_cast<size_t>(channelCount_);
-                    if (plcDecodeScratch_.size() < decodeSamples) {
-                        plcDecodeScratch_.resize(decodeSamples);
-                    }
+                    if (plcDecodeScratch_.size() < decodeSamples) plcDecodeScratch_.resize(decodeSamples);
+                    const int plcSamples = opus_decode_float(source.context->decoder, nullptr, 0,
+                        plcDecodeScratch_.data(), static_cast<int>(kFrameSizeSamples), 0);
+                    if (plcSamples <= 0) break;
+                    const size_t plcOutFrames = source.context->resampler.processInterleaved(
+                        plcDecodeScratch_.data(), static_cast<size_t>(plcSamples),
+                        channelCount_, plcResampledScratch_);
+                    if (plcOutFrames == 0) break;
 
-                    plcSamples = opus_decode_float(source.context->decoder,
-                                                   nullptr,
-                                                   0,
-                                                   plcDecodeScratch_.data(),
-                                                   static_cast<int>(kFrameSizeSamples),
-                                                   0);
-                    if (plcSamples <= 0) {
-                        break;
-                    }
-
-                    plcOutFrames = source.context->resampler.processInterleaved(plcDecodeScratch_.data(),
-                                                                                 static_cast<size_t>(plcSamples),
-                                                                                 channelCount_,
-                                                                                 plcResampledScratch_);
-                    if (plcOutFrames == 0 || plcResampledScratch_.empty()) {
-                        break;
-                    }
-
+                    // A DAW callback rarely consumes a whole 20 ms Opus frame.
+                    // Queue every sample so the tail survives for the next pull,
+                    // ahead of any subsequently decoded packet from this peer.
+                    source.buffer->pushInterleaved(plcResampledScratch_.data(), plcOutFrames, channelCount_);
                     ++source.context->plcFrameCount;
                     if (!source.context->loggedFirstPlcFrame) {
                         source.context->loggedFirstPlcFrame = true;
                         plcLogged = true;
                     }
+                    framesRead = source.buffer->pop(pullTempChannelPtrsScratch_.data(),
+                        frames - peerFramesMixed, channels);
                 }
-
-                if (plcLogged) {
-                    log("Generated first Opus PLC frame for underrun concealment");
-                }
-
-                const size_t channelsToMix = static_cast<size_t>(std::min(channels, channelCount_));
-                const size_t framesToMix = std::min(plcOutFrames, framesNeeded);
-                for (size_t i = 0; i < framesToMix; ++i) {
-                    const size_t srcBase = i * static_cast<size_t>(channelCount_);
-                    for (size_t ch = 0; ch < channelsToMix; ++ch) {
-                        outputs[static_cast<int>(ch)][mixOffset + i] += plcResampledScratch_[srcBase + ch];
-                    }
-                }
-
-                mixOffset += framesToMix;
-                framesNeeded -= framesToMix;
-                peerFramesMixed += framesToMix;
             }
+            if (plcLogged) log("Generated first Opus PLC frame for underrun concealment");
+            if (framesRead == 0) break;
+            for (int ch = 0; ch < channels; ++ch) {
+                for (size_t i = 0; i < framesRead; ++i) {
+                    outputs[ch][peerFramesMixed + i] += pullTempChannelPtrsScratch_[static_cast<size_t>(ch)][i];
+                }
+            }
+            peerFramesMixed += framesRead;
         }
-
-        if (peerFramesMixed > maxFramesRead) {
-            maxFramesRead = peerFramesMixed;
-        }
+        maxFramesRead = std::max(maxFramesRead, peerFramesMixed);
     }
 
     return maxFramesRead;

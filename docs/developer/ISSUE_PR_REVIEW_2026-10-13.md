@@ -290,3 +290,70 @@ Windows module SHA-256:
 
 - Downloaded 0.2.5: `55e00cb554776e3616cad4e84713b33a266948c48f5adb622eabde3cfa7c67f7`
 - Reviewed build: `2f34a905704ba81cea8f977543d62f785791d5bc8c1e1d1597edbbb540fcf83c`
+
+## Packet-loss validation follow-up (2026-10-14)
+
+A deterministic harness now feeds real Opus packets into the production session
+receive function and pulls audio through the production resampler, per-peer
+ring, and concealment path. It does not duplicate these algorithms in the test.
+The existing track callback was extracted into a private member method; a
+friend test fixture supplies owned peers without contacting signaling servers.
+
+**Confirmed defect:** a partial DAW callback discarded the rest of a generated
+20 ms PLC frame. For the same 100 ms outage at 48 kHz, one large pull generated
+five PLC frames, but 64-sample callbacks generated 75 (1,500 ms internally), and
+256-sample callbacks generated 19 (380 ms). Output samples and subsequent
+recovery depended on callback partitioning. The same final test program was run
+against the pre-fix receive/pull code and the fixed code: the baseline fails
+118 of 126 partition cases, 11 scenario concealment budgets, and the mid-frame
+arrival check. Those failures are retained, not counted as a passing gate.
+
+**Fix:** enqueue every resampled PLC sample in the peer's existing bounded ring.
+A partial callback leaves the rest ahead of any newly arriving packet. Decode,
+resample, and enqueue now share the context lock so incoming packets cannot be
+interleaved with concealment between those operations. Interleaved ring writes
+avoid converting every decoded packet into newly allocated planar arrays.
+Encoder settings, FEC, packet duration, pre-fill thresholds and buffer capacities
+are unchanged.
+
+Validation on Windows x64 / Release:
+
+- All 126 block-partition cases pass: nine host rates from 8 to 384 kHz,
+  mono/stereo, and seven callback sizes from 32 to 4,096 frames. Concealment and
+  recovery samples exactly match the large-pull reference, and each 100 ms
+  outage generates five 20 ms PLC packets.
+- Clean 48 kHz audio matches an independent Opus decoder; arrival during a
+  partial concealed frame, independent peers, and concurrent receive/pull pass.
+- Twenty-one virtual ten-second scenarios exercise regular 5% packet loss,
+  100 ms loss bursts, 12 ms arrival jitter, 30 ms reorder events, duplicate
+  payload delivery, a one-second outage, and clean traffic at three block sizes.
+  Outputs remain finite/unclipped and recover audible tail levels. At 64-frame
+  callbacks, 5% loss now needs 25 PLC packets instead of 375; the one-second
+  outage needs 50 instead of 750.
+- The nine native Windows checks and all 15 offline JavaScript tests pass.
+- A subsequent 90-second real WebRTC soak passes its normal level, frequency,
+  finite-output and dropout-rate checks, but fails the optional strict zero-silence
+  check: one silent block among 15,040 steady blocks. This is retained as a failed
+  strict result pending diagnosis; the deterministic PLC fix does not establish
+  dropout-free operation of the entire host/worker/transport path.
+
+Evidence: [baseline](validation/2026-10-14-audio-impairment-baseline.json),
+[fixed](validation/2026-10-14-audio-impairment-fixed.json), and
+[test source](../../tests/audio_impairment_test.cpp).
+
+### Limits of the impairment checks
+
+The packet schedule is applied at the Opus payload boundary, after transport
+processing. It does not test SRTP replay protection, ICE, actual UDP scheduling,
+WAN performance, or a real DAW under impaired networking. Reordering and
+duplicate scenarios check bounded, finite playback and recovery, not correct
+RTP chronology or music fidelity. The current onFrame path ignores RTP timestamps
+and libdatachannel's pinned Opus depacketizer does not reorder packets. A bounded
+packet jitter/reorder layer remains follow-up work before adding FEC recovery.
+In the 1,024-frame callback simulation, 12 ms jitter still generates 29 PLC
+packets without intentional packet loss; extra concealment and buffer overflow
+under that schedule need attention in that broader playout design.
+
+FEC remains disabled. The earlier strict distortion measurement caveat and the
+unperformed DAW save/export and macOS DAW tests still apply. No new UI assets are
+needed for this audio-only change.

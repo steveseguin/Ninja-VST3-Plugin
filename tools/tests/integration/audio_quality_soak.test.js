@@ -30,6 +30,7 @@ function launch(mode, seconds) {
         WEBRTC_CLI_HOST_QUALITY: "1", WEBRTC_CLI_HOST_MONITOR_OUTPUT: "1"
     });
     if (process.env.WEBRTC_SOAK_TRACE) Object.assign(env, {WEBRTC_VST_LOG_STDOUT:"1", WEBRTC_VST_LOG_SIGNALING:"1"});
+    if (process.env.WEBRTC_SOAK_CAPTURE) env.WEBRTC_CLI_HOST_CAPTURE = path.join(out, mode + ".pcmblocks");
     const child = spawn(cliExecutable, [pluginBundle], {env, stdio:["ignore","pipe","pipe"]});
     children.add(child);
     const log = fs.createWriteStream(path.join(out, mode + ".log"));
