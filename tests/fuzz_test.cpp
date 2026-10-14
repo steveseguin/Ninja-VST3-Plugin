@@ -437,7 +437,8 @@ TestResult test_reconnect_during_streaming(const std::string& path) {
     // Inject Publish mode with a stream ID
     host.injectState(R"({"mode":"publish","streamId":"fuzz-reconnect-test"})");
 
-    constexpr int kCycles = 20;
+    constexpr int kCycles = 80;
+    constexpr std::array<int, 4> kConnectDelaysMs{0, 1, 3, 10};
     constexpr int kBlocksPerCycle = 200; // ~1 second
 
     for (int cycle = 0; cycle < kCycles; ++cycle) {
@@ -446,6 +447,11 @@ TestResult test_reconnect_during_streaming(const std::string& path) {
                     "activate failed at cycle " + std::to_string(cycle) + ": " + host.err(), 0};
         }
 
+        // Sweep the WebSocket-open boundary. An onConnected callback that
+        // passed its shutdown check used to race stop() clearing its client.
+        // The extended runner supplies an owned, immediately accepting server.
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            kConnectDelaysMs[static_cast<size_t>(cycle) % kConnectDelaysMs.size()]));
         for (int b = 0; b < kBlocksPerCycle; ++b) {
             if (!host.processBlock()) {
                 return {"ReconnectDuringStreaming", false,

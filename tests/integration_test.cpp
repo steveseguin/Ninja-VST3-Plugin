@@ -344,6 +344,13 @@ public:
 
     bool action(ParamID id) { return controller_->setParamNormalized(id, 1.0) == kResultOk; }
 
+    bool setMode(double value, double expected) {
+        return controller_->setParamNormalized(webrtc_vst::kParamMode, value) == kResultOk &&
+            controller_->getParamNormalized(webrtc_vst::kParamMode) == expected;
+    }
+
+    double mode() { return controller_->getParamNormalized(webrtc_vst::kParamMode); }
+
     bool readStringParam(ParamID id, std::string& value) {
         if (!controller_) {
             lastError_ = "Controller not available";
@@ -843,6 +850,23 @@ TestResult test_publish_silence_flags(const std::string& pluginPath, bool inPlac
     return {name, true};
 }
 
+TestResult test_discrete_mode_state(const std::string& pluginPath) {
+    VST3HostSimulator host(pluginPath);
+    if (!host.loadPlugin()) return {"DiscreteModeState", false, "Cannot load"};
+    for (const double value : {0.0, 0.323835, 0.499999, 0.5, 0.75, 1.0}) {
+        const double expected = value;
+        if (!host.setMode(value, expected))
+            return {"DiscreteModeState", false, "Host automation value changed"};
+        for (const bool controller : {false, true}) {
+            const auto state = host.savedState(controller);
+            if (!host.setMode(1.0 - expected, 1.0 - expected) ||
+                !host.injectState(state) || host.mode() != expected)
+                return {"DiscreteModeState", false, "Mode changed across preset round trip"};
+        }
+    }
+    return {"DiscreteModeState", true};
+}
+
 TestResult test_atomic_invalid_state(const std::string& pluginPath) {
     VST3HostSimulator host(pluginPath);
     if (!host.loadPlugin() || !host.injectState(R"({"streamId":"original","password":"secret","webBaseUrl":"https://vdo.ninja/","salt":"original-salt","handshakeUrl":"wss://wss.vdo.ninja"})"))
@@ -856,6 +880,9 @@ TestResult test_atomic_invalid_state(const std::string& pluginPath) {
         R"({"streamId":"changed","roomName":42})",
         R"({"streamId":"changed","mode":false})",
         R"({"streamId":"changed","mode":"typo"})",
+        R"({"streamId":"changed","mode":"play","modeNormalized":0.75})",
+        R"({"streamId":"changed","mode":"seed","modeNormalized":2})",
+        R"({"streamId":"changed","modeNormalized":"0.3"})",
         "{\"streamId\":\"changed\",\"salt\":\"" + std::string(100000, 'x') + "\"}",
         R"({"streamId":"changed","handshakeUrl":"wss://a..test"})",
         R"({"streamId":"changed","handshakeUrl":"wss://[abcd]"})"
@@ -1009,6 +1036,7 @@ int main(int argc, char** argv) {
     suite.addResult(test_room_view_link_uses_solo(pluginPath));
     suite.addResult(test_advanced_settings(pluginPath));
     suite.addResult(test_atomic_invalid_state(pluginPath));
+    suite.addResult(test_discrete_mode_state(pluginPath));
     suite.addResult(test_edit_memory(pluginPath));
     suite.addResult(test_atomic_advanced_apply(pluginPath));
     {

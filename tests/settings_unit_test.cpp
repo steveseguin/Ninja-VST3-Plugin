@@ -16,6 +16,30 @@ static std::string read(const std::string& file) {
 int main() {
     try {
         using namespace webrtc_vst;
+        for (double rate : {48000., 96000., 192000., 384000.}) {
+            RealtimeAudioBridge bridge;
+            bridge.setSampleRate(rate);
+            std::array<float, 512> left{}, right{}, outLeft{}, outRight{};
+            left.fill(0.25f); right.fill(-0.5f);
+            const float* input[]{left.data(), right.data()};
+            float* output[]{outLeft.data(), outRight.data()};
+            bridge.transfer(nullptr, output, 64, 0, 2, false);
+            size_t supplied = 0;
+            while (const auto count = bridge.takeDemand()) {
+                bridge.supplyOutput(input, count);
+                supplied += count;
+                require(supplied <= RealtimeAudioBridge::capacity, "Rate reserve exceeded capacity");
+            }
+            // No producer runs during a simulated 16 ms scheduling pause.
+            // The old fixed 1024-frame reserve underruns above 48 kHz.
+            for (size_t elapsed = 0; elapsed + 64 <= static_cast<size_t>(rate * .016); elapsed += 64) {
+                outLeft.fill(0); outRight.fill(0);
+                bridge.transfer(nullptr, output, 64, 0, 2, false);
+                for (int i = 0; i < 64; ++i)
+                    require(outLeft[i] == 0.25f && outRight[i] == -0.5f,
+                            "High-rate scheduling pause caused a silent block");
+            }
+        }
         require(encodeBrowserPassword("a &é🔊") == "a%20%26%C3%A9%F0%9F%94%8A", "Browser password escaping mismatch");
         require(browserAesKeyBytes("plainASCII") == "plainASCII", "ASCII AES material changed");
         require(browserAesKeyBytes("é🔊") == std::string("\xe9\x3d\x0a", 3), "Browser UTF-16 low-byte encoding mismatch");

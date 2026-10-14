@@ -589,6 +589,7 @@ bool WebRTCController::applyStateJson(const std::string& jsonString) {
         previous.password = findStringParameter(kParamPassword)->getString();
         previous.handshakeUrl = findStringParameter(kParamHandshakeUrl)->getString();
         previous.mode = parameters.getParameter(kParamMode)->getNormalized() >= 0.5 ? ConnectionMode::Publish : ConnectionMode::Play;
+        previous.modeNormalized = parameters.getParameter(kParamMode)->getNormalized();
         const auto next = parseConfigState(jsonString, previous);
         committedAdvanced_ = next;
         advancedDirty_ = false;
@@ -598,7 +599,7 @@ bool WebRTCController::applyStateJson(const std::string& jsonString) {
         findStringParameter(kParamWebBaseUrl)->setString(next.webBaseUrl);
         findStringParameter(kParamSalt)->setString(next.salt);
         findStringParameter(kParamPassword)->setString(next.password);
-        parameters.getParameter(kParamMode)->setNormalized(next.mode == ConnectionMode::Publish ? 1.0 : 0.0);
+        parameters.getParameter(kParamMode)->setNormalized(next.modeNormalized);
 
         updateDisableEncryptionFromPassword();
         updateShareLinks();
@@ -651,6 +652,7 @@ std::string WebRTCController::exportStateJson(bool includeDraft) const {
         {"salt", includeDraft ? findStringParameter(kParamSalt)->getString() : committedAdvanced_.salt},
         {"password", password},
         {"mode", isPublish ? "publish" : "play"},
+        {"modeNormalized", modeParam ? modeParam->getNormalized() : 0.0},
         {"disableEncryption", disableEncryption}
     };
 

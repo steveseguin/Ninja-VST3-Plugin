@@ -12,6 +12,7 @@ enum class ConnectionMode {
 
 struct PluginConfig {
     ConnectionMode mode{ConnectionMode::Play};
+    double modeNormalized{0.0}; // Preserve host automation exactly in presets.
     std::string streamId;
     std::string roomName;
     std::string handshakeUrl{kDefaultHandshakeUrl};

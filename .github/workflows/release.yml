@@ -76,6 +76,7 @@ jobs:
           cmake --build build/webrtc_vst_win --config Release --target `
             webrtc_vst `
             webrtc_vst_resampler_test `
+            webrtc_vst_audio_ring_test `
             webrtc_vst_peer_audio_buffer_test `
             webrtc_vst_audio_impairment_test `
             webrtc_vst_settings_test `

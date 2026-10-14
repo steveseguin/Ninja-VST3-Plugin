@@ -46,7 +46,7 @@ public:
                   StatusSink statusSink = {});
     ~WebRTCSession();
 
-    void start(const PluginConfig& config, double sampleRate, int channels);
+    void start(const PluginConfig& config, double sampleRate, int channels, size_t maxHostBlock = 512);
     void stop();
     void setConfigUpdateSink(ConfigSink sink);
     void setStatusSink(StatusSink sink);
@@ -143,7 +143,9 @@ private:
     void processCandidateMessage(PeerSession& session, const nlohmann::json& candidateMessage);
     void queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject);
     void flushPendingIceLocked(PeerSession& session);
-    void sendSignalingMessage(const nlohmann::json& payload);
+    // Caller holds mutex_; stop() cannot remove the client during a send.
+    void sendSignalingMessageLocked(const nlohmann::json& payload);
+    bool isConnectedLocked() const;
     void requestPlayRefresh(const std::string& reason);
 
     void emitStatus(const std::string& status) const;
@@ -173,6 +175,7 @@ private:
     mutable SpinLock mutex_;
     std::atomic<bool> shuttingDown_{false};
     bool started_{false};
+    size_t maxHostBlock_{512};
     std::atomic<bool> intentionalDisconnect_{false};
 
     ::OpusEncoder* opusEncoder_{nullptr};

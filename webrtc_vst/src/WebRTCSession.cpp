@@ -310,8 +310,10 @@ void WebRTCSession::log(const std::string& line) const {
     }
 }
 
-void WebRTCSession::sendSignalingMessage(const nlohmann::json& payload) {
-    if (!signalingClient_) {
+void WebRTCSession::sendSignalingMessageLocked(const nlohmann::json& payload) {
+    // mutex_ protects both client ownership and the UUID through the send.
+    // A callback may already be in flight when stop() marks shutdown.
+    if (shuttingDown_.load(std::memory_order_acquire) || !started_ || !signalingClient_) {
         return;
     }
 
@@ -655,7 +657,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         session.audioContext->decoder = nullptr;
     }
     session.audioContext->resampler.configure(48000.0, sampleRate_, channelCount_);
-    const auto bufferSizing = peerAudioBufferSizing(sampleRate_);
+    const auto bufferSizing = peerAudioBufferSizing(sampleRate_, maxHostBlock_);
     session.audioContext->preFillFrames = bufferSizing.preFillFrames;
     session.audioContext->buffer = std::make_shared<AudioRingBuffer>(bufferSizing.capacityFrames, channelCount_);
 
@@ -1152,7 +1154,7 @@ void WebRTCSession::processCandidateMessage(PeerSession& session, const nlohmann
     }
 }
 
-void WebRTCSession::start(const PluginConfig& config, double sampleRate, int channels) {
+void WebRTCSession::start(const PluginConfig& config, double sampleRate, int channels, size_t maxHostBlock) {
     // Clear shutdown flag when starting
     shuttingDown_.store(false, std::memory_order_release);
     intentionalDisconnect_.store(false, std::memory_order_release);
@@ -1178,6 +1180,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         }
 
         sampleRate_ = sampleRate;
+        maxHostBlock_ = std::min(maxHostBlock, size_t{8192});
         channelCount_ = channels;
 
         salt_ = effectiveSalt(config_.salt, config_.webBaseUrl);
@@ -1196,7 +1199,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         }
 
         if (sampleRate_ != 48000.0) {
-            log("Only 48 kHz sample rate is currently supported; audio will be resampled externally if needed.");
+            log("Resampling host audio to/from Opus at 48 kHz.");
         }
 
         int opusError = 0;
@@ -1377,6 +1380,10 @@ void WebRTCSession::stop() {
 
 bool WebRTCSession::isConnected() const {
     std::lock_guard<SpinLock> lock(mutex_);
+    return isConnectedLocked();
+}
+
+bool WebRTCSession::isConnectedLocked() const {
     for (const auto& [key, session] : peerSessions_) {
         if (session.connection && session.connection->state() == rtc::PeerConnection::State::Connected) {
             return true;
@@ -1712,7 +1719,7 @@ void WebRTCSession::sendPeerDescription(PeerSession& session,
             log(std::string("Failed to send via datachannel: ") + ex.what());
         }
     } else if (signalingClient_) {
-        sendSignalingMessage(payload);
+        sendSignalingMessageLocked(payload);
     }
 }
 
@@ -1753,29 +1760,36 @@ void WebRTCSession::sendIceCandidate(PeerSession& session,
             log(std::string("Failed to send ICE via datachannel: ") + ex.what());
         }
     } else if (signalingClient_) {
-        sendSignalingMessage(payload);
+        sendSignalingMessageLocked(payload);
     }
 }
 
 void WebRTCSession::postInitialRequests() {
-    if (!signalingClient_) {
-        return;
-    }
+    {
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (shuttingDown_.load(std::memory_order_acquire) || !started_ || !signalingClient_) {
+            return;
+        }
 
-    if (!config_.roomName.empty()) {
-        nlohmann::json joinMessage = {
-            {"request", "joinroom"},
-            {"roomid", hashedRoomId_.empty() ? config_.roomName : hashedRoomId_}
-        };
-        sendSignalingMessage(joinMessage);
-    } else {
+        if (!config_.roomName.empty()) {
+            nlohmann::json joinMessage = {
+                {"request", "joinroom"},
+                {"roomid", hashedRoomId_.empty() ? config_.roomName : hashedRoomId_}
+            };
+            sendSignalingMessageLocked(joinMessage);
+            return;
+        }
         log(std::string("postInitialRequests: mode=") + (config_.mode == ConnectionMode::Publish ? "Publish" : "Play") +
             ", stream=" + config_.streamId);
-        announceRoleIfReady();
     }
+    announceRoleIfReady();
 }
 
 void WebRTCSession::announceRoleIfReady() {
+    std::lock_guard<SpinLock> lock(mutex_);
+    if (shuttingDown_.load(std::memory_order_acquire) || !started_) {
+        return;
+    }
     log(std::string("announceRoleIfReady invoked; roleAnnounced=") + (roleAnnounced_ ? "true" : "false"));
     if (roleAnnounced_) {
         log("announceRoleIfReady: role already announced");
@@ -1803,10 +1817,10 @@ void WebRTCSession::announceRoleIfReady() {
             {"request", "seed"},
             {"streamID", hashedStreamId_.empty() ? config_.streamId : hashedStreamId_}
         };
-        sendSignalingMessage(publishMessage);
+        sendSignalingMessageLocked(publishMessage);
         log("Sent publish request for stream " + config_.streamId);
     } else {
-        if (isConnected()) {
+        if (isConnectedLocked()) {
             log("Preserving healthy Play media without requesting a duplicate peer");
             roleAnnounced_ = true;
             return;
@@ -1818,7 +1832,7 @@ void WebRTCSession::announceRoleIfReady() {
             {"audio", true},
             {"video", false}
         };
-        sendSignalingMessage(playMessage);
+        sendSignalingMessageLocked(playMessage);
         log("Sent play request for stream " + config_.streamId);
     }
 
@@ -1830,33 +1844,30 @@ void WebRTCSession::requestPlayRefresh(const std::string& reason) {
         return;
     }
 
-    std::string streamIdToRequest;
-    {
-        std::lock_guard<SpinLock> lock(mutex_);
-        if (shuttingDown_.load(std::memory_order_acquire) || !started_) {
-            return;
-        }
-        if (config_.mode != ConnectionMode::Play) {
-            return;
-        }
-        if (!signalingClient_) {
-            return;
-        }
-        if (!config_.roomName.empty() && !roomJoined_) {
-            return;
-        }
-        if (config_.streamId.empty()) {
-            return;
-        }
-
-        const auto now = std::chrono::steady_clock::now();
-        if (lastPlayRefreshAt_.time_since_epoch().count() != 0 &&
-            (now - lastPlayRefreshAt_) < kPlayRefreshCooldown) {
-            return;
-        }
-        lastPlayRefreshAt_ = now;
-        streamIdToRequest = hashedStreamId_.empty() ? config_.streamId : hashedStreamId_;
+    std::lock_guard<SpinLock> lock(mutex_);
+    if (shuttingDown_.load(std::memory_order_acquire) || !started_) {
+        return;
     }
+    if (config_.mode != ConnectionMode::Play) {
+        return;
+    }
+    if (!signalingClient_) {
+        return;
+    }
+    if (!config_.roomName.empty() && !roomJoined_) {
+        return;
+    }
+    if (config_.streamId.empty()) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (lastPlayRefreshAt_.time_since_epoch().count() != 0 &&
+        (now - lastPlayRefreshAt_) < kPlayRefreshCooldown) {
+        return;
+    }
+    lastPlayRefreshAt_ = now;
+    const std::string streamIdToRequest = hashedStreamId_.empty() ? config_.streamId : hashedStreamId_;
 
     nlohmann::json playMessage = {
         {"request", "play"},
@@ -1864,7 +1875,7 @@ void WebRTCSession::requestPlayRefresh(const std::string& reason) {
         {"audio", true},
         {"video", false}
     };
-    sendSignalingMessage(playMessage);
+    sendSignalingMessageLocked(playMessage);
     log("Sent play refresh request (" + reason + ") for stream " + config_.streamId);
 }
 

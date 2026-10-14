@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <stdexcept>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -70,8 +71,9 @@ private:
     std::atomic<Steinberg::uint32> refCount_{1};
 };
 
-constexpr double kSampleRate = 48000.0;
-constexpr Steinberg::int32 kBlockSize = 256;
+// Test-host format, fixed before creating any plugin instances or buffers.
+double kSampleRate = 48000.0;
+Steinberg::int32 kBlockSize = 256;
 constexpr int kDefaultProcessIterations = 200;
 constexpr double kDefaultToneFrequency = 1000.0;
 constexpr double kToneAmplitude = 0.25;
@@ -399,6 +401,22 @@ bool injectPluginState(Steinberg::Vst::IComponent* component,
 } // namespace
 
 int main(int argc, char** argv) {
+    auto formatValue = [](const char* name, int fallback, int minimum, int maximum) {
+        const char* text = std::getenv(name);
+        if (!text) return fallback;
+        char* end = nullptr;
+        const long value = std::strtol(text, &end, 10);
+        if (end == text || *end || value < minimum || value > maximum)
+            throw std::invalid_argument(std::string("Invalid ") + name);
+        return static_cast<int>(value);
+    };
+    try {
+        kSampleRate = formatValue("WEBRTC_CLI_HOST_SAMPLE_RATE", 48000, 8000, 384000);
+        kBlockSize = formatValue("WEBRTC_CLI_HOST_BLOCK_SIZE", 256, 1, 8192);
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
     std::string pluginPath = (argc > 1) ? std::string{argv[1]} : defaultPluginPath();
     if (!std::filesystem::exists(pluginPath)) {
         std::cerr << "Plugin not found at: " << pluginPath << "\n";
@@ -549,16 +567,34 @@ int main(int argc, char** argv) {
     data.outputs = outputBusViews.empty() ? nullptr : outputBusViews.data();
     data.processContext = &context;
 
-    // Prime one block to trigger startup, then warm up for signaling/ICE.
+    const bool precisePacing = std::getenv("WEBRTC_CLI_HOST_REALTIME_PACING") != nullptr;
+    HostPacing hostPacing(precisePacing);
+    // Live quality probes need a running audio engine during connection setup.
+    // A single prime followed by a two-second callback stall fills every receive
+    // queue to its overwrite boundary and is a separate stalled-host scenario.
+    bool processingFailed = false;
     const int warmupMs = parseIntEnv(std::getenv("WEBRTC_CLI_HOST_WARMUP_MS"), 2000);
     if (warmupMs > 0) {
-        if (processor->process(data) != Steinberg::kResultOk) {
-            std::cerr << "warmup process call failed." << std::endl;
-        } else {
+        const bool continuous = std::getenv("WEBRTC_CLI_HOST_CONTINUOUS_WARMUP") != nullptr;
+        const auto began = std::chrono::steady_clock::now();
+        const auto deadline = began + std::chrono::milliseconds(warmupMs);
+        std::cout << "[warmup] Waiting " << warmupMs << "ms for connection"
+                  << (continuous ? " with continuous callbacks..." : "...") << std::endl;
+        uint64_t blocks = 0;
+        do {
+            if (processor->process(data) != Steinberg::kResultOk) {
+                std::cerr << "warmup process call failed." << std::endl;
+                processingFailed = true;
+                break;
+            }
             context.projectTimeSamples += kBlockSize;
-        }
-        std::cout << "[warmup] Waiting " << warmupMs << "ms for connection..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(warmupMs));
+            ++blocks;
+            if (!continuous) { std::this_thread::sleep_until(deadline); break; }
+            const auto next = began + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(blocks * kBlockSize / kSampleRate));
+            if (precisePacing) hostPacing.waitUntil(std::min(next, deadline));
+            else std::this_thread::sleep_until(std::min(next, deadline));
+        } while (std::chrono::steady_clock::now() < deadline);
     }
 
     std::vector<float> toneBlock(kBlockSize, 0.0f);
@@ -569,8 +605,6 @@ int main(int argc, char** argv) {
     double outputEnergy = 0.0;
     size_t outputSamples = 0;
     const bool qualityMonitor = std::getenv("WEBRTC_CLI_HOST_QUALITY") != nullptr;
-    const bool precisePacing = std::getenv("WEBRTC_CLI_HOST_REALTIME_PACING") != nullptr;
-    HostPacing hostPacing(precisePacing);
     const bool probeEnvelope = std::getenv("WEBRTC_CLI_HOST_PROBE_ENVELOPE") != nullptr;
     std::ofstream capture;
     if (const char* path = std::getenv("WEBRTC_CLI_HOST_CAPTURE")) {
@@ -583,7 +617,7 @@ int main(int argc, char** argv) {
 
     int iteration = 0;
     const auto processStart = std::chrono::steady_clock::now();
-    while (true) {
+    while (!processingFailed) {
         if (wallclockRuntimeMs > 0) {
             const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - processStart).count();
@@ -616,7 +650,7 @@ int main(int argc, char** argv) {
                 // with a nonzero floor so DTX/stream-start do not skew latency.
                 for (auto& bus : inputBuses) for (auto& channel : bus.storage)
                     for (size_t sample = 0; sample < channel.size(); ++sample)
-                        if ((static_cast<uint64_t>(iteration) * kBlockSize + sample) % 96000 >= 24000) channel[sample] *= 0.2f;
+                        if ((static_cast<uint64_t>(iteration) * kBlockSize + sample) % static_cast<uint64_t>(kSampleRate * 2) >= static_cast<uint64_t>(kSampleRate / 2)) channel[sample] *= 0.2f;
             }
         }
         const auto callbackStart = std::chrono::steady_clock::now();
@@ -624,11 +658,12 @@ int main(int argc, char** argv) {
         callbackMaxUs = std::max(callbackMaxUs, std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - callbackStart).count());
         if (processResult != Steinberg::kResultOk) {
             std::cerr << "process call failed at iteration " << iteration << "\n";
+            processingFailed = true;
             break;
         }
         if (capture && iteration < static_cast<int>(kSampleRate * 120 / kBlockSize) && !outputBuses.empty()) {
             // Native-endian records: double monotonic block timestamp (seconds),
-            // then 256 float32 left samples and 256 right samples, 48 kHz.
+            // then block-size float32 samples per channel at the selected rate.
             const double timestamp = std::chrono::duration<double>(callbackStart.time_since_epoch()).count();
             capture.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
             for (size_t ch = 0; ch < 2; ++ch) capture.write(
@@ -704,5 +739,5 @@ int main(int argc, char** argv) {
     auto* componentRaw = component.take();
     auto* controllerRaw = controller.take();
     provider.releasePlugIn(componentRaw, controllerRaw);
-    return 0;
+    return processingFailed ? 1 : 0;
 }

@@ -76,11 +76,34 @@ void checkRate(double rate) {
     buffer.reset(sizing.capacityFrames, 2);
     require(buffer.availableFrames(2) == 0, "Reset retained old peer audio");
 }
+
+void checkHostBursts() {
+    for (size_t block : {size_t{64}, size_t{256}, size_t{512}, size_t{1024}, size_t{2048}, size_t{8192}}) {
+        const auto sizing = webrtc_vst::peerAudioBufferSizing(48000, block);
+        require(sizing.preFillFrames == 960, "Host block size increased startup latency");
+        require(sizing.capacityFrames == std::max(size_t{2048}, 4 * block), "Host burst capacity mismatch");
+        if (block <= 512) continue;
+        webrtc_vst::AudioRingBuffer ring(sizing.capacityFrames, 2);
+        // One packet already queued, followed by a multi-packet host burst.
+        const size_t count = 960 * (1 + (block + 959) / 960);
+        std::vector<float> input(count * 2), left(count), right(count);
+        for (size_t i = 0; i < count; ++i) { input[2*i] = static_cast<float>(i); input[2*i+1] = -input[2*i]; }
+        ring.pushInterleaved(input.data(), 960, 2);
+        ring.pushInterleaved(input.data() + 1920, count - 960, 2);
+        float* output[]{left.data(), right.data()};
+        require(ring.pop(output, count, 2) == count, "Host burst truncated queued audio");
+        for (size_t i = 0; i < count; ++i)
+            require(left[i] == input[2*i] && right[i] == input[2*i+1], "Host burst lost sample continuity");
+    }
+    require(webrtc_vst::peerAudioBufferSizing(48000, size_t(-1)).capacityFrames == 32768,
+            "Host burst capacity is not bounded");
+}
 }
 
 int main() {
     try {
         checkInterleavedPush();
+        checkHostBursts();
         for (double rate : {8000., 16000., 22050., 44100., 48000., 88200., 96000., 192000., 384000.})
             checkRate(rate);
         std::cout << "PASS: receive packet retention, stereo continuity, pre-fill and reset across host rates\n";

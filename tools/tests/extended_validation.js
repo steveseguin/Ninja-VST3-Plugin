@@ -12,6 +12,8 @@ const { WebSocketServer } = require("ws");
 const { rootDir, cliExecutable, pluginBundle } = require("./integration/build_paths");
 const seconds = Number(process.env.WEBRTC_EXTENDED_SECONDS || 1800);
 assert.ok(Number.isFinite(seconds) && seconds >= 10 && seconds <= 14400);
+const firstSeed = Number(process.env.WEBRTC_FUZZ_SEED || 0x56444f);
+assert.ok(Number.isInteger(firstSeed) && firstSeed >= 0 && firstSeed <= 0xffffffff);
 const directory = path.join(rootDir, "build/test-tools/extended-" + Date.now());
 fs.mkdirSync(directory, {recursive:true});
 const binary = path.join(pluginBundle, process.platform === "darwin" ? "Contents/MacOS/webrtc_vst" :
@@ -57,7 +59,7 @@ for (const signal of ["SIGINT","SIGTERM"]) process.on(signal,() => {interrupted=
     console.log(`Started ${seconds}s wall-clock extended validation: ${directory}; SHA256=${originalDigest}`);
     let cycle=0;
     do {
-        const seed = 0x56444f + cycle;
+        const seed = (firstSeed + cycle) >>> 0;
         for (const name of ["webrtc_vst_settings_test","webrtc_vst_integration_test","webrtc_vst_fuzz_test","webrtc_vst_stress_test"]) await run(name,seed);
         console.log(`Cycle ${++cycle}: ${(Date.now()-start)/1000}s, ${results.length} suites passed, seed=${seed}`);
     } while(Date.now()-start < seconds*1000);

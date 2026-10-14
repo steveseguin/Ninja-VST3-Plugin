@@ -101,6 +101,7 @@ WebRTCProcessor::WebRTCProcessor()
     config_.streamId = generateRandomStreamId();
     config_.handshakeUrl = "wss://wss.vdo.ninja";
     config_.mode = ConnectionMode::Play;
+    config_.modeNormalized = config_.mode == ConnectionMode::Publish ? 1.0 : 0.0;
     modeAtomic_.store(config_.mode, std::memory_order_release);
 }
 
@@ -175,6 +176,7 @@ tresult PLUGIN_API WebRTCProcessor::setupProcessing(ProcessSetup& setup) {
                    (setup.symbolicSampleSize != processSetup_.symbolicSampleSize);
     if (!std::isfinite(setup.sampleRate) || setup.sampleRate < 8000 || setup.sampleRate > 384000 ||
         setup.maxSamplesPerBlock < 1 || setup.symbolicSampleSize != kSample32) return kInvalidArgument;
+    audioBridge_.setSampleRate(setup.sampleRate);
     { std::lock_guard<std::mutex> lock(configMutex_); processSetup_ = setup; }
     offline_.store(setup.processMode == kOffline, std::memory_order_release);
     if (changed) {
@@ -232,6 +234,7 @@ void WebRTCProcessor::updateConfigFromEnvironment() {
     if (config_.handshakeUrl.empty()) {
         config_.handshakeUrl = "wss://wss.vdo.ninja";
     }
+    config_.modeNormalized = config_.mode == ConnectionMode::Publish ? 1.0 : 0.0;
     modeAtomic_.store(config_.mode, std::memory_order_release);
 }
 
@@ -259,7 +262,7 @@ void WebRTCProcessor::startSession(const PluginConfig& config) {
     session_.setStatusSink([this](const std::string& status) {
         queueStatus(status);
     });
-    session_.start(config, sampleRate, channels);
+    session_.start(config, sampleRate, channels, static_cast<size_t>(activeMaxHostBlock_));
     sessionActive_.store(true, std::memory_order_release);
     if (shouldLogToStdout()) {
         std::cout << "[WebRTC] sessionActive=true" << std::endl;
@@ -281,7 +284,7 @@ void WebRTCProcessor::applyParameterChange(Steinberg::Vst::ParamID id, Steinberg
     // Text arrives through bounded ConfigUpdate messages, not process-local IDs.
     // Numeric automation only publishes a lock-free mailbox for the worker.
     if (id == kParamMode && std::isfinite(value) && value >= 0 && value <= 1) {
-        pendingMode_.store(value >= 0.5 ? 1 : 0, std::memory_order_release);
+        pendingMode_.store(value, std::memory_order_release);
         configDirty_.store(true, std::memory_order_release);
     }
 }
@@ -331,9 +334,10 @@ void WebRTCProcessor::configThreadMain() {
         }
 
         configPending_.store(false, std::memory_order_release);
-        const int pendingMode = pendingMode_.exchange(-1, std::memory_order_acq_rel);
+        const double pendingMode = pendingMode_.exchange(-1, std::memory_order_acq_rel);
         if (pendingMode >= 0) {
-            config_.mode = pendingMode ? ConnectionMode::Publish : ConnectionMode::Play;
+            config_.mode = pendingMode >= 0.5 ? ConnectionMode::Publish : ConnectionMode::Play;
+            config_.modeNormalized = pendingMode;
             modeAtomic_.store(config_.mode, std::memory_order_release);
         }
         const bool shouldActivate = hostActive_.load(std::memory_order_acquire);
@@ -341,6 +345,7 @@ void WebRTCProcessor::configThreadMain() {
         PluginConfig configCopy = config_;
 
         double sampleRate = processSetup_.sampleRate > 0.0 ? processSetup_.sampleRate : kDefaultSampleRate;
+        const int maxHostBlock = std::max(1, processSetup_.maxSamplesPerBlock);
         const int channels = 2;
         lock.unlock();
 
@@ -378,7 +383,8 @@ void WebRTCProcessor::configThreadMain() {
                              (configCopy.password != activeConfig_.password) ||
                              (configCopy.disableEncryption != activeConfig_.disableEncryption);
 
-        bool audioParamsChanged = (sampleRate != activeSampleRate_) || (channels != activeChannels_);
+        bool audioParamsChanged = (sampleRate != activeSampleRate_) || (channels != activeChannels_) ||
+                                  (maxHostBlock != activeMaxHostBlock_);
 
         if (sessionActive_.load(std::memory_order_acquire) && !configChanged && !audioParamsChanged) {
             continue; // Nothing significant changed
@@ -387,6 +393,7 @@ void WebRTCProcessor::configThreadMain() {
         stopSession();
         activeConfig_ = configCopy;
         activeSampleRate_ = sampleRate;
+        activeMaxHostBlock_ = maxHostBlock;
         activeChannels_ = channels;
 
         try {
@@ -404,6 +411,11 @@ std::string WebRTCProcessor::serializeConfigToJson() const {
     {
         std::lock_guard<std::mutex> lock(configMutex_);
         copy = config_;
+        const double pendingMode = pendingMode_.load(std::memory_order_acquire);
+        if (pendingMode >= 0) {
+            copy.modeNormalized = pendingMode;
+            copy.mode = pendingMode >= 0.5 ? ConnectionMode::Publish : ConnectionMode::Play;
+        }
     }
 
     nlohmann::json json = {
@@ -413,6 +425,7 @@ std::string WebRTCProcessor::serializeConfigToJson() const {
         {"webBaseUrl", copy.webBaseUrl},
         {"salt", copy.salt},
         {"mode", copy.mode == ConnectionMode::Publish ? "seed" : "play"},
+        {"modeNormalized", copy.modeNormalized},
         {"password", copy.password},
         {"disableEncryption", copy.disableEncryption}
     };

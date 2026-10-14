@@ -22,7 +22,9 @@ Updated for the September 2026 hardening changes. See
 lock-free atomic cursors: the host owns TX writes/RX reads and the serialized
 worker owns TX reads/RX writes. No try-lock contention drops host blocks.
 Reset discards at consumer-owned cursors rather than rewriting live storage.
-RX demand maintains four host blocks of scheduling headroom (minimum 1024 frames).
+RX demand maintains four host blocks of scheduling headroom, with a minimum
+of 1024 frames at 48 kHz that scales up with sample rate (about 21 ms).
+The reserve remains bounded by the existing 8192-frame queue.
 An empty RX queue still produces silence; a full TX queue drops excess input.
 Bounded memory does not imply lossless operation under arbitrary starvation.
 
@@ -51,7 +53,9 @@ bounce, so this is not a network-isolation switch.
   process-local string registry or numeric audio automation.
 - `audioWorkMutex_` serializes processor audio-worker session calls against
   start/stop. The host audio callback never takes it.
-- The session `mutex_` protects peer maps and codec/session state. Per-peer
+- The session `mutex_` protects peer maps, codec/session state, and signaling
+  client ownership. Every `sendSignalingMessageLocked()` caller holds it through
+  the send, including role announcements, room joins and Play refreshes. Per-peer
   audio contexts have their own lock and shared ownership. Keep lock scopes
   short and never wait on RTC worker futures while holding the session lock.
 - IX callback storage has its own lock. Copy callbacks under it, then invoke
@@ -94,9 +98,10 @@ released. Shared audio-context captures keep decoder storage alive while held.
 An early shutdown-flag check does not cancel callbacks already in flight.
 Likewise, copying a raw codec pointer and releasing its lock does not make later
 use safe. Changes to callback ownership need live teardown stress and sanitizer
-coverage; do not infer safety merely from short smoke tests. Current ASan/UBSan
-and TSan coverage instruments settings/audio-bridge unit paths, **not the whole
-plugin and third-party RTC stack**. Full-stack TSan/ASan remains an explicit gap.
+coverage; do not infer safety merely from short smoke tests. The October macOS validation instruments the plugin and built dependencies
+with ASan/UBSan (prebuilt OpenSSL excluded), including repeated live signaling
+teardown. Full-stack TSan remains an explicit gap. See
+[the macOS report](docs/developer/MACOS_VALIDATION_2026_10_14.md).
 
 ## Regression commands
 

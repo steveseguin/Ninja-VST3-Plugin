@@ -5,6 +5,7 @@
 #include "BoundedJson.h"
 #include <pluginterfaces/base/ibstream.h>
 #include <array>
+#include <cmath>
 
 namespace webrtc_vst {
 
@@ -39,6 +40,16 @@ inline PluginConfig parseConfigState(const std::string& text, const PluginConfig
         const auto mode = json.at("mode").get<std::string>();
         if (mode != "seed" && mode != "publish" && mode != "play") throw std::invalid_argument("Invalid mode");
         candidate.mode = mode == "play" ? ConnectionMode::Play : ConnectionMode::Publish;
+        candidate.modeNormalized = candidate.mode == ConnectionMode::Publish ? 1.0 : 0.0;
+    }
+    if (json.contains("modeNormalized")) {
+        const auto& value = json.at("modeNormalized");
+        if (!value.is_number()) throw std::invalid_argument("Invalid normalized mode");
+        const double normalized = value.get<double>();
+        if (!std::isfinite(normalized) || normalized < 0 || normalized > 1 ||
+            (normalized >= 0.5) != (candidate.mode == ConnectionMode::Publish))
+            throw std::invalid_argument("Normalized mode disagrees with mode");
+        candidate.modeNormalized = normalized;
     }
     auto password = trimSetting(candidate.password);
     std::transform(password.begin(), password.end(), password.begin(), [](unsigned char c) { return std::tolower(c); });

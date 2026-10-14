@@ -31,6 +31,13 @@ target_compile_features(webrtc_vst_resampler_test PRIVATE cxx_std_20)
 add_test(NAME ResamplerUnitTest COMMAND webrtc_vst_resampler_test)
 set_tests_properties(ResamplerUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;audio")
 
+add_executable(webrtc_vst_audio_ring_test audio_ring_test.cpp
+    ../webrtc_vst/src/AudioRingBuffer.cpp)
+target_compile_features(webrtc_vst_audio_ring_test PRIVATE cxx_std_20)
+target_link_libraries(webrtc_vst_audio_ring_test PRIVATE Threads::Threads)
+add_test(NAME AudioRingTest COMMAND webrtc_vst_audio_ring_test)
+set_tests_properties(AudioRingTest PROPERTIES TIMEOUT 30 LABELS "unit;audio")
+
 add_executable(webrtc_vst_settings_test settings_unit_test.cpp)
 target_include_directories(webrtc_vst_settings_test PRIVATE ${vst3sdk_SOURCE_DIR})
 target_link_libraries(webrtc_vst_settings_test PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
@@ -177,7 +184,7 @@ endif()
 
 # Set MSVC runtime to match plugin
 if(MSVC)
-    foreach(tgt webrtc_vst_settings_test webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test)
+    foreach(tgt webrtc_vst_audio_ring_test webrtc_vst_settings_test webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test)
         set_property(TARGET ${tgt} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endforeach()
 endif()

@@ -18,15 +18,16 @@ const analysisSource = source.slice(begin, end);
 assert.ok(!/\b(?:spawn|require|WebSocket|setTimeout|launch|process\.on)\s*\(/.test(analysisSource),
     "Only the offline measurement functions may be extracted");
 
-const RATE = 48000;
-const FRAMES = 256;
-const PERIOD = 96000;
-const HIGH = 24000;
+let RATE = 48000;
+let FRAMES = 256;
+let PERIOD = 96000;
+let HIGH = 24000;
 const DURATION = 36;
-const STRIDE = 8 + FRAMES * 4 * 2;
+let STRIDE = 8 + FRAMES * 4 * 2;
 let result;
 const captures = new Map();
 const context = {
+    sampleRate: RATE, blockSize: FRAMES, performance: {},
     assert, path, out: "synthetic", process: { env: {} }, console: { log() {} },
     fs: {
         readFileSync(file) { return captures.get(path.basename(file)); },
@@ -41,8 +42,8 @@ new vm.Script(analysisSource + "\nglobalThis.analysis = { read, analyze };")
 // Buffers exist only in memory and are decoded by the original capture reader.
 function capture({ delayBlocks = 0, gains = [1, 1], phases = [0, 0], clip,
     alternating = true, clippedGain = 1, clipChannels = [0, 1], varyingDelay = false,
-    highGainOnly = false } = {}) {
-    const count = DURATION * RATE / FRAMES;
+    highGainOnly = false, click = false, harmonic = 0 } = {}) {
+    const count = Math.floor(DURATION * RATE / FRAMES);
     const bytes = Buffer.alloc(count * STRIDE);
     for (let block = 0; block < count; block++) {
         const cycle = Math.floor(block * FRAMES / PERIOD);
@@ -53,11 +54,13 @@ function capture({ delayBlocks = 0, gains = [1, 1], phases = [0, 0], clip,
                 const n = (block - delay) * FRAMES + i;
                 const amplitude = n < 0 ? 0 : n % PERIOD < HIGH ? 0.25 : 0.05;
                 let value = amplitude * Math.sin(2 * Math.PI * (ch ? 1500 : 1000) * n / RATE + phases[ch]);
+                value += amplitude * harmonic * Math.sin(2 * Math.PI * (ch ? 3000 : 2000) * n / RATE);
                 if (clip !== undefined && clipChannels.includes(ch) &&
                     (!alternating || Math.floor(n / PERIOD) % 2 === 0)) {
                     value = Math.max(-clip, Math.min(clip, value)) * clippedGain;
                 }
                 const gain = highGainOnly && n % PERIOD >= HIGH ? 1 : gains[ch];
+                if (click && ch === 1 && n === Math.round(RATE * 10.2)) value += 0.35;
                 bytes.writeFloatLE(value * gain, block * STRIDE + 8 + ch * FRAMES * 4 + i * 4);
             }
         }
@@ -66,7 +69,7 @@ function capture({ delayBlocks = 0, gains = [1, 1], phases = [0, 0], clip,
 }
 
 captures.set("seed.pcmblocks", capture());
-const seed = context.analysis.read("seed");
+let seed = context.analysis.read("seed");
 captures.clear();
 function analyze(options) {
     captures.set("play.pcmblocks", capture(options));
@@ -145,4 +148,32 @@ test("existing full-scale clipping guard is unchanged", () => {
 
 test("existing latency limit still rejects an otherwise clean delayed signal", () => {
     assert.throws(() => analyze({ delayBlocks: 21 }), /Local one-way latency exceeds/);
+});
+
+test("one isolated right-channel click fails even when percentile distortion is low", () => {
+    assert.throws(() => analyze({ delayBlocks: 9, click: true }), /Abrupt waveform discontinuity/);
+    assert.ok(result.thdnPercent[1].p95 < 0.001);
+    assert.ok(result.maxAdjacentStep[1] > 0.3);
+});
+
+function setFormat(rate, frames) {
+    RATE = rate; FRAMES = frames; PERIOD = rate * 2; HIGH = rate / 2; STRIDE = 8 + frames * 8;
+    context.sampleRate = rate; context.blockSize = frames;
+    captures.set("seed.pcmblocks", capture());
+    seed = context.analysis.read("seed");
+    captures.clear();
+}
+
+test("resampled format allows codec reference residual but still bounds distortion", () => {
+    try {
+        setFormat(44100, 128);
+        const measured = analyze({ delayBlocks: 9, harmonic: 0.014 });
+        assert.ok(measured.thdnPercent.every(row => row.median > 1.39 && row.median < 1.41));
+        assert.throws(() => analyze({ delayBlocks: 9, harmonic: 0.025 }), /Tone residual distortion exceeds/);
+        assert.throws(() => analyze({ delayBlocks: 9, click: true }), /Abrupt waveform discontinuity/);
+    } finally { setFormat(48000, 256); }
+});
+
+test("native 48 kHz retains its stricter median residual gate", () => {
+    assert.throws(() => analyze({ delayBlocks: 9, harmonic: 0.014 }), /Tone residual distortion exceeds/);
 });

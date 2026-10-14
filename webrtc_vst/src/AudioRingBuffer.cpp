@@ -46,16 +46,23 @@ void AudioRingBuffer::push(const float* const* inputs, size_t frames, int channe
         return;
     }
 
-    while (size_ + totalSamples > capacity) {
-        readPos_ = (readPos_ + channels) % capacity;
-        size_ -= channels;
+    if (size_ + totalSamples > capacity) {
+        const size_t discarded = size_ + totalSamples - capacity;
+        readPos_ = (readPos_ + discarded) % capacity;
+        size_ -= discarded;
     }
 
-    for (size_t frame = 0; frame < frames; ++frame) {
+    // At most two contiguous spans. Avoid a runtime integer division for every
+    // sample while holding the lock; channel-wise loops can also vectorize.
+    for (size_t frame = 0; frame < frames;) {
+        const size_t count = std::min(frames - frame, (capacity - writePos_) / channels);
         for (int ch = 0; ch < channels; ++ch) {
-            buffer_[writePos_] = inputs[ch][frame];
-            writePos_ = (writePos_ + 1) % capacity;
+            for (size_t i = 0; i < count; ++i)
+                buffer_[writePos_ + i * channels + ch] = inputs[ch][frame + i];
         }
+        writePos_ += count * channels;
+        if (writePos_ == capacity) writePos_ = 0;
+        frame += count;
     }
 
     size_ += totalSamples;
@@ -110,11 +117,15 @@ size_t AudioRingBuffer::pop(float* const* outputs, size_t frames, int channels) 
     const size_t samplesToRead = std::min(requestedSamples, size_);
     const size_t framesToRead = samplesToRead / static_cast<size_t>(channels);
 
-    for (size_t frame = 0; frame < framesToRead; ++frame) {
+    for (size_t frame = 0; frame < framesToRead;) {
+        const size_t count = std::min(framesToRead - frame, (capacity - readPos_) / channels);
         for (int ch = 0; ch < channels; ++ch) {
-            outputs[ch][frame] = buffer_[readPos_];
-            readPos_ = (readPos_ + 1) % capacity;
+            for (size_t i = 0; i < count; ++i)
+                outputs[ch][frame + i] = buffer_[readPos_ + i * channels + ch];
         }
+        readPos_ += count * channels;
+        if (readPos_ == capacity) readPos_ = 0;
+        frame += count;
     }
 
     for (size_t frame = framesToRead; frame < frames; ++frame) {

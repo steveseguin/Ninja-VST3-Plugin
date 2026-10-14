@@ -85,7 +85,8 @@ private:
     std::atomic<bool> configPending_{false};
     std::atomic<bool> hostActive_{false};
     std::atomic<ConnectionMode> modeAtomic_{ConnectionMode::Play};
-    std::atomic<int> pendingMode_{-1};
+    static_assert(std::atomic<double>::is_always_lock_free);
+    std::atomic<double> pendingMode_{-1.0};
     std::atomic<bool> processingReady_{false};
     std::atomic<bool> controllerSyncPending_{false};
 
@@ -99,6 +100,7 @@ private:
 
     PluginConfig activeConfig_;
     double activeSampleRate_{0.0};
+    int activeMaxHostBlock_{512};
     int activeChannels_{0};
 };
 

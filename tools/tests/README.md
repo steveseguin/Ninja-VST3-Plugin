@@ -112,3 +112,69 @@ npm run test:audio-only
 
 - Tests use default encryption behavior (empty password), matching VDO.Ninja default key flow.
 - These are networked integration tests and require internet access.
+
+## Audio formats and performance measurements
+
+The CLI host accepts `WEBRTC_CLI_HOST_SAMPLE_RATE` (8000–384000) and
+`WEBRTC_CLI_HOST_BLOCK_SIZE` (1–8192). Defaults remain 48000 Hz and 256 frames.
+Invalid formats and failed plugin processing calls return a nonzero exit code.
+`WEBRTC_CLI_HOST_CONTINUOUS_WARMUP=1` keeps callbacks running during connection
+setup. The live quality probe enables it so receive queues do not fill during
+an artificial two-second callback stall. Ordinary CLI defaults are unchanged.
+Use `WEBRTC_PROBE_STALL_WARMUP=1` to exercise the original saturated-startup
+condition deliberately; results record which warmup mode was used.
+
+The live playback probe creates two synthetic stereo endpoints and measures
+level-marker latency, tone residual, individual waveform jumps, silence,
+clipping and nonfinite output. On macOS it also records CPU time and peak RSS
+for each complete CLI process, including the host's pacing and capture overhead.
+These are same-machine transport measurements, excluding audio-interface delay
+and remote-network latency; they are not a listening evaluation.
+
+```bash
+# Six sequential formats: 44.1/48/96/192 kHz and 32–1024-frame callbacks.
+WEBRTC_GUARD_SECONDS=360 node tools/tests/guarded_run.js npm run test:playback-matrix
+
+# One format, with the same quality gates.
+WEBRTC_PROBE_SAMPLE_RATE=96000 WEBRTC_PROBE_BLOCK_SIZE=64 \
+  node tools/tests/guarded_run.js npm run test:playback-quality
+
+# Verify the analyzer rejects an isolated click and clipped plateaus offline.
+node --test tools/tests/offline/playback_quality_analysis.test.js
+
+# Exact FIFO/model and resampler checks, followed by a buffer-only benchmark.
+build/webrtc_vst_mac/bin/Release/webrtc_vst_audio_ring_test --benchmark
+```
+
+The default latency limits remain 100 ms p95 and 25 ms spread. Larger callbacks
+receive additional allowance for the existing four-block scheduling reserve and
+block-level timestamp resolution. Waveform-jump checks exclude intentional
+amplitude transitions and apply to the probe's known tones. Raw captures and
+JSON measurements remain under `build/test-tools/playback-probe-*`.
+
+Median tone residual is limited to 1% at native 48 kHz and 2% when resampling;
+the p95 limit is 3% at every rate. A standalone reference using the unchanged
+resampler and default Opus settings, without networking or queues, measured up
+to 1.67% median residual depending on the starting phase at 44.1 kHz. This avoids
+misclassifying existing codec/resampling behavior as a transport glitch. The
+waveform-jump, silence and clipping gates remain separate and unchanged.
+
+Reproduce the reference on a built Mac (optional diagnostic, not a timing test):
+
+```bash
+c++ -std=c++20 -O3 tools/tests/diagnostics/codec_quality_reference.cpp \
+  -Iwebrtc_vst/src -Ibuild/webrtc_vst_mac/_deps/opus-src/include \
+  build/webrtc_vst_mac/lib/Release/libopus.a -o build/test-tools/codec-quality-reference
+node tools/tests/guarded_run.js build/test-tools/codec-quality-reference 44100
+```
+
+The extended lifecycle runner accepts `WEBRTC_FUZZ_SEED` as its first seed and
+increments it each cycle. It owns a loopback WebSocket server so rapid
+activation/deactivation actually overlaps successful signaling opens. The
+reconnect regression sweeps short connection delays across 80 cycles. For the
+shutdown-race seed found during macOS sanitizer validation:
+
+```bash
+WEBRTC_FUZZ_SEED=5653587 WEBRTC_EXTENDED_SECONDS=600 WEBRTC_GUARD_SECONDS=720 \
+  node tools/tests/guarded_run.js npm run test:extended
+```

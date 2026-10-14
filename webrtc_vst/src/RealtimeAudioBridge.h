@@ -17,6 +17,10 @@ public:
     static constexpr size_t capacity = 8192;
     static constexpr size_t chunk = 512;
     static_assert(std::atomic<uint64_t>::is_always_lock_free);
+    void setSampleRate(double rate) noexcept {
+        const double scale = std::isfinite(rate) ? std::clamp(rate / 48000.0, 1.0, 8.0) : 1.0;
+        minimumReserve_.store(static_cast<size_t>(std::ceil(1024 * scale)), std::memory_order_relaxed);
+    }
     void transfer(const float* const* input, float* const* output, size_t frames,
                   int inputChannels, int outputChannels, bool publish) noexcept {
         if (publish && input) {
@@ -40,9 +44,9 @@ public:
                     ? (rx_.samples[0][(read+i)%capacity] + rx_.samples[1][(read+i)%capacity])*0.5f
                     : rx_.samples[ch][(read+i)%capacity];
             rx_.read.store(read + count, std::memory_order_release);
-            // Four host blocks of headroom (minimum 1024 frames) absorb worker
-            // scheduling variation. The target follows consumption, never time.
-            const auto reserve = std::min(capacity, std::max(size_t{1024}, std::min(frames, capacity/4)*4));
+            // Preserve the 48 kHz minimum's ~21 ms of scheduling headroom at
+            // higher rates, plus four host blocks. Consumption drives demand.
+            const auto reserve = std::min(capacity, std::max(minimumReserve_.load(std::memory_order_relaxed), std::min(frames, capacity/4)*4));
             wanted_.store(read + count + reserve, std::memory_order_release);
         }
     }
@@ -85,6 +89,7 @@ private:
         alignas(64) std::atomic<uint64_t> read{0};
     } tx_, rx_;
     std::atomic<uint64_t> wanted_{0};
+    std::atomic<size_t> minimumReserve_{1024};
     std::atomic<bool> discardRx_{false};
 };
 } // namespace webrtc_vst
