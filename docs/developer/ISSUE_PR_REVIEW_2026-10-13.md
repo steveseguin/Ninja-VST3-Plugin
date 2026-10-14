@@ -331,11 +331,11 @@ Validation on Windows x64 / Release:
   callbacks, 5% loss now needs 25 PLC packets instead of 375; the one-second
   outage needs 50 instead of 750.
 - The nine native Windows checks and all 15 offline JavaScript tests pass.
-- A subsequent 90-second real WebRTC soak passes its normal level, frequency,
-  finite-output and dropout-rate checks, but fails the optional strict zero-silence
-  check: one silent block among 15,040 steady blocks. This is retained as a failed
-  strict result pending diagnosis; the deterministic PLC fix does not establish
-  dropout-free operation of the entire host/worker/transport path.
+- Two 90-second real WebRTC soaks of the initial PLC-only candidate pass their
+  normal level, frequency, finite-output and dropout-rate checks, but each fails
+  the optional strict zero-silence check: one silent block among 15,040 steady
+  blocks. The retained pre-PLC build passes its separate 90-second comparison.
+  These results motivated the worker timing diagnosis below and remain recorded.
 
 Evidence: [baseline](validation/2026-10-14-audio-impairment-baseline.json),
 [fixed](validation/2026-10-14-audio-impairment-fixed.json), and
@@ -357,3 +357,54 @@ under that schedule need attention in that broader playout design.
 FEC remains disabled. The earlier strict distortion measurement caveat and the
 unperformed DAW save/export and macOS DAW tests still apply. No new UI assets are
 needed for this audio-only change.
+
+### Windows worker timing diagnosis
+
+A temporary instrumented build reproduced a silent 256-frame block at the
+exact time its host-facing worker queue lacked 256 frames. The worker had not
+iterated for 16.348 ms, despite its idle path requesting a 1 ms sleep. The
+timestamps differ by less than 0.1 ms. This identifies the observed empty block
+as a worker queue underrun rather than a silent Opus concealment frame.
+
+A separate 200-wait probe measured ordinary 1 ms sleeps at 10.062 ms median,
+16.045 ms p95 and 22.222 ms maximum on this Windows machine. The worker now uses
+a private high-resolution waitable timer while an online session is active.
+The same probe measured 1.526 ms median, 1.684 ms p95 and 1.991 ms maximum.
+The worker owns and closes its handle; the host process callback does not wait
+or make timer calls. No global timer period, thread priority or buffering
+threshold was changed. Inactive/offline sessions retain the previous idle wait;
+unsupported timer APIs and non-Windows platforms retain the normal sleep path.
+See Microsoft's [timer API](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createwaitabletimerexw)
+and [Sleep scheduling notes](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep).
+
+Buffered reads also avoid acquiring the decoder lock. Only an empty ring needs
+that lock, and the worker checks the ring again before generating concealment
+in case a packet arrived while it waited. All 126 partition regressions and
+21 impairment scenarios pass with this final receive path.
+
+[Runtime observations and wait measurements](validation/2026-10-14-audio-runtime.json)
+retain the earlier failed strict runs and the temporary instrumentation result.
+These scheduling measurements are local observations, not hard real-time
+guarantees. The instrumentation itself is not shipped.
+
+With the final worker wait and receive path, a **300-second real WebRTC soak
+passes the unchanged strict zero-dropout gate**: zero silent blocks among
+54,520 measured steady blocks, no nonfinite samples, minimum one-second RMS
+0.177708, and maximum measured tone-frequency error 0.665 Hz. The largest
+observed host process callback took 254 microseconds. This is same-machine
+synthetic stereo audio, without deliberate network impairment or audio hardware.
+
+The final 45-second encrypted playback-quality probe also passes its unchanged
+limits: local one-way latency 57.418 ms median / 57.597 ms p95, 0.615 ms spread,
+and tone-residual median 0.365% left / 0.709% right (p95 0.422% / 0.976%). It
+measures 522 plateau windows per channel, with no silent, clipped or nonfinite
+steady output. This passing run does not erase the earlier codec/window-alignment
+caveat or establish performance on a WAN or physical audio interface.
+
+The final source commit, `5a6fe993d6bf232beca92ca5ea2feac80a5a047a`, also
+passes all nine Windows native checks. Both Apple Silicon and Intel macOS
+complete [CI run 38513264927](https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38513264927)
+successfully: eight native tests (including the new impairment regression),
+15 offline tests, SDK/security/settings/reconnect checks, and WebRTC publish/
+receive integration on each architecture. The Windows worker-timer behavior
+was measured locally; macOS uses the existing platform sleep path.

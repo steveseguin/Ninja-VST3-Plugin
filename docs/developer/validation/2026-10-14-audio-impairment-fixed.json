@@ -1622,5 +1622,6 @@
   "scope": "Virtual clock; production Opus receive, resampler, ring and pull; excludes network transport and DAW",
   "baselineSourceCommit": "3232aeb",
   "baselineAdaptation": "Receive lambda extracted verbatim into a private method for the test harness; decoder, resampler, ring and pull behavior unchanged.",
-  "platform": "Windows x64, Release, production Opus 1.5.2"
+  "platform": "Windows x64, Release, production Opus 1.5.2",
+  "sourceCommit": "5a6fe993d6bf232beca92ca5ea2feac80a5a047a"
 }

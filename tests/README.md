@@ -37,6 +37,14 @@ amount of concealment generated. They do not certify fidelity under reordering.
 This is a media-boundary simulation, without ICE, SRTP, signaling, a DAW, or
 an operating-system packet scheduler. Both platform build workflows include it.
 
+Build and run `webrtc_vst_audio_worker_wait_probe` to compare 200 ordinary 1 ms
+sleeps with the production worker wait. An optional argument saves JSON results.
+This is a manual timing diagnostic, not a timing-sensitive CI assertion.
+Set `WEBRTC_SOAK_CAPTURE=1` when running `npm run test:audio-soak` to record
+timestamped synthetic PCM under the ignored build directory (capture is capped at 120
+seconds per process). Use `WEBRTC_SOAK_STRICT=1` to require zero silent blocks
+after warmup; failed strict results should be retained.
+
 The peer buffer test also compares interleaved and planar writes through wrap,
 overflow, and empty writes, preserving the policy of keeping the newest frames.
 

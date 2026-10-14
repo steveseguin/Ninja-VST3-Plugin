@@ -1,0 +1,214 @@
+{
+  "sourceCommit": "5a6fe993d6bf232beca92ca5ea2feac80a5a047a",
+  "scope": "Windows x64; real same-machine encrypted WebRTC and precise CLI host callbacks; no physical audio device or WAN impairment",
+  "priorSoaks": {
+    "plcOnlyFirst": {
+      "summary": {
+        "seconds": 90,
+        "windows": 89,
+        "steadyWindows": 80,
+        "worstCallbackUs": 217.9,
+        "silentBlocks": 1,
+        "totalBlocks": 15040,
+        "minRms": 0.177245,
+        "maxFrequencyError": 6.980000000000018
+      },
+      "normalChecksPassed": true,
+      "strictZeroDropoutsPassed": false
+    },
+    "plcOnlyRepeat": {
+      "summary": {
+        "seconds": 90,
+        "windows": 89,
+        "steadyWindows": 80,
+        "worstCallbackUs": 175.9,
+        "silentBlocks": 1,
+        "totalBlocks": 15040,
+        "minRms": 0.17731,
+        "maxFrequencyError": 6.980000000000018
+      },
+      "normalChecksPassed": true,
+      "strictZeroDropoutsPassed": false
+    },
+    "retainedPrePlcBuild": {
+      "summary": {
+        "seconds": 90,
+        "windows": 89,
+        "steadyWindows": 80,
+        "worstCallbackUs": 139.1,
+        "silentBlocks": 0,
+        "totalBlocks": 15040,
+        "minRms": 0.176958,
+        "maxFrequencyError": 1.330000000000041
+      },
+      "normalChecksPassed": true,
+      "strictZeroDropoutsPassed": true
+    },
+    "instrumentedPlcOnly": {
+      "summary": {
+        "seconds": 120,
+        "windows": 119,
+        "steadyWindows": 110,
+        "worstCallbackUs": 426,
+        "silentBlocks": 1,
+        "totalBlocks": 20680,
+        "minRms": 0.177249,
+        "maxFrequencyError": 6.980000000000018
+      },
+      "normalChecksPassed": true,
+      "strictZeroDropoutsPassed": false
+    }
+  },
+  "diagnosticObservation": {
+    "scope": "Temporary local instrumentation; not shipped in the plugin",
+    "silentCaptureBlock": 6309,
+    "silentCaptureTimestamp": 1443549.1603672002,
+    "workerObservationTimestamp": 1443549.160453,
+    "workerQueueMissingFrames": 256,
+    "workerLoopGapMs": 16.3482,
+    "requestedIdleSleepMs": 1,
+    "interpretation": "The captured empty block coincided with the worker output queue underrun; this was not a silent Opus PLC frame."
+  },
+  "waitProbe": {
+    "audioWorkerWait": {
+      "maxMs": 1.9908,
+      "meanMs": 1.528405,
+      "medianMs": 1.5259,
+      "p95Ms": 1.6839,
+      "requestedMs": 1,
+      "samples": 200
+    },
+    "highResolutionTimerAvailable": true,
+    "ordinarySleep": {
+      "maxMs": 22.2217,
+      "meanMs": 11.090073000000002,
+      "medianMs": 10.0624,
+      "p95Ms": 16.0453,
+      "requestedMs": 1,
+      "samples": 200
+    },
+    "scope": "Observed local scheduling only; no hard real-time guarantee or timing assertion"
+  },
+  "retainedPrePlcBinarySha256": "2f34a905704ba81cea8f977543d62f785791d5bc8c1e1d1597edbbb540fcf83c",
+  "plcOnlyBinarySha256": "0f9ba328701a36879381cee97603b944d968ca75275a460cad2d2c4f681d3776",
+  "finalBinarySha256": "a7759bc4e1042aead61b5eb4ccafaf4d0c0c2ba0da3d7b9adae760dda02b14e0",
+  "finalSoak": {
+    "summary": {
+      "seconds": 300,
+      "windows": 299,
+      "steadyWindows": 290,
+      "worstCallbackUs": 254,
+      "silentBlocks": 0,
+      "totalBlocks": 54520,
+      "minRms": 0.177708,
+      "maxFrequencyError": 0.6649999999999636
+    },
+    "normalChecksPassed": true,
+    "strictZeroDropoutsPassed": true,
+    "seconds": 300,
+    "intentionalPacketImpairment": false
+  },
+  "finalPlaybackQuality": {
+    "scope": "48 kHz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+    "latencyMs": {
+      "median": 57.41779995150864,
+      "p95": 57.596500031650066,
+      "min": 57.10129998624325,
+      "max": 57.716700015589595,
+      "spread": 0.6154000293463469,
+      "markers": 18
+    },
+    "thdnPercent": [
+      {
+        "median": 0.3647146091508042,
+        "p95": 0.42191301527931674,
+        "windows": 522
+      },
+      {
+        "median": 0.7088529423082207,
+        "p95": 0.9758965094267009,
+        "windows": 522
+      }
+    ],
+    "silentBlocks": 0,
+    "totalBlocks": 6750,
+    "nonfinite": 0,
+    "clippedBlocks": 0,
+    "passed": true
+  },
+  "windowsNativeTests": [
+    {
+      "name": "AudioImpairmentTest",
+      "passed": true,
+      "seconds": 1.85
+    },
+    {
+      "name": "PeerAudioBufferUnitTest",
+      "passed": true,
+      "seconds": 0.01
+    },
+    {
+      "name": "ResamplerUnitTest",
+      "passed": true,
+      "seconds": 0.03
+    },
+    {
+      "name": "SettingsUnitTest",
+      "passed": true,
+      "seconds": 0.16
+    },
+    {
+      "name": "IntegrationTest",
+      "passed": true,
+      "seconds": 17.91
+    },
+    {
+      "name": "StressTest",
+      "passed": true,
+      "seconds": 38.01
+    },
+    {
+      "name": "FuzzTest",
+      "passed": true,
+      "seconds": 1.53
+    },
+    {
+      "name": "WindowsEditorSmoke",
+      "passed": true,
+      "seconds": 29.13
+    },
+    {
+      "name": "WindowsEditorWithoutResources",
+      "passed": true,
+      "seconds": 29.13
+    }
+  ],
+  "windowsOfflineTestsPassed": 15,
+  "finalGateExitCodes": {
+    "qualityExit": 0,
+    "nativeExit": 0
+  },
+  "macos": {
+    "workflow": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38513264927",
+    "sourceCommit": "5a6fe993d6bf232beca92ca5ea2feac80a5a047a",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "build (macos-15-intel, x86_64)",
+        "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38513264927/job/115686336680",
+        "nativeTestsPassed": 8,
+        "offlineTestsPassed": 15,
+        "conclusion": "success",
+        "completedAt": "2026-10-14T05:09:14Z"
+      },
+      {
+        "name": "build (macos-15, arm64)",
+        "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38513264927/job/115686336812",
+        "nativeTestsPassed": 8,
+        "offlineTestsPassed": 15,
+        "conclusion": "success",
+        "completedAt": "2026-10-14T04:56:46Z"
+      }
+    ]
+  }
+}
