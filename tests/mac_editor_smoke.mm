@@ -52,32 +52,29 @@ static NSView* nativeEditor(NSView* view) {
     return nil;
 }
 
-// Running NSRunLoop alone services timers, but does not dispatch Cocoa's queued
-// activation, focus and window events. Behave like an actual host's event loop.
-static void pumpEvents(NSTimeInterval seconds) {
-    NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    do {
-        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:deadline
-            inMode:NSDefaultRunLoopMode dequeue:YES];
-        if (event) [NSApp sendEvent:event];
-    } while ([deadline timeIntervalSinceNow] > 0);
-    [NSApp updateWindows];
-}
-
 static void clickEditor(NSWindow* window, NSPoint point) {
     for (const auto type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp}) {
         NSEvent* event = [NSEvent mouseEventWithType:type location:point modifierFlags:0
             timestamp:0 windowNumber:[window windowNumber] context:nil eventNumber:1 clickCount:1 pressure:1];
         [window sendEvent:event];
     }
-    pumpEvents(0.05);
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+}
+
+static NSString* fieldEditorText(NSWindow* window) {
+    id responder = [window firstResponder];
+    if (![responder isKindOfClass:[NSTextView class]]) return nil;
+    NSTextView* editor = responder;
+    if (!editor.editable || !editor.fieldEditor || editor.window != window) return nil;
+    return editor.string;
 }
 
 static bool typeField(NSWindow* window, NSPoint point, NSString* value) {
     clickEditor(window, point);
     id responder = [window firstResponder];
     if (![responder respondsToSelector:@selector(insertText:replacementRange:)]) return false;
-    NSString* old = [[[responder attributedSubstringForProposedRange:NSMakeRange(0, 127) actualRange:nil] string] copy];
+    NSString* old = [fieldEditorText(window) copy];
+    if (!old) return false;
     [responder insertText:value replacementRange:NSMakeRange(0, [old length])];
     [responder didChangeText];
     // Deliver Return through Cocoa so the field editor synchronizes its owning
@@ -86,7 +83,7 @@ static bool typeField(NSWindow* window, NSPoint point, NSString* value) {
         timestamp:0 windowNumber:[window windowNumber] context:nil characters:@"\r"
         charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36];
     [window sendEvent:enter];
-    pumpEvents(0.05);
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
     return true;
 }
 
@@ -135,28 +132,27 @@ int main(int argc, char** argv) {
             }
             view->onSize(&rect);
             [window makeKeyAndOrderFront:nil];
-            NSDate* focusDeadline = [NSDate dateWithTimeIntervalSinceNow:5];
-            while ((!NSApp.active || !window.keyWindow) && [focusDeadline timeIntervalSinceNow] > 0)
-                pumpEvents(0.03);
-            if (!NSApp.active || !window.keyWindow) {
-                std::cerr << "Test host could not activate its Cocoa window\n";
-                return 1;
-            }
             [window makeFirstResponder:nativeEditor([window contentView])];
             view->onFocus(true); // Hosts must activate the VSTGUI frame for text commits.
-            pumpEvents(0.3);
+            [[NSNotificationCenter defaultCenter] postNotificationName:NSWindowDidBecomeKeyNotification object:window];
+            for (int tick = 0; tick < 10; ++tick) {
+                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.03]];
+            }
             for (int toggle = 0; toggle < 4; ++toggle) {
                 clickEditor(window, NSMakePoint(650, 310));
                 clickEditor(window, NSMakePoint(450, 222)); // web domain field
                 NSResponder* responder = [window firstResponder];
-                NSString* fieldText = nil;
+                NSString* inputMethodText = nil;
                 if ([responder respondsToSelector:@selector(attributedSubstringForProposedRange:actualRange:)]) {
-                    fieldText = [[(id<NSTextInputClient>)responder
+                    inputMethodText = [[(id<NSTextInputClient>)responder
                         attributedSubstringForProposedRange:NSMakeRange(0, 127) actualRange:nil] string];
                 }
+                NSString* fieldText = fieldEditorText(window);
+                if (!inputMethodText && [fieldText isEqualToString:@"https://vdo.ninja/"])
+                    std::cout << "Input-method query returned nil for a focused field containing the expected domain\n";
                 if (![fieldText isEqualToString:@"https://vdo.ninja/"]) {
-                    NSLog(@"Advanced field text: %@; cycle=%d toggle=%d active=%d key=%d responder=%@",
-                        fieldText, cycle, toggle, NSApp.active, window.keyWindow, responder);
+                    NSLog(@"Advanced field text: %@; IME text: %@; cycle=%d toggle=%d responder=%@",
+                        fieldText, inputMethodText, cycle, toggle, responder);
                     std::cerr << "Advanced domain field did not become editable\n";
                     return 1;
                 }
@@ -190,7 +186,7 @@ int main(int argc, char** argv) {
                         controller->setParamNormalized(tag, 0.0);
                     }
                 }
-                pumpEvents(0.05);
+                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
                 method_setImplementation(opener, original);
                 const bool hostActionsInert = qrOpenRequests == 0 && [pasteboard changeCount] == pasteboardVersion;
                 if (!hostActionsInert) {

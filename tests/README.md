@@ -20,6 +20,11 @@ continuity, pre-fill and reset across 8–384 kHz. Build it with the
 playback-quality analyzer with in-memory clean and distorted PCM; it does not
 require native dependencies or a network connection.
 
+The offline suite also checks synthetic sender timing with late and repeated
+timer callbacks. Both `with_test_publisher.js` and the manual DAW probe use
+`tools/tests/helpers/paced_tone.js` to supply audio according to elapsed
+monotonic time. A timer callback is not assumed to represent exactly 10 ms.
+
 ## Dependency-free resampler regression
 
 From the repository root, run this CPU-only test without a VST3 SDK, audio host,

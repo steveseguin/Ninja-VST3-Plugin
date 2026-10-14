@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "baselineCommit": "cb63ae0978e3d0bb4b25dee42e53bdc323ea4080",
+  "platform": "win32",
+  "node": "v22.19.0",
+  "deterministic": {
+    "callbackIntervalMs": 15.625,
+    "elapsedSeconds": 1,
+    "originalAudioSeconds": 0.64,
+    "fixedAudioSeconds": 1
+  },
+  "realtime": {
+    "sourceAudioSeconds": 10,
+    "sourceWallSeconds": 10.0069307,
+    "sourcePacingRatio": 0.9993074100133421
+  },
+  "offlineTests": {
+    "passed": 15,
+    "failed": 0
+  },
+  "ownedRoomLive": {
+    "passed": true,
+    "monitorRms": 0.171816,
+    "sourceAudioSeconds": 29.63,
+    "sourceWallSeconds": 29.650691799999997,
+    "sourcePacingRatio": 0.9993021478170031
+  }
+}

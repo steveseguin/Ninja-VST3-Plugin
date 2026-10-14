@@ -8,6 +8,7 @@ const path = require("node:path");
 const { parseArgs } = require("node:util");
 const wrtc = require("@roamhq/wrtc");
 const VDONinjaSDK = require("../../../js_sdk/vdoninja-sdk-node.js");
+const { startTestTone } = require("../helpers/paced_tone.js");
 const { values } = parseArgs({ options: {
     input: { type: "string" }, output: { type: "string" },
     "host-rate": { type: "string" }, "buffer-size": { type: "string" },
@@ -23,34 +24,18 @@ fs.writeFileSync(path.join(outputDir, "streams.json"), JSON.stringify(streams, n
 const options = { host: "wss://wss.vdo.ninja", password: "", salt: "vdo.ninja", autoReconnect: false };
 const publisher = new VDONinjaSDK(options), viewer = new VDONinjaSDK(options);
 const source = new wrtc.nonstandard.RTCAudioSource(), track = source.createTrack();
-const started = performance.now();
-let phase = 0, sourceFrames = 0, sink = null, finished = false;
-
-// Count elapsed audio frames, rather than assuming each timer callback took
-// exactly 10 ms. Windows timer scheduling can otherwise underfeed the source.
-const timer = setInterval(() => {
-    const due = Math.floor((performance.now() - started) / 10);
-    while (sourceFrames < due) {
-        const samples = new Int16Array(480);
-        for (let i = 0; i < samples.length; ++i) {
-            samples[i] = Math.round(8000 * Math.sin(phase++ * 2 * Math.PI * 440 / 48000));
-        }
-        source.onData({ samples, sampleRate: 48000, bitsPerSample: 16, channelCount: 1, numberOfFrames: 480 });
-        ++sourceFrames;
-    }
-}, 2);
+const tone = startTestTone(source);
+let sink = null, finished = false;
 const watchdog = setTimeout(() => finish({ passed: false, error: "180-second timeout" }, 1), 180000);
 
 async function finish(result, code) {
     if (finished) return;
     finished = true;
     clearTimeout(watchdog);
-    clearInterval(timer);
+    tone.stop();
     if (sink) sink.stop();
     track.stop();
-    const sourceAudioSeconds = phase / 48000;
-    const sourceWallSeconds = (performance.now() - started) / 1000;
-    const sourcePacingRatio = sourceAudioSeconds / sourceWallSeconds;
+    const { sourceAudioSeconds, sourceWallSeconds, sourcePacingRatio } = tone.getStats();
     if (result.passed && (sourcePacingRatio < 0.99 || sourcePacingRatio > 1.01)) {
         result.passed = false;
         result.error = "Synthetic sender did not maintain real-time pacing";

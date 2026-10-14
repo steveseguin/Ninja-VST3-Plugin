@@ -7,6 +7,7 @@ const { spawn } = require("node:child_process");
 const { once } = require("node:events");
 const wrtc = require("@roamhq/wrtc");
 const VDONinjaSDK = require("../../../js_sdk/vdoninja-sdk-node.js");
+const { startTestTone } = require("../helpers/paced_tone.js");
 const streamId = "vstgate" + Date.now().toString(36);
 const room = streamId + "room";
 const password = process.env.WEBRTC_TEST_PASSWORD || "";
@@ -15,12 +16,7 @@ const sdk = new VDONinjaSDK({ host: process.env.WEBRTC_TEST_WSS || "wss://wss.vd
     password, salt, autoReconnect: false, debug: !!process.env.WEBRTC_TEST_DEBUG });
 const source = new wrtc.nonstandard.RTCAudioSource();
 const track = source.createTrack();
-let phase = 0;
-const timer = setInterval(() => {
-    const samples = new Int16Array(480);
-    for (let i = 0; i < samples.length; ++i) samples[i] = Math.round(8000 * Math.sin(phase++ * 2 * Math.PI * 440 / 48000));
-    source.onData({ samples, sampleRate: 48000, bitsPerSample: 16, channelCount: 1, numberOfFrames: 480 });
-}, 10);
+const tone = startTestTone(source);
 let child;
 let cleaned = false;
 const watchdog = setTimeout(() => { console.error("Test publisher timed out"); cleanup(1); }, 300000);
@@ -28,7 +24,8 @@ async function cleanup(code) {
     if (cleaned) return;
     cleaned = true;
     clearTimeout(watchdog);
-    clearInterval(timer);
+    tone.stop();
+    console.log("Test publisher pacing:", JSON.stringify(tone.getStats()));
     if (child && child.exitCode === null) child.kill();
     track.stop();
     try { await sdk.disconnect(); } catch (_) {}
