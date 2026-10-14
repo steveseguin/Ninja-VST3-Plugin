@@ -12,6 +12,15 @@ connect to remote audio or launch a DAW.
 Use `python scripts/capture_windows_gallery.py --ffmpeg C:/path/to/ffmpeg.exe`
 to regenerate the [gallery](../media/gallery/README.md) from that editor.
 
+## macOS editor regression
+
+After `bash scripts/build_macos.sh`, run
+`ctest --test-dir build/webrtc_vst_mac -C Release -R MacEditorSmoke --output-on-failure`.
+The host queues complete mouse gestures, dispatches Cocoa events, and waits
+for asynchronous text-field focus. It verifies actual field contents, Unicode
+edits, Apply, Copy/QR behavior, host parameter side effects, and repeated opens.
+It requires a macOS GUI session. CTest enforces a 30-second process timeout.
+
 ## Receive-buffer and analyzer regressions
 
 `PeerAudioBufferUnitTest` checks production ring-buffer packet retention, stereo

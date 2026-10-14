@@ -19,7 +19,9 @@ MSVC 2022, Release configuration, and VST3 SDK 3.8.0 build 66.
 Reviewed PR heads: #3 `442001f45cf3cf6534a8b324d0a34cb69c04caec`,
 #4 `1f3380105c85e59cce2bbba287662dd8eab9ad65`,
 #5 `f4001162c4433778d7d20ab5bd5b3dfd73f41635`.
-The local combined changes do not merge or close those GitHub items.
+The combined changes are on the
+[validation branch](https://github.com/steveseguin/Ninja-VST3-Plugin/tree/codex/validated-issue-fixes-20261013).
+They do not merge or close those GitHub items.
 
 ## Conversation and review follow-up
 
@@ -53,13 +55,64 @@ against downloaded job logs, rather than accepted from the descriptions:
 - [PR #5](https://github.com/steveseguin/Ninja-VST3-Plugin/pull/5) currently has
   passing ARM64, Intel, and CodeQL checks. CodeQL also passes on #3 and #4.
 
-The macOS editor failure still needs diagnosis on macOS and verification on
-both architectures before calling the combined candidate fully validated.
-The Cocoa test was inspected locally; no speculative platform fix or relaxed
-assertion was added on this Windows machine. No additional application fix was
-justified by the comments. No replies were posted and no threads were resolved.
+The follow-up below investigates the Cocoa test on actual macOS runners.
+No additional application behavior change was justified by the comments.
+No replies were posted and no threads were resolved.
 
 Audit metadata: [comment/review snapshot](validation/2026-10-13-github-comments.json).
+
+### Cocoa editor test follow-up
+
+The first Apple Silicon run reproduced the Advanced-field failure. Changing
+only event-loop pumping did not fix it. A second diagnostic read the actual
+`NSTextView` contents and recorded a cold-run failure with `VSTGUI_NSView`
+still holding focus; the later 20 repetitions passed on each architecture.
+This isolated a timing assumption in the host test, rather than establishing
+a plugin settings defect.
+
+The test clicked a field, waited a fixed 50 ms, and assumed Cocoa had finished
+focusing it. The pinned SDK [defers text-field focus on the main queue](https://github.com/steinbergmedia/vstgui/blob/76823bdbe286e4bdb9f79ab8986af5ce7202336c/vstgui/lib/platform/mac/cocoa/cocoatextedit.mm#L191).
+The candidate now waits up to one second for the expected editable field,
+dispatches queued Cocoa events, and queues both halves of each mouse gesture
+before processing them. It reads the complete field-editor string when
+checking/replacing text. The original value, Unicode editing, Apply, Copy,
+independent QR decoding, host-side-effect and reopen assertions remain.
+
+The [validation workflow](https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38507298437)
+tests source commit `2f59aa743a060fcb3d090b9cd913ffd03b05bd52` and compares the
+original test with 20 repetitions of the candidate on each architecture.
+The first Intel attempt encountered a runner DNS failure cloning libdatachannel;
+it did not reach compilation. The retry passed the complete workflow.
+
+Apple Silicon passed all seven native tests, all 15 offline tests, and every
+security/signaling/WebRTC workflow step. In the same job, the original editor
+test failed once in five repetitions and the revised test passed all 20.
+The final repetition's retained log records that it needed the asynchronous
+focus wait before completing all actual text-edit and QR assertions.
+Intel also passed all seven native tests, all 15 offline tests, the complete
+security/signaling/WebRTC workflow, and 20 editor repetitions. Its original
+test passed all five baseline repetitions, consistent with an intermittent
+failure. Across both architectures, the revised test passed **40/40** repeated
+runs plus both initial native-suite runs. The temporary comparison steps were
+removed from the final workflow; the regular native and JS gates remain.
+Evidence: [macOS UI validation](validation/2026-10-13-macos-ui.json).
+
+### Synthetic sender timing follow-up
+
+The existing integration publisher had the same callback-counted sender that
+underfed the first Ableton probes. Running the original sender callback with
+15.625 ms timer intervals produces only 0.64 seconds of audio per second.
+The shared monotonic-time sender produces the full second, maintains phase
+through delayed callbacks, and does not emit early when callbacks repeat.
+Both the integration publisher and manual DAW probe now use this helper.
+
+All 15 offline regressions pass, including three timing cases. A real Windows
+`RTCAudioSource` accepted 10 seconds of tone in 10.0069 seconds (99.93% pacing).
+The owned-room integration smoke also passes with decoded RMS 0.171816 and
+99.93% sender pacing. Its required `WEBRTC_PUBLISH_TEST_ROOM=1` setting must be
+present; an initial invocation without it had no remote peer and was corrected.
+These are test-harness changes, with no plugin audio or feature changes.
+Evidence: [sender pacing](validation/2026-10-13-sender-pacing.json).
 
 ## Validation
 
@@ -109,6 +162,17 @@ Machine-readable results: [first run](validation/2026-10-13-playback-first.json)
 [repeat](validation/2026-10-13-playback-repeat.json). No test thresholds were relaxed.
 Investigating why the right-channel median straddles 1% remains follow-up work;
 there is insufficient evidence here to change codec settings or audio behavior.
+
+A subsequent diagnostic isolated the same production-built Opus library from
+the plugin and networking. With its default stereo encoder and 20 ms packets,
+the right-channel median reached **1.204%** solely by changing the alignment of
+the 10 ms analysis windows; 111 of 480 tested alignments exceeded 1%. The
+aligned-window checks across 60 input offsets had all stayed below 1%.
+This shows that the gate can fail for the codec alone. It is consistent with,
+but does not establish the exact cause of, the original live result. The
+measurement method and acceptable fidelity target need review before treating
+that result as a new plugin defect. Neither codec defaults nor thresholds were
+changed. [Diagnostic method and results](validation/2026-10-13-opus-window-diagnostic.json).
 
 ## Reproduce locally
 
@@ -212,10 +276,9 @@ covered the editor and synthetic audio route above; saving, reloading sets,
 and export were unavailable in the selected demo mode. Native host tests
 substitute for specific VST3 operations, not complete DAW compatibility.
 High host rates were tested in the production DSP/ring code and host setup
-tests; the live quality probe runs at 48 kHz. macOS/Linux builds were not run
-locally. Existing macOS PR checks contain intermittent Advanced-field UI
-failures; those tests were not weakened and the combined candidate's macOS CI
-has not been run here.
+tests; the live quality probe runs at 48 kHz. Windows was built locally and
+macOS validation ran on GitHub's Apple Silicon and Intel runners, as detailed
+above. Linux builds and macOS DAW tests were not performed.
 
 The [media gallery](../../media/gallery/README.md) contains actual editor
 screenshots and a short silent recording. The local development binary is not

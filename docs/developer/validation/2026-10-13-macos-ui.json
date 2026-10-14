@@ -1,0 +1,57 @@
+{
+  "sourceCommit": "2f59aa743a060fcb3d090b9cd913ffd03b05bd52",
+  "baselineCommit": "cb63ae0978e3d0bb4b25dee42e53bdc323ea4080",
+  "workflow": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38507298437",
+  "scope": "Native Cocoa host tests on GitHub macOS 15 runners; no macOS DAW test",
+  "change": "Queue complete mouse gestures, dispatch Cocoa events, and wait up to one second for expected editable field contents.",
+  "assertionsPreserved": [
+    "five editor reopen cycles",
+    "twenty Advanced view cycles",
+    "Unicode text edits",
+    "Apply and Copy",
+    "independent Apple Vision QR decoding",
+    "200 inert host Copy/QR parameter cycles"
+  ],
+  "arm64": {
+    "job": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38507298437/job/115667616551",
+    "conclusion": "success",
+    "nativeTestsPassed": 7,
+    "offlineTestsPassed": 15,
+    "baselineRepetitionsPassed": 4,
+    "baselineRepetitionsFailed": 1,
+    "candidateRepetitionsPassed": 20,
+    "candidateRepetitionsFailed": 0,
+    "lastRepetitionNeededAsynchronousFocusWait": true,
+    "lastRepetitionVerifiedActualEdits": true,
+    "allWorkflowStepsPassed": true
+  },
+  "x86_64": {
+    "firstAttemptFailure": "Runner could not resolve github.com when cloning libdatachannel; compilation did not start.",
+    "job": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/38507298437/job/115670886804",
+    "nativeTestsPassed": 7,
+    "candidateRepetitionsPassed": 20,
+    "candidateRepetitionsFailed": 0,
+    "conclusion": "success",
+    "offlineTestsPassed": 15,
+    "baselineRepetitionsPassed": 5,
+    "baselineRepetitionsFailed": 0,
+    "lastRepetitionNeededAsynchronousFocusWait": false,
+    "lastRepetitionVerifiedActualEdits": true,
+    "allWorkflowStepsPassed": true
+  },
+  "priorDiagnostics": [
+    {
+      "sourceCommit": "d6b52d5",
+      "run": 38505520231,
+      "result": "Event-loop change alone still failed the Advanced-field assertion; rejected."
+    },
+    {
+      "sourceCommit": "200a2e7",
+      "run": 38506143546,
+      "result": "Reading NSTextView contents alone still failed first ARM64 run with VSTGUI_NSView holding focus. Twenty later repetitions passed per architecture; fixed-delay timing remained unaddressed."
+    }
+  ],
+  "completedAtUtc": "2026-10-14T04:07:19.234642+00:00",
+  "workflowConclusion": "success",
+  "candidateRepetitionsPassedTotal": 40
+}

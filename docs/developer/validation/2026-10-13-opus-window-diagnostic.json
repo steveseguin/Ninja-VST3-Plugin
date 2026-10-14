@@ -1,0 +1,69 @@
+{
+  "scope": "Exploratory codec-only diagnostic; no plugin processing, network, resampling, packet loss, or audio device",
+  "librarySha256": "6a92b954a5e0934f81e61a45ca58f443ad2655d39cdae1fc39a47ca978bd82cd",
+  "encoder": {
+    "sampleRate": 48000,
+    "channels": 2,
+    "application": "OPUS_APPLICATION_AUDIO",
+    "defaultBitrate": 120000,
+    "packetSamplesPerChannel": 960,
+    "lookaheadSamples": 312
+  },
+  "input": {
+    "durationSeconds": 45,
+    "frequenciesHz": [
+      1000,
+      1500
+    ],
+    "highAmplitude": 0.25,
+    "lowAmplitude": 0.05,
+    "highDurationSeconds": 0.5,
+    "periodSeconds": 2,
+    "source": "Actual captured Seed output from the first failed plugin-to-plugin probe; separate generated-tone check produced the same codec statistics"
+  },
+  "analysis": {
+    "discardFirstSeconds": 8,
+    "windowSamples": 480,
+    "testedWindowOffsets": 480,
+    "plateauFromSeconds": 0.1,
+    "plateauToSeconds": 0.4,
+    "delayCompensationSamples": 312,
+    "metric": "100 * sqrt((energy - fitted fundamental energy - DC energy) / fitted fundamental energy)",
+    "quantileMethod": "lower"
+  },
+  "channels": [
+    {
+      "channel": 0,
+      "worst": {
+        "windowOffsetSamples": 338,
+        "medianResidualPercent": 0.4510479482509354,
+        "p95ResidualPercent": 0.4819057610998812
+      },
+      "offsetsAboveOnePercent": 0
+    },
+    {
+      "channel": 1,
+      "worst": {
+        "windowOffsetSamples": 305,
+        "medianResidualPercent": 1.2041858538830226,
+        "p95ResidualPercent": 1.5423668320002617
+      },
+      "offsetsAboveOnePercent": 111
+    }
+  ],
+  "interpretation": "The codec alone can exceed the existing 1% median residual threshold as the 10 ms analysis-window alignment changes. This is consistent with, but does not prove the exact cause of, the earlier live failure. No codec defaults or gate thresholds changed.",
+  "directWindowCrossCheck": [
+    {
+      "windowOffsetSamples": 0,
+      "medianResidualPercent": 0.8312305991039348,
+      "p95ResidualPercent": 1.1742958775752186,
+      "windows": 551
+    },
+    {
+      "windowOffsetSamples": 305,
+      "medianResidualPercent": 1.2041858556509846,
+      "p95ResidualPercent": 1.5423668317117685,
+      "windows": 551
+    }
+  ]
+}
