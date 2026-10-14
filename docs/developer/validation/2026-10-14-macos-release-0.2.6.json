@@ -1,0 +1,100 @@
+{
+  "sourceCommit": "b0836a61e9db58957bfc5dba48aed2917c5775b1",
+  "releaseTag": "mac-v0.2.6",
+  "verificationRun": 38652439283,
+  "artifacts": {
+    "arm64": {
+      "dmgSha256": "02c54d5e74dddc136b5e241a8b6f727972e68116e0b1aa390bb436d7f0a531b9",
+      "signedBinarySha256": "b5b9431bf90a95b7802e2ed32566c51acdab1d16f3868f0fc7577448bd1d9a4b",
+      "notarization": {
+        "id": "c50a33ac-5c35-48cf-b7db-d2f00ff4defe",
+        "status": "Accepted",
+        "issues": null
+      },
+      "integrationCases": 15,
+      "pluginvalStrictness": 10,
+      "peerChurn": {
+        "sent": 384,
+        "peerGenerations": 380,
+        "recoveryOffers": 3,
+        "analysis": [
+          {
+            "frames": 960000,
+            "nonfinite": 0,
+            "peak": 0.25210532546043396,
+            "maxStep": 0.032907336950302124,
+            "maxResidual": 6.12252087203724e-06,
+            "maxBoundaryResidual": 4.545135259381716e-06,
+            "suspiciousSamples": 0,
+            "tolerance": 0.001
+          },
+          {
+            "frames": 960000,
+            "nonfinite": 0,
+            "peak": 0.2552979290485382,
+            "maxStep": 0.0498463399708271,
+            "maxResidual": 2.8002128438786578e-05,
+            "maxBoundaryResidual": 2.504494414190539e-05,
+            "suspiciousSamples": 0,
+            "tolerance": 0.001
+          }
+        ]
+      },
+      "reaper": {
+        "instances": 2,
+        "audioWindows": 21,
+        "editorBypassReload": true
+      }
+    },
+    "x86_64": {
+      "dmgSha256": "db0bea2dd04da47e131f80317f2d389053cc8461ed0aedad29c83333b3caedd3",
+      "signedBinarySha256": "2fec0608d6f8f2a6b34af15b38cba2e5fde32a27ed98e182a4f51ac3e985c431",
+      "notarization": {
+        "id": "6627979f-ab9b-4ab8-b536-50f87943ac5d",
+        "status": "Accepted",
+        "issues": null
+      },
+      "integrationCases": 15,
+      "pluginvalStrictness": 10,
+      "peerChurn": {
+        "sent": 384,
+        "peerGenerations": 381,
+        "recoveryOffers": 3,
+        "analysis": [
+          {
+            "frames": 960000,
+            "nonfinite": 0,
+            "peak": 0.25309959053993225,
+            "maxStep": 0.0330476313829422,
+            "maxResidual": 1.0954609342972432e-05,
+            "maxBoundaryResidual": 7.660612064530614e-06,
+            "suspiciousSamples": 0,
+            "tolerance": 0.001
+          },
+          {
+            "frames": 960000,
+            "nonfinite": 0,
+            "peak": 0.25574398040771484,
+            "maxStep": 0.04994988441467285,
+            "maxResidual": 2.395419676487487e-05,
+            "maxBoundaryResidual": 1.778262197066338e-05,
+            "suspiciousSamples": 0,
+            "tolerance": 0.001
+          }
+        ]
+      },
+      "reaper": {
+        "instances": 2,
+        "audioWindows": 21,
+        "editorBypassReload": true
+      }
+    }
+  },
+  "liveRoomArm64": true,
+  "virusTotal": {
+    "completed": true,
+    "malicious": 0,
+    "suspicious": 0
+  },
+  "scope": "Developer ID signed, notarized and stapled DMGs; quarantined extracted plugin tests; local Intel execution under Rosetta"
+}

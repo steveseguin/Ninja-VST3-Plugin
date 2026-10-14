@@ -8,7 +8,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { rootDir } = require("./build_paths");
 const { chromium } = require(path.join(rootDir, "build/test-tools/browser/node_modules/playwright-core"));
-const version = process.env.WEBRTC_TEST_RELEASE_VERSION || "0.2.5";
+const version = process.env.WEBRTC_TEST_RELEASE_VERSION || "0.2.6";
 assert.match(version, /^\d+\.\d+\.\d+$/);
 const site = "https://steveseguin.github.io/Ninja-VST3-Plugin/";
 const release = `https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v${version}/`;

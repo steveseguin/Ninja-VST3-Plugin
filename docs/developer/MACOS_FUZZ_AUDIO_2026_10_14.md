@@ -177,6 +177,54 @@ Reproduce the new sustained-audio peer replacement check with
 tooling README for selecting the TSan build. Each run lasts about 28 seconds;
 no additional long soak was performed.
 
+## Mac v0.2.6 release package validation
+
+Both final DMGs are Developer ID signed, Apple-notarized and stapled. Apple's
+logs report `Accepted` with no issues. Local verification and the independent
+GitHub release job verified the exact hashes, signatures, architecture, version,
+stapled tickets and Gatekeeper acceptance. See the
+[artifact record](validation/2026-10-14-macos-release-0.2.6.json).
+
+The source tag `mac-v0.2.6` identifies `b0836a6`; subsequent release-workflow and
+website changes do not modify the plugin. The Apple Silicon build is the tested
+production build above, with its distribution signature added. Intel was rebuilt
+from the same runtime source and passed all ten native suites under Rosetta.
+
+Both disk images were mounted read-only, their plugins copied into isolated test
+folders, and quarantine attributes applied to those copies. Each final signed
+plugin passed 15 native integration cases, strictness-10 pluginval, 384 peer
+replacement requests with uninterrupted measured stereo audio, and REAPER
+editor/bypass/saved-project reload checks with 21 sustained audio windows. The
+exact plugin path was checked in REAPER to exclude another installed copy.
+The signed Apple Silicon artifact also passed the owned-publisher live-room
+gate, including audio-only preferences, datachannel mapping and decoded output
+(RMS 0.168857).
+
+The Intel standalone Cocoa test initially could not activate its window. A
+foregrounded rerun passed; the local launcher was also corrected to tolerate
+the test process exiting before its final focus request. Intel REAPER initially
+waited for permission to install its optional ReWire component, before loading
+the VST3. That request was cancelled; no administrator credentials or ReWire
+installation were needed. REAPER's evaluation dialog was dismissed before the
+successful test journey. Its optional FFmpeg lookup found an incompatible
+Homebrew architecture, but the VST3 audio checks passed. The first Intel packaging
+attempt lacked the shared dependency-license path; the final package includes
+the licenses and passed all verification. These were host/packaging setup issues,
+not additional plugin fixes.
+
+The release workflow now waits for completed VirusTotal results rather than
+publishing on submission alone. Both final DMGs completed with zero malicious
+or suspicious detections (60 and 61 undetected results respectively). Analysis
+URLs remain in the workflow/local verification logs, outside public release notes.
+The verification run is `38652439283`; local evidence is under
+`build/test-tools/release-026/`. Tests ran sequentially behind the resource guard,
+which waited when concurrent work reduced startup memory headroom.
+
+| Final DMG | SHA-256 |
+| --- | --- |
+| Apple Silicon | `02c54d5e74dddc136b5e241a8b6f727972e68116e0b1aa390bb436d7f0a531b9` |
+| Intel | `db0bea2dd04da47e131f80317f2d389053cc8461ed0aedad29c83333b3caedd3` |
+
 ## Scope
 
 These are objective synthetic audio checks, not a subjective speaker/headphone

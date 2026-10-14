@@ -117,7 +117,8 @@ the saved ID with `xcrun notarytool info <id> --keychain-profile vdoninja-notary
 before retrying; don't blindly resubmit a pending job.
 
 The packaging commands do not upload or publish GitHub releases. Final DMGs
-must pass artifact tests and VirusTotal submission. The Mac release workflow
+must pass artifact tests and completed VirusTotal scans with no malicious or
+suspicious detections. The Mac release workflow
 verifies their hashes, stapled Apple tickets, Gatekeeper acceptance, bundle
 identity, version and architecture before it can publish a private draft.
 
