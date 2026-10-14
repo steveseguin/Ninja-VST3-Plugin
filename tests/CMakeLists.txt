@@ -2,6 +2,10 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+add_executable(webrtc_vst_audio_worker_wait_probe audio_worker_wait_probe.cpp)
+target_link_libraries(webrtc_vst_audio_worker_wait_probe PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
+target_compile_features(webrtc_vst_audio_worker_wait_probe PRIVATE cxx_std_20)
+
 # Real Opus + production receive/pull code, with a deterministic packet clock.
 add_executable(webrtc_vst_audio_impairment_test audio_impairment_test.cpp
     ../webrtc_vst/src/WebRTCSession.cpp

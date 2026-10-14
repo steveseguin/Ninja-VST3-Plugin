@@ -221,6 +221,7 @@ set(PLUGIN_HEADERS
     src/WebRTCSession.h
     src/VDONinjaSignalingClient.h
     src/AudioRingBuffer.h
+    src/AudioWorkerWait.h
     src/PluginConfig.h
     src/PluginController.h
     src/StreamIdGenerator.h

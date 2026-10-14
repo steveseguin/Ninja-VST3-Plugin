@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "AudioWorkerWait.h"
 #include "ConfigState.h"
 #include "EnvironmentSettings.h"
 
@@ -536,6 +537,7 @@ tresult PLUGIN_API WebRTCProcessor::canProcessSampleSize(int32 symbolicSampleSiz
 }
 
 void WebRTCProcessor::audioWorkerMain() {
+    AudioWorkerWait idleWait;
     std::array<float, RealtimeAudioBridge::chunk> left{}, right{};
     float* output[] = {left.data(), right.data()};
     const float* input[] = {left.data(), right.data()};
@@ -562,7 +564,12 @@ void WebRTCProcessor::audioWorkerMain() {
                 }
             }
         }
-        if (!worked) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (!worked) {
+            if (sessionActive_.load(std::memory_order_acquire) && !offline_.load(std::memory_order_acquire))
+                idleWait.wait();
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
 }
 

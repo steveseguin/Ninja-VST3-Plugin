@@ -2064,11 +2064,16 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
     for (auto& source : peerSources) {
         size_t peerFramesMixed = 0;
         while (peerFramesMixed < frames) {
-            size_t framesRead = 0;
+            if (!source.context->active.load(std::memory_order_acquire)) break;
+            // Buffered reads only need the ring's lock; do not wait behind a
+            // packet decode unless concealment might actually be necessary.
+            size_t framesRead = source.buffer->pop(pullTempChannelPtrsScratch_.data(),
+                frames - peerFramesMixed, channels);
             bool plcLogged = false;
-            {
+            if (framesRead == 0) {
                 std::lock_guard<SpinLock> ctxLock(source.context->mutex);
                 if (!source.context->active.load(std::memory_order_acquire)) break;
+                // A packet may have been decoded while we acquired the lock.
                 framesRead = source.buffer->pop(pullTempChannelPtrsScratch_.data(),
                     frames - peerFramesMixed, channels);
                 if (framesRead == 0) {
