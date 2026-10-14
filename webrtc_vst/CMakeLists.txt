@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 if(CMAKE_HOST_APPLE AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
-project(WebRTC_VST VERSION 0.2.6 LANGUAGES CXX)
+project(WebRTC_VST VERSION 0.2.7 LANGUAGES CXX)
 
 if(APPLE)
     enable_language(OBJCXX)

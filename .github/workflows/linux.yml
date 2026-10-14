@@ -1,0 +1,72 @@
+name: Linux Build And Test
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.31.6'
+      - name: Install Linux build and display dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build pkg-config libssl-dev libwayland-dev wayland-protocols \
+            libx11-xcb-dev libxcb-util-dev libxcb-cursor-dev libxcb-keysyms1-dev libxcb-xkb-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libpango1.0-dev libglib2.0-dev libcairo2-dev \
+            libgtkmm-3.0-dev libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev xvfb
+      - name: Build and run native tests
+        run: xvfb-run -a bash scripts/build_linux.sh
+      - name: Extensive VST3 validator
+        env:
+          WEBRTC_VST_HANDSHAKE_URL: ws://127.0.0.1:1
+        run: xvfb-run -a build/webrtc_vst_linux/bin/Release/validator -e build/webrtc_vst_linux/VST3/Release/webrtc_vst.vst3
+      - run: npm ci
+      - name: Offline and hardening tests
+        run: npm run test:offline && npm run test:hardening
+      - name: Integration with an owned synthetic publisher
+        run: node tools/tests/integration/with_test_publisher.js npm run test:integration
+      - name: Live room with an owned synthetic publisher
+        env:
+          WEBRTC_PUBLISH_TEST_ROOM: '1'
+        run: node tools/tests/integration/with_test_publisher.js npm run test:integration:live
+      - name: Media loss and peer replacement recovery
+        run: npm run test:media-faults && npm run test:peer-churn-audio
+      - name: Package complete VST3 bundle
+        run: bash scripts/package_linux.sh
+      # Download and validate the archived bundle before attaching it to a release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-release-candidate
+          path: |
+            build/release/*.tar.gz
+            build/release/*SHA256SUMS.txt
+            build/release/linux-dependencies.txt
+            build/webrtc_vst_linux/bin/Release/webrtc_vst_cli_host
+            build/webrtc_vst_linux/bin/Release/validator
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: linux-test-logs
+          path: |
+            build/webrtc_vst_linux/Testing/Temporary/*.log
+            build/test-tools/**/results.json
+            build/test-tools/**/*.log
