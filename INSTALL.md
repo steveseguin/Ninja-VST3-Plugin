@@ -1,5 +1,13 @@
 # Install WebRTC VST
 
+## Linux (x86-64)
+
+Download the Linux `.tar.gz` and checksum file from the same release. Verify the
+checksum, then extract the whole `webrtc_vst.vst3` bundle into `~/.vst3/`.
+Restart your DAW and rescan VST3 plugins. Release binaries target Ubuntu 22.04
+or compatible newer glibc distributions. See the
+[Linux guide](docs/developer/LINUX.md) for commands and runtime requirements.
+
 ## macOS (Apple Silicon or Intel, macOS 11+)
 
 1. Choose the `macos-arm64` build for a native Apple Silicon DAW, or `macos-x86_64`

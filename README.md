@@ -24,6 +24,7 @@ Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transpo
 
 - Build/test doc: [docs/developer/BUILD_AND_TEST.md](./docs/developer/BUILD_AND_TEST.md)
 - macOS build, install and signing: [docs/developer/MACOS.md](./docs/developer/MACOS.md)
+- Linux build, installation and packaging: [docs/developer/LINUX.md](./docs/developer/LINUX.md)
 - Current hardening, audio measurements and testing gaps: [docs/developer/HARDENING_VALIDATION.md](./docs/developer/HARDENING_VALIDATION.md)
 - SDK policy: Steinberg VST3 SDK 3.8+ (MIT) only
 - Primary automation tests: `npm run test:integration`

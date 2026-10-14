@@ -38,12 +38,11 @@ cmake --build build/webrtc_vst_win --config Release --target webrtc_vst webrtc_v
 
 ## Configure + build (Linux)
 
-```bash
-cmake -S webrtc_vst -B build/webrtc_vst_linux \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DVST3_SDK_ROOT="$PWD/vst3sdk"
+For the pinned SDK, static media/crypto dependencies, native tests, and release
+packaging, use the [Linux guide](LINUX.md). The complete build/test command is:
 
-cmake --build build/webrtc_vst_linux --config Release --target webrtc_vst webrtc_vst_cli_host
+```bash
+xvfb-run -a bash scripts/build_linux.sh
 ```
 
 ## Configure + build (macOS)

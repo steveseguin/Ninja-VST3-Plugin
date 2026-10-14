@@ -25,6 +25,7 @@ Current version macro: `0.2.7` (`webrtc_vst/src/Version.h`).
 - `tests/` - native C++ integration + stress tests simulating host behavior.
 - `docs/` - GitHub Pages landing/download site.
 - `.github/workflows/release.yml` - Windows release packaging workflow.
+- `.github/workflows/linux.yml` - Linux build, native/integration tests and release-candidate packaging.
 - `deploy_plugin.ps1` - local Windows deployment to system VST3 folder.
 
 ## 3) Runtime Behavior (Current State)
@@ -89,12 +90,11 @@ cmake --build build/webrtc_vst_win --config Release --target webrtc_vst webrtc_v
 Linux:
 
 ```bash
-cmake -S webrtc_vst -B build/webrtc_vst_linux \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DVST3_SDK_ROOT="$PWD/vst3sdk"
-
-cmake --build build/webrtc_vst_linux --config Release --target webrtc_vst webrtc_vst_cli_host
+xvfb-run -a bash scripts/build_linux.sh
+bash scripts/package_linux.sh
 ```
+
+See `docs/developer/LINUX.md` for prerequisites and archived-bundle validation.
 
 Key CMake toggle:
 

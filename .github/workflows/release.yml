@@ -249,7 +249,6 @@ jobs:
             $analysisUrl = "https://www.virustotal.com/gui/file-analysis/$($response.data.id)"
             $analysisUrls += $analysisUrl
             Write-Host "VirusTotal submitted: $file"
-            Write-Host "Analysis URL: $analysisUrl"
           }
 
           "analysis_urls<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
