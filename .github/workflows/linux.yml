@@ -31,7 +31,7 @@ jobs:
           sudo apt-get install -y ninja-build pkg-config libssl-dev libwayland-dev wayland-protocols \
             libx11-xcb-dev libxcb-util-dev libxcb-cursor-dev libxcb-keysyms1-dev libxcb-xkb-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libpango1.0-dev libglib2.0-dev libcairo2-dev \
-            libgtkmm-3.0-dev libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev xvfb
+            libgtkmm-3.0-dev libfreetype6-dev libfontconfig1-dev libgl1-mesa-dev libsqlite3-dev xvfb
       - name: Build and run native tests
         run: xvfb-run -a bash scripts/build_linux.sh
       - name: Extensive VST3 validator

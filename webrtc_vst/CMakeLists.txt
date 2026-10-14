@@ -234,6 +234,13 @@ set(PLUGIN_HEADERS
 
 smtg_add_vst3plugin(${PLUGIN_NAME} ${PLUGIN_SOURCES} ${PLUGIN_HEADERS})
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(${PLUGIN_NAME} PRIVATE src/LinuxX11Support.cpp)
+    target_link_options(${PLUGIN_NAME} PRIVATE
+        "LINKER:--wrap=cairo_xcb_surface_create" "LINKER:--wrap=xcb_disconnect"
+        "LINKER:--wrap=xcb_aux_sync")
+endif()
+
 if(WIN32)
     enable_language(RC)
     target_sources(${PLUGIN_NAME} PRIVATE resources/webrtc_vst.rc)

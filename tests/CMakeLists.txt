@@ -260,6 +260,20 @@ if(WIN32)
         RUN_SERIAL TRUE TIMEOUT 60 LABELS "windows;ui")
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(webrtc_vst_linux_editor_test linux_editor_smoke.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/connectionproxy.cpp)
+    target_include_directories(webrtc_vst_linux_editor_test PRIVATE ${vst3sdk_SOURCE_DIR})
+    target_link_libraries(webrtc_vst_linux_editor_test PRIVATE sdk sdk_common sdk_hosting xcb)
+    target_compile_definitions(webrtc_vst_linux_editor_test PRIVATE WEBRTC_VST_DEFAULT_PLUGIN_PATH="${_plugin_bundle}")
+    add_dependencies(webrtc_vst_linux_editor_test webrtc_vst)
+    add_test(NAME LinuxEditorSmoke COMMAND webrtc_vst_linux_editor_test "${_plugin_bundle}")
+    set_tests_properties(LinuxEditorSmoke PROPERTIES TIMEOUT 60 LABELS "linux;ui")
+endif()
+
 if(APPLE)
     add_executable(webrtc_vst_mac_editor_test mac_editor_smoke.mm
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp
