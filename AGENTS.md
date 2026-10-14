@@ -15,7 +15,7 @@ Primary practical use-cases:
 - Voiceover direction and mix review
 - Lightweight collaboration without self-hosted signaling
 
-Current version macro: `0.2.5` (`webrtc_vst/src/Version.h`).
+Current version macro: `0.2.6` (`webrtc_vst/src/Version.h`).
 
 ## 2) Repository Map
 

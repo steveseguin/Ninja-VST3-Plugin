@@ -254,9 +254,12 @@ jobs:
           ($analysisUrls -join "`n") | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Publish GitHub Release
+      # Keep signed packages private until their scan results and packaged-host
+      # smoke checks have been reviewed. Publication is a separate release edit.
+      - name: Stage GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: |
             ${{ steps.package.outputs.asset_path }}
             ${{ steps.package.outputs.installer_assets }}
