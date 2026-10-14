@@ -322,7 +322,8 @@ Current workflow behavior:
 - Zips the signed `.vst3` bundle
 - Auto-detects installer artifacts (`*setup*.exe`, `*installer*.exe`, `*.msi`) and signs/attaches them
 - Submits release assets to VirusTotal before publish
-- Publishes assets to GitHub Releases via `softprops/action-gh-release`
+- Stages signed assets in a draft GitHub Release via `softprops/action-gh-release`.
+- Publish the draft only after reviewing completed scans and validating the downloaded packages.
 
 ### 11.3 Manual local release (no CI wait)
 

@@ -1,0 +1,243 @@
+{
+  "date": "2026-10-14",
+  "version": "0.2.6",
+  "sourceCommit": "4f0c8bafd1db3d84f39810b7428ac546f0d2ac7d",
+  "platform": "Windows x64",
+  "sha256": {
+    "webrtc_vst-v0.2.6-windows-vst3.zip": "1bfacb76d3323eba3134360cbe340c6b5feb183ed9747436e6b26adc42412092",
+    "webrtc_vst-windows-setup.exe": "7913ffdbc0789f02dbc5d0ac20c504b3e4e02bfc98767c6fa9c0a18fa76eb433",
+    "plugin": "790534512306c01b022dcc734d673cd9ee4ce111c1078100a20125f4841d8fd5"
+  },
+  "imports": [
+    "IPHLPAPI.DLL",
+    "bcrypt.dll",
+    "WSOCK32.dll",
+    "WS2_32.dll",
+    "SHLWAPI.dll",
+    "CRYPT32.dll",
+    "KERNEL32.dll",
+    "USER32.dll",
+    "GDI32.dll",
+    "SHELL32.dll",
+    "ole32.dll",
+    "ADVAPI32.dll",
+    "d2d1.dll",
+    "DWrite.dll",
+    "d3d11.dll",
+    "IMM32.dll",
+    "dwmapi.dll",
+    "OPENGL32.dll"
+  ],
+  "ci": {
+    "windows": {
+      "run": 38517837251,
+      "conclusion": "success",
+      "nativeTestsPassed": 9
+    },
+    "macOS": {
+      "run": 38517837265,
+      "conclusion": "success",
+      "architectures": [
+        "arm64",
+        "x86_64"
+      ],
+      "nativeTestsPassedPerArchitecture": 8,
+      "offlineTestsPassedPerArchitecture": 15
+    }
+  },
+  "packaging": {
+    "moduleInfoVersion": "0.2.6",
+    "installerExitCode": 0,
+    "installerPluginMatchesZip": true,
+    "externalOpenSslOrVisualCppRuntimeRequired": false
+  },
+  "signatures": {
+    "signer": "Social Stream Ninja / Steve Seguin",
+    "timestampAuthority": "DigiCert",
+    "bothTimestamped": true,
+    "localTrustStatus": "UnknownError: signer chain terminates in an untrusted root",
+    "policy": "Verified signer, timestamp and CI signing; repository explicitly permits missing local root trust. Not a claim of public certificate trust."
+  },
+  "virusTotal": [
+    {
+      "file": "webrtc_vst-v0.2.6-windows-vst3.zip",
+      "sha256": "1bfacb76d3323eba3134360cbe340c6b5feb183ed9747436e6b26adc42412092",
+      "lastAnalysisDate": 1791957405,
+      "stats": {
+        "malicious": 0,
+        "suspicious": 0,
+        "undetected": 68,
+        "harmless": 0,
+        "timeout": 0,
+        "confirmed-timeout": 0,
+        "failure": 0,
+        "type-unsupported": 7
+      },
+      "detections": []
+    },
+    {
+      "file": "webrtc_vst-windows-setup.exe",
+      "sha256": "7913ffdbc0789f02dbc5d0ac20c504b3e4e02bfc98767c6fa9c0a18fa76eb433",
+      "lastAnalysisDate": 1791957407,
+      "stats": {
+        "malicious": 0,
+        "suspicious": 0,
+        "undetected": 71,
+        "harmless": 0,
+        "timeout": 0,
+        "confirmed-timeout": 0,
+        "failure": 0,
+        "type-unsupported": 4
+      },
+      "detections": []
+    }
+  ],
+  "steinbergValidator": {
+    "sdk": "v3.8.0_build_66",
+    "passed": 47,
+    "failed": 0,
+    "exitCode": 0,
+    "sample64": "Intentionally unsupported; those processing cases are skipped"
+  },
+  "nativeEditor": {
+    "passed": true,
+    "cycles": 5,
+    "checks": [
+      "720x340 layout",
+      "Play/Publish",
+      "text fields",
+      "Advanced",
+      "DPI scaling",
+      "close/reopen"
+    ]
+  },
+  "javascript": {
+    "integrationGate": "passed",
+    "liveRoom": "passed",
+    "liveRoomRms": 0.171692,
+    "receiveLoopbackRms": 0.1557,
+    "publishSdkRms": 0.1532,
+    "source": "Owned synthetic SDK tone; release plugin selected through WEBRTC_TEST_PLUGIN_BUNDLE"
+  },
+  "reaper": {
+    "version": "7.82/x64",
+    "audioDevice": "Dummy Audio",
+    "loadedReleaseBinaryVerified": true,
+    "journey": {
+      "phases": 2,
+      "secondsPerPhase": 35,
+      "sustainedPeakWindows": 21,
+      "passed": true,
+      "bypassRecovery": true,
+      "customPasswordSaltDomain": true
+    },
+    "freshProcess": {
+      "seconds": 35,
+      "sustainedPeakWindows": 13,
+      "passed": true
+    },
+    "offlineRender": {
+      "framesPerChannel": 96000,
+      "format": "48 kHz stereo PCM24",
+      "publishByteIdenticalToBypass": true,
+      "playAllZeroAsIntended": true
+    }
+  },
+  "audacity": {
+    "editorSmoke": {
+      "version": "3.7.9",
+      "plugin": "0.2.6",
+      "cycles": [
+        {
+          "cycle": 1,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 2,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 3,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 4,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 5,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        }
+      ],
+      "exitCode": 0,
+      "scope": "Editor open/close with owned live stream configured; no playback measurement"
+    },
+    "registrationSmoke": {
+      "hostVersion": "4.0.1",
+      "freshProcesses": 5,
+      "allValidated": true,
+      "reportedPluginVersion": "0.2.6",
+      "scope": "CLI registration only; no audio or GUI compatibility claim"
+    }
+  },
+  "limits": [
+    "Windows packages only. New Mac source passed CI; public notarized Mac downloads remain v0.2.5.",
+    "FEC remains disabled; no packet reorder queue or adaptive jitter buffer added.",
+    "No physical audio-device latency or impaired-WAN certification.",
+    "Audacity tests do not measure live playback."
+  ],
+  "strictSoak": {
+    "passed": true,
+    "signalingInterruptionsSeconds": [
+      20,
+      40
+    ],
+    "seconds": 300,
+    "windows": 299,
+    "steadyWindows": 290,
+    "worstCallbackUs": 194.6,
+    "silentBlocks": 0,
+    "totalBlocks": 54520,
+    "minRms": 0.176629,
+    "maxFrequencyError": 0.6649999999999636
+  },
+  "strictPlaybackQuality": {
+    "passed": true,
+    "durationSeconds": 45,
+    "scope": "48 kHz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+    "latencyMs": {
+      "median": 65.8473998773843,
+      "p95": 66.14999985322356,
+      "min": 65.3031999245286,
+      "max": 66.25879998318851,
+      "spread": 0.9556000586599112,
+      "markers": 18
+    },
+    "thdnPercent": [
+      {
+        "median": 0.36764379552932824,
+        "p95": 0.8746818980415483,
+        "windows": 522
+      },
+      {
+        "median": 0.994091709562101,
+        "p95": 1.1203215070214922,
+        "windows": 522
+      }
+    ],
+    "silentBlocks": 0,
+    "totalBlocks": 6750,
+    "nonfinite": 0,
+    "clippedBlocks": 0
+  }
+}

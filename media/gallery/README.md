@@ -74,6 +74,18 @@ The [host validation report](../../docs/developer/ISSUE_PR_REVIEW_2026-10-13.md#
 also covers save/reload, a fresh host process, and offline rendering. Dummy
 Audio exercises the real DAW/plugin graph without an audio interface.
 
+## Audacity 3.7.9 — signed v0.2.6 package
+
+The editor loaded from the signed Windows release ZIP on 2026-10-14.
+Five open/close cycles and clean host shutdown passed. An owned synthetic
+stream was configured; this capture shows the idle editor and does not
+demonstrate Audacity audio playback.
+
+![Signed v0.2.6 editor in Audacity](audacity-v0.2.6.png)
+
+See the [packaged-release validation](../../docs/developer/RELEASE_VALIDATION_0.2.6.md)
+for the exact binary hash and the measured audio checks in REAPER and the CLI host.
+
 ## Reproduce native-host captures
 
 Build `webrtc_vst_windows_editor_test`, then run:
