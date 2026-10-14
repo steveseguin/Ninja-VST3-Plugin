@@ -408,3 +408,68 @@ successfully: eight native tests (including the new impairment regression),
 15 offline tests, SDK/security/settings/reconnect checks, and WebRTC publish/
 receive integration on each architecture. The Windows worker-timer behavior
 was measured locally; macOS uses the existing platform sleep path.
+
+## REAPER core VST validation (2026-10-14)
+
+The final production build from `5a6fe993d6bf232beca92ca5ea2feac80a5a047a`
+passes the additional Windows DAW checks below. No further production fix was
+needed. This follow-up closes the earlier Windows project save/reload and
+offline-render coverage gaps; the earlier Ableton observations remain specific
+to the build tested there.
+
+REAPER **7.82/x64**, build `338578`, was installed as an isolated portable
+evaluation from the [official download](https://www.reaper.fm/download.php).
+The installer has a valid Cockos Incorporated signature. The loaded module
+path was inspected, and its SHA-256 matches the final tested binary:
+`a7759bc4e1042aead61b5eb4ccafaf4d0c0c2ba0da3d7b9adae760dda02b14e0`.
+REAPER used **Dummy Audio**, with no hardware input. Its device API confirmed
+the rate and block size for each round trip.
+
+The measured path was synthetic SDK tone -> REAPER Play -> REAPER Publish ->
+SDK sink, using two instances on one track. Each run measured ten seconds
+after a three-second warmup, with the existing thresholds unchanged:
+
+| Host setting / case | Return RMS | Frequency, zero crossings | Silent frames / measured frames |
+| --- | ---: | ---: | ---: |
+| 48 kHz / 256 samples | 0.171268 | 440.5 Hz | 0 / 1,000 |
+| Same settings, project saved and reopened | 0.171174 | 442.5 Hz | 0 / 1,000 |
+| 44.1 kHz / 512 samples | 0.171214 | 442.5 Hz | 0 / 1,000 |
+| 96 kHz / 1,024 samples | 0.170448 | 442.9 Hz | 0 / 1,000 |
+
+All four pass. The 44.1 and 96 kHz runs each also pass five editor open/close
+cycles per instance during audio, followed by both editors being open together.
+The actual 720 x 340 editors are shown in the [gallery](../../media/gallery/README.md#reaper-782).
+The probe returns mono and uses a functional tone gate; these measurements
+do not establish stereo separation, distortion or hardware latency.
+
+The existing `tools/tests/reaper_smoke.lua` also passes with an explicit test
+password, custom salt and web domain. It sends a generated DAW tone through
+Publish and Play, bypasses/re-enables both instances, reopens their editors,
+saves the project, and restores it. Its two 35-second phases pass all 21 eligible
+two-second peak windows. After REAPER exits, a fresh process reloads the saved
+project, verifies the custom settings and loaded plugin identity, and passes
+another 35 seconds / 13 peak windows before closing. These peak windows verify
+sustained activity and recovery, rather than individual missing samples.
+
+Full-speed offline rendering also passes. A two-second stereo source uses
+440 Hz on the left and 997 Hz on the right. The resulting 48 kHz PCM24 files
+each contain exactly 96,000 frames per channel. **Publish matches the bypassed
+reference byte for byte; Play produces all-zero PCM**, as intended for an
+offline bounce of a live network receiver. Record the incoming stream in real
+time before exporting it. The new reusable
+`tools/tests/manual/reaper_offline_probe.lua` independently repeats these
+assertions in its own project tab and retains the WAV files and project under
+the ignored build directory. It completed all three renders in roughly one
+second on this machine.
+
+The official Steinberg validator, built from SDK `v3.8.0_build_66`, reports
+**47 tests passed, zero failed**, including bundle structure and host contract
+checks. Unsupported 64-bit sample-processing cases are skipped by the
+validator; 32-bit float processing remains intentional.
+
+[Machine-readable results](validation/2026-10-14-reaper-core.json) retain the
+round-trip measurements, render hashes, host identity and test limits. The
+prior nine Windows native checks, both Mac CI builds and five-minute strict
+audio soak apply to this unchanged production binary. This pass does not
+certify physical audio drivers, macOS DAWs, Studio One, Audacity or impaired
+WAN conditions. FEC remains disabled.

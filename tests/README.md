@@ -12,6 +12,33 @@ connect to remote audio or launch a DAW.
 Use `python scripts/capture_windows_gallery.py --ffmpeg C:/path/to/ffmpeg.exe`
 to regenerate the [gallery](../media/gallery/README.md) from that editor.
 
+## REAPER host checks
+
+Scan the intended VST3 bundle in REAPER before running these ReaScripts through
+Actions > ReaScript > Load, or by passing their path to the REAPER executable.
+Use an isolated portable installation and Dummy Audio for repeatable checks
+without a microphone or speakers. Enable **Inform plug-ins of offline rendering
+state** in REAPER's VST preferences and use full-speed offline rendering.
+
+- `tools/tests/reaper_smoke.lua` creates its own project tab, sends a synthetic
+  tone through Publish and Play with a custom password/salt/domain, exercises
+  bypass and editor reopening, then saves/reloads the project. Its peak windows
+  check sustained activity, not individual dropouts or audio fidelity. Restart
+  REAPER with `WEBRTC_REAPER_TEST_REOPEN=1` to check the saved project in a fresh
+  process. `WEBRTC_REAPER_TEST_OUTPUT_DIR` selects the evidence directory.
+- `tools/tests/manual/daw_roundtrip_probe.js` supplies and measures a synthetic
+  440 Hz source around a manually configured Play -> Publish chain. Pass
+  `--host-rate` and `--buffer-size` to record the settings actually observed in
+  the DAW. It measures a mono return and does not certify stereo separation.
+- `tools/tests/manual/reaper_offline_probe.lua` creates a separate project tab
+  and a two-second stereo source. It asserts that Publish renders PCM identical
+  to the bypass reference and that Play renders silence. It never starts
+  playback. WAV files, a saved project and `result.txt` go to
+  `build/reaper-offline/`, or `WEBRTC_REAPER_OFFLINE_OUTPUT_DIR` if set.
+
+The [REAPER validation results](../docs/developer/ISSUE_PR_REVIEW_2026-10-13.md#reaper-core-vst-validation-2026-10-14)
+record the exact plugin binary and measured scope.
+
 ## macOS editor regression
 
 After `bash scripts/build_macos.sh`, run

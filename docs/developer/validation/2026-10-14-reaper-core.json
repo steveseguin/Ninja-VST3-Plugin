@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-14",
+  "productionSourceCommit": "5a6fe993d6bf232beca92ca5ea2feac80a5a047a",
+  "validationParentCommit": "4604bd4c648cd7553d14aa1005151af26aa36e66",
+  "pluginSha256": "a7759bc4e1042aead61b5eb4ccafaf4d0c0c2ba0da3d7b9adae760dda02b14e0",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "host": {
+    "name": "REAPER",
+    "version": "7.82/x64",
+    "build": "win64 rev 338578 (Oct 4 2026)",
+    "install": "isolated portable evaluation",
+    "download": "https://www.reaper.fm/files/7.x/reaper782_x64-install.exe",
+    "installerSignature": "Valid; Cockos Incorporated",
+    "installerSha256": "ae86dd8396673318a85275175dc8c1c9b0b8e090bf305f9cec920358e9d1e18f",
+    "audioDevice": "Dummy Audio",
+    "hardwareInput": false,
+    "loadedModuleVerified": true
+  },
+  "roundTrips": [
+    {
+      "input": "PZOCIYZV",
+      "output": "2LNQ21MC",
+      "passed": true,
+      "frames": 1000,
+      "samples": 480000,
+      "sampleRate": 48000,
+      "channels": 1,
+      "rms": 0.17126786110592881,
+      "peak": 0.286468505859375,
+      "frequencyHz": 440.5,
+      "frequencyMethod": "positive zero crossings",
+      "silentFrames": 0,
+      "sourceAudioSeconds": 13.45,
+      "sourceWallSeconds": 13.4530278,
+      "sourcePacingRatio": 0.9997749354238308,
+      "hostSampleRate": 48000,
+      "hostBufferSamples": 256,
+      "hostSettingsSource": "operator supplied",
+      "measuredChannel": 0,
+      "path": "SDK synthetic 440 Hz -> DAW Play -> DAW Publish -> SDK audio sink",
+      "case": "roundtrip-48000-256",
+      "hostSettingsVerifiedBy": "REAPER GetAudioDeviceInfo MODE/SRATE/BSIZE"
+    },
+    {
+      "input": "PZOCIYZV",
+      "output": "2LNQ21MC",
+      "passed": true,
+      "frames": 1000,
+      "samples": 480000,
+      "sampleRate": 48000,
+      "channels": 1,
+      "rms": 0.1711738872419718,
+      "peak": 0.260040283203125,
+      "frequencyHz": 442.5,
+      "frequencyMethod": "positive zero crossings",
+      "silentFrames": 0,
+      "sourceAudioSeconds": 13.34,
+      "sourceWallSeconds": 13.351389300000001,
+      "sourcePacingRatio": 0.9991469576877665,
+      "hostSampleRate": 48000,
+      "hostBufferSamples": 256,
+      "hostSettingsSource": "operator supplied",
+      "measuredChannel": 0,
+      "path": "SDK synthetic 440 Hz -> DAW Play -> DAW Publish -> SDK audio sink",
+      "case": "roundtrip-reloaded",
+      "hostSettingsVerifiedBy": "REAPER GetAudioDeviceInfo MODE/SRATE/BSIZE"
+    },
+    {
+      "input": "PZOCIYZV",
+      "output": "2LNQ21MC",
+      "passed": true,
+      "frames": 1000,
+      "samples": 480000,
+      "sampleRate": 48000,
+      "channels": 1,
+      "rms": 0.17121403410924738,
+      "peak": 0.259307861328125,
+      "frequencyHz": 442.5,
+      "frequencyMethod": "positive zero crossings",
+      "silentFrames": 0,
+      "sourceAudioSeconds": 13.36,
+      "sourceWallSeconds": 13.3693501,
+      "sourcePacingRatio": 0.999300631673936,
+      "hostSampleRate": 44100,
+      "hostBufferSamples": 512,
+      "hostSettingsSource": "operator supplied",
+      "measuredChannel": 0,
+      "path": "SDK synthetic 440 Hz -> DAW Play -> DAW Publish -> SDK audio sink",
+      "case": "roundtrip-44100-512",
+      "hostSettingsVerifiedBy": "REAPER GetAudioDeviceInfo MODE/SRATE/BSIZE"
+    },
+    {
+      "input": "PZOCIYZV",
+      "output": "2LNQ21MC",
+      "passed": true,
+      "frames": 1000,
+      "samples": 480000,
+      "sampleRate": 48000,
+      "channels": 1,
+      "rms": 0.17044820447272638,
+      "peak": 0.32647705078125,
+      "frequencyHz": 442.9,
+      "frequencyMethod": "positive zero crossings",
+      "silentFrames": 0,
+      "sourceAudioSeconds": 13.43,
+      "sourceWallSeconds": 13.438842200000002,
+      "sourcePacingRatio": 0.9993420415339052,
+      "hostSampleRate": 96000,
+      "hostBufferSamples": 1024,
+      "hostSettingsSource": "operator supplied",
+      "measuredChannel": 0,
+      "path": "SDK synthetic 440 Hz -> DAW Play -> DAW Publish -> SDK audio sink",
+      "case": "roundtrip-96000-1024",
+      "hostSettingsVerifiedBy": "REAPER GetAudioDeviceInfo MODE/SRATE/BSIZE"
+    }
+  ],
+  "editorCycles": {
+    "perInstancePerRun": 5,
+    "instances": 2,
+    "runs": 2,
+    "total": 20,
+    "passed": true,
+    "duringAudio": true,
+    "editorSize": [
+      720,
+      340
+    ]
+  },
+  "projectPersistence": {
+    "sameProcessRestore": true,
+    "freshProcessRestore": true,
+    "defaultModesAndIdsAsserted": true,
+    "customPasswordSaltDomainJourney": {
+      "passed": true,
+      "sustainedPeakWindows": 21,
+      "durationSecondsPerPhase": 35,
+      "phases": 2,
+      "bypassSeconds": 2,
+      "customSalt": "reaper-custom-salt",
+      "webDomain": "https://studio.example.test/",
+      "syntheticTestPassword": "secret",
+      "returnPeaks": [
+        0.26389786601067,
+        0.2741451561451
+      ]
+    },
+    "coldProcess": {
+      "passed": true,
+      "sustainedPeakWindows": 13,
+      "durationSeconds": 35,
+      "returnPeak": 0.2676128745079,
+      "closedAfterRequestedQuit": true
+    }
+  },
+  "offlineRender": {
+    "bypass": {
+      "format": [
+        1,
+        2,
+        48000,
+        288000,
+        6,
+        24
+      ],
+      "dataBytes": 576000,
+      "pcmSha256": "e3bc0d7a46af2d416786955d53f469398347ea003ca02e246bb761ef76c5da36",
+      "allZero": false
+    },
+    "play": {
+      "format": [
+        1,
+        2,
+        48000,
+        288000,
+        6,
+        24
+      ],
+      "dataBytes": 576000,
+      "pcmSha256": "30fafbdc0facf210a26498db982f7ff8ad1e0b9a805816731c72e356a768c162",
+      "allZero": true
+    },
+    "publish": {
+      "format": [
+        1,
+        2,
+        48000,
+        288000,
+        6,
+        24
+      ],
+      "dataBytes": 576000,
+      "pcmSha256": "e3bc0d7a46af2d416786955d53f469398347ea003ca02e246bb761ef76c5da36",
+      "allZero": false
+    },
+    "publishMatchesBypass": true,
+    "playIsSilent": true
+  },
+  "offlineRenderReusableProbe": {
+    "script": "tools/tests/manual/reaper_offline_probe.lua",
+    "passed": true,
+    "outputFormat": "stereo PCM24, 48000 Hz",
+    "framesPerChannel": 96000,
+    "fullSpeedOfflineProjectFlag": 0,
+    "log": "REAPER 7.82/x64\nPlugin: build/reaper-validation\\plugins\\webrtc_vst.vst3\\Contents\\x86_64-win\\webrtc_vst.vst3<1076348955{63A34A7CBE2142089DB2E0D11173D962\nbypass: 576000 PCM bytes, 0.351 seconds elapsed\npublish: 576000 PCM bytes, 0.347 seconds elapsed\nplay: 576000 PCM bytes, 0.384 seconds elapsed\nPASS: Publish matches bypass byte for byte; Play is silent offline.\n"
+  },
+  "steinbergValidator": {
+    "sdkVersion": "v3.8.0_build_66",
+    "passed": 47,
+    "failed": 0,
+    "exitCode": 0,
+    "sample64": "unsupported as intended; validator skips processing for this format"
+  },
+  "limits": [
+    "Windows DAW graph tested with Dummy Audio, without physical audio drivers or interfaces.",
+    "Round-trip probe measures mono channel 0; host stereo channel separation is not certified by it.",
+    "Custom-salt ReaScript peak windows show sustained activity, not sample-level dropout or distortion results.",
+    "Offline Play silence is intentional; record remote audio in real time before exporting it.",
+    "No macOS DAW, Studio One, Audacity or impaired WAN test added in this pass.",
+    "FEC remains disabled; no production code changed in this pass."
+  ]
+}

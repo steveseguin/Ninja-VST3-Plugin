@@ -1,11 +1,11 @@
 # Application gallery
 
 Actual Windows captures of the VDO.Ninja WebRTC Bridge editor, recorded on
-2026-10-13 from the source build reviewed in
+2026-10-13 and 2026-10-14 from the source builds reviewed in
 [the validation report](../../docs/developer/ISSUE_PR_REVIEW_2026-10-13.md).
 The first captures use the native VST3 test host, which loads the real plugin
 and its controls. `gallery-demo` is an inactive example stream in those
-captures. Actual Ableton host captures and synthetic audio routing are shown
+captures. Actual Ableton and REAPER host captures and synthetic audio routing are shown
 below. None of these images are mockups.
 
 ## Play
@@ -57,6 +57,22 @@ The fixed binary alone restores the **720×340** editor even without the
 external layout file. Installing the complete bundle is still recommended.
 
 ![Fixed file alone: working editor in Live](ableton-fixed-file-only.png)
+
+## REAPER 7.82
+
+The final audio-fix build running in REAPER's Windows x64 evaluation on
+2026-10-14. Both instances are on one track: a synthetic SDK sender feeds
+Play, and Publish returns the received audio to an SDK sink. These captures
+were taken during the passing 44.1 kHz / 512-sample Dummy Audio test, after
+five editor open/close cycles per instance.
+
+| Play | Publish |
+| --- | --- |
+| ![Play receiving synthetic audio in REAPER](reaper-play.png) | ![Publish sending the return in REAPER](reaper-publish.png) |
+
+The [host validation report](../../docs/developer/ISSUE_PR_REVIEW_2026-10-13.md#reaper-core-vst-validation-2026-10-14)
+also covers save/reload, a fresh host process, and offline rendering. Dummy
+Audio exercises the real DAW/plugin graph without an audio interface.
 
 ## Reproduce native-host captures
 
