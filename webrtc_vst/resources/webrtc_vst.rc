@@ -1,0 +1,2 @@
+// Keep a fallback in the Windows module if the bundle's resource folder is lost.
+webrtc_vst.uidesc DATA "webrtc_vst.uidesc"

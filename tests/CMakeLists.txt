@@ -2,6 +2,19 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+add_executable(webrtc_vst_peer_audio_buffer_test peer_audio_buffer_test.cpp
+    ../webrtc_vst/src/AudioRingBuffer.cpp)
+target_link_libraries(webrtc_vst_peer_audio_buffer_test PRIVATE Threads::Threads)
+target_compile_features(webrtc_vst_peer_audio_buffer_test PRIVATE cxx_std_20)
+add_test(NAME PeerAudioBufferUnitTest COMMAND webrtc_vst_peer_audio_buffer_test)
+set_tests_properties(PeerAudioBufferUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;audio")
+
+# Dependency-free DSP regression; also runnable directly with a C++20 compiler.
+add_executable(webrtc_vst_resampler_test resampler_unit_test.cpp)
+target_compile_features(webrtc_vst_resampler_test PRIVATE cxx_std_20)
+add_test(NAME ResamplerUnitTest COMMAND webrtc_vst_resampler_test)
+set_tests_properties(ResamplerUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;audio")
+
 add_executable(webrtc_vst_settings_test settings_unit_test.cpp)
 target_include_directories(webrtc_vst_settings_test PRIVATE ${vst3sdk_SOURCE_DIR})
 target_link_libraries(webrtc_vst_settings_test PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
@@ -195,6 +208,27 @@ set_tests_properties(FuzzTest PROPERTIES
     TIMEOUT 300
     LABELS "fuzz"
 )
+
+if(WIN32)
+    add_executable(webrtc_vst_windows_editor_test windows_editor_smoke.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/plugprovider.cpp
+        ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/connectionproxy.cpp)
+    target_include_directories(webrtc_vst_windows_editor_test PRIVATE ${vst3sdk_SOURCE_DIR})
+    target_link_libraries(webrtc_vst_windows_editor_test PRIVATE sdk sdk_common sdk_hosting gdiplus)
+    target_compile_definitions(webrtc_vst_windows_editor_test PRIVATE WEBRTC_VST_DEFAULT_PLUGIN_PATH="${_plugin_bundle}")
+    add_dependencies(webrtc_vst_windows_editor_test webrtc_vst)
+    add_test(NAME WindowsEditorSmoke COMMAND webrtc_vst_windows_editor_test "${_plugin_bundle}")
+    add_test(NAME WindowsEditorWithoutResources COMMAND ${CMAKE_COMMAND}
+        "-DPLUGIN_BINARY=$<TARGET_FILE:webrtc_vst>"
+        "-DTEST_HOST=$<TARGET_FILE:webrtc_vst_windows_editor_test>"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/editor-without-resources"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/windows_editor_without_resources.cmake")
+    set_tests_properties(WindowsEditorSmoke WindowsEditorWithoutResources PROPERTIES
+        RUN_SERIAL TRUE TIMEOUT 60 LABELS "windows;ui")
+endif()
 
 if(APPLE)
     add_executable(webrtc_vst_mac_editor_test mac_editor_smoke.mm

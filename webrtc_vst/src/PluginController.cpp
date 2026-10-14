@@ -876,6 +876,22 @@ Steinberg::tresult PLUGIN_API WebRTCController::setParamNormalized(Steinberg::Vs
 Steinberg::IPlugView* PLUGIN_API WebRTCController::createView(const char* name) {
     Steinberg::ConstString viewName(name);
     if (viewName == Steinberg::Vst::ViewType::kEditor) {
+#if SMTG_OS_WINDOWS
+        // Hosts can load a Windows .vst3 DLL copied without its enclosing bundle.
+        // VSTGUI otherwise silently parses no layout and reports a 0x0 editor.
+        // Preserve normal bundle resources, but fall back to our embedded DATA
+        // resource when the external layout is unavailable.
+        if (auto* factory = VSTGUI::getPlatformFactory().asWin32Factory()) {
+            const auto base = factory->getResourceBasePath();
+            if (base) {
+                std::error_code error;
+                const auto path = std::filesystem::path(std::u8string(
+                    reinterpret_cast<const char8_t*>((*base).getString().c_str()))) / "webrtc_vst.uidesc";
+                if (!std::filesystem::is_regular_file(path, error))
+                    factory->setResourceBasePath(VSTGUI::UTF8String{});
+            }
+        }
+#endif
         return new WebRTCEditor(this, "view", "webrtc_vst.uidesc");
     }
     return nullptr;

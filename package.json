@@ -4,6 +4,7 @@
   "description": "Integration tooling for WebRTC VST",
   "main": "index.js",
   "scripts": {
+    "test:offline": "node --test tools/tests/offline/*.test.js",
     "test:security": "node tools/tests/integration/ws_security.test.js",
     "test:advanced-settings": "node tools/tests/integration/advanced_settings.test.js",
     "test:hardening": "node tools/tests/integration/crypto_compat.test.js && node tools/tests/integration/signaling_recovery.test.js && node tools/tests/integration/signaling_limits.test.js",

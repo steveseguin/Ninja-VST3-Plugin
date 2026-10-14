@@ -27,6 +27,8 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -35,10 +37,42 @@ jobs:
         run: brew install cmake ninja
       - name: Build and run native suites
         run: bash scripts/build_macos.sh '${{ matrix.arch }}'
+      - name: Compare original and candidate Cocoa event loops
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_dir=build/webrtc_vst_mac
+          test_bin="$build_dir/bin/Release/webrtc_vst_mac_editor_test"
+          [[ -x "$test_bin" ]]
+          cp tests/mac_editor_smoke.mm build/mac_editor_candidate.mm
+          git show cb63ae0978e3d0bb4b25dee42e53bdc323ea4080:tests/mac_editor_smoke.mm > tests/mac_editor_smoke.mm
+          cmake --build "$build_dir" --target webrtc_vst_mac_editor_test
+          baseline_failures=0
+          for attempt in {1..5}; do
+            if "$test_bin" > "$build_dir/Testing/Temporary/editor-baseline-$attempt.log" 2>&1; then
+              echo "Baseline $attempt: PASS"
+            else
+              baseline_failures=$((baseline_failures + 1))
+              echo "Baseline $attempt: FAIL"
+              cat "$build_dir/Testing/Temporary/editor-baseline-$attempt.log"
+            fi
+          done
+          echo "Baseline failures: $baseline_failures/5"
+          cp build/mac_editor_candidate.mm tests/mac_editor_smoke.mm
+          cmake --build "$build_dir" --target webrtc_vst_mac_editor_test
+          for attempt in {1..20}; do
+            if "$test_bin" > "$build_dir/Testing/Temporary/editor-candidate-$attempt.log" 2>&1; then
+              echo "Candidate $attempt: PASS"
+            else
+              cat "$build_dir/Testing/Temporary/editor-candidate-$attempt.log"
+              exit 1
+            fi
+          done
       - name: Install JavaScript test dependencies
         run: npm ci
       - name: SDK and signaling security tests
-        run: npm run test:security && npm run test:sdk && npm run test:advanced-settings && npm run test:hardening
+        run: npm run test:offline && npm run test:security && npm run test:sdk && npm run test:advanced-settings && npm run test:hardening
       - name: WebRTC publish and receive tests
         run: npm run test:play-request-audio-only && npm run test:integration:local
       - name: Package development bundle
@@ -49,7 +83,7 @@ jobs:
           path: build/release/*-development.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: macos-${{ matrix.arch }}-test-logs
           path: build/webrtc_vst_mac/Testing/Temporary/*.log

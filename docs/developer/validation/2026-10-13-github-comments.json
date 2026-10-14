@@ -1,0 +1,345 @@
+{
+  "checkedAtUtc": "2026-10-14T03:02:27.910867+00:00",
+  "repository": "steveseguin/Ninja-VST3-Plugin",
+  "remoteMain": "cb63ae0978e3d0bb4b25dee42e53bdc323ea4080",
+  "coverage": {
+    "pullRequests": 5,
+    "ordinaryIssues": 1,
+    "conversationComments": 3,
+    "inlineComments": 0,
+    "submittedReviews": 0,
+    "reviewThreads": 0,
+    "allPagesFetched": true
+  },
+  "comments": [
+    {
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/1#issuecomment-3380628003",
+      "updatedAt": "2025-10-08T09:23:17Z",
+      "issueNumber": 1
+    },
+    {
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/2#issuecomment-5715237896",
+      "updatedAt": "2026-09-17T13:35:05Z",
+      "issueNumber": 2
+    },
+    {
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/issues/6#issuecomment-6147831733",
+      "updatedAt": "2026-10-13T14:26:55Z",
+      "issueNumber": 6
+    }
+  ],
+  "pullRequests": [
+    {
+      "number": 1,
+      "title": "Add Claude Code GitHub Workflow",
+      "state": "MERGED",
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/1",
+      "headRefOid": "f4579dc1460e07d34ec3d3ec7312b505a68effc8",
+      "reviews": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "reviewThreads": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "contexts": {
+                  "pageInfo": {
+                    "hasNextPage": false,
+                    "endCursor": "MQ"
+                  },
+                  "nodes": [
+                    {
+                      "name": "claude-review",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/18339999045/job/52232987417"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 2,
+      "title": "Bump ws from 8.18.3 to 8.20.1 in the npm_and_yarn group across 1 directory",
+      "state": "CLOSED",
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/2",
+      "headRefOid": "b59438fc0bec95d692156343e5df63473cf36866",
+      "reviews": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "reviewThreads": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 3,
+      "title": "Fix resampler frame loss at audio block boundaries",
+      "state": "OPEN",
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/3",
+      "headRefOid": "442001f45cf3cf6534a8b324d0a34cb69c04caec",
+      "reviews": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "reviewThreads": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "contexts": {
+                  "pageInfo": {
+                    "hasNextPage": false,
+                    "endCursor": "Ng"
+                  },
+                  "nodes": [
+                    {
+                      "name": "build (macos-15, arm64)",
+                      "status": "COMPLETED",
+                      "conclusion": "FAILURE",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37207798538/job/111452546316"
+                    },
+                    {
+                      "name": "analyze (c-cpp)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37207798495/job/111452546084"
+                    },
+                    {
+                      "name": "analyze (javascript-typescript)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37207798495/job/111452546138"
+                    },
+                    {
+                      "name": "build (macos-15-intel, x86_64)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37207798538/job/111452546066"
+                    },
+                    {
+                      "name": "analyze (actions)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37207798495/job/111452545972"
+                    },
+                    {
+                      "name": "CodeQL",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/runs/111454049621"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 4,
+      "title": "Preserve receive audio packets at high host sample rates",
+      "state": "OPEN",
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/4",
+      "headRefOid": "1f3380105c85e59cce2bbba287662dd8eab9ad65",
+      "reviews": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "reviewThreads": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "contexts": {
+                  "pageInfo": {
+                    "hasNextPage": false,
+                    "endCursor": "Ng"
+                  },
+                  "nodes": [
+                    {
+                      "name": "analyze (c-cpp)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37208239058/job/111453871664"
+                    },
+                    {
+                      "name": "build (macos-15, arm64)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37208239079/job/111453871701"
+                    },
+                    {
+                      "name": "build (macos-15-intel, x86_64)",
+                      "status": "COMPLETED",
+                      "conclusion": "FAILURE",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37208239079/job/111453871427"
+                    },
+                    {
+                      "name": "analyze (javascript-typescript)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37208239058/job/111453871725"
+                    },
+                    {
+                      "name": "analyze (actions)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37208239058/job/111453871513"
+                    },
+                    {
+                      "name": "CodeQL",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/runs/111454462431"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 5,
+      "title": "Include distorted plateaus in playback quality analysis",
+      "state": "OPEN",
+      "url": "https://github.com/steveseguin/Ninja-VST3-Plugin/pull/5",
+      "headRefOid": "f4001162c4433778d7d20ab5bd5b3dfd73f41635",
+      "reviews": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "reviewThreads": {
+        "totalCount": 0,
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "contexts": {
+                  "pageInfo": {
+                    "hasNextPage": false,
+                    "endCursor": "Ng"
+                  },
+                  "nodes": [
+                    {
+                      "name": "analyze (c-cpp)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37677055386/job/112983155555"
+                    },
+                    {
+                      "name": "build (macos-15, arm64)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37677055441/job/112983155452"
+                    },
+                    {
+                      "name": "analyze (javascript-typescript)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37677055386/job/112983155099"
+                    },
+                    {
+                      "name": "build (macos-15-intel, x86_64)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37677055441/job/112983155273"
+                    },
+                    {
+                      "name": "analyze (actions)",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/37677055386/job/112983155613"
+                    },
+                    {
+                      "name": "CodeQL",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS",
+                      "detailsUrl": "https://github.com/steveseguin/Ninja-VST3-Plugin/runs/112983672448"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "localAction": "Documented disposition; no additional production edits justified by comments",
+  "externalWrites": false
+}

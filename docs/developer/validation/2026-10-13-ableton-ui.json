@@ -1,0 +1,68 @@
+{
+  "host": "Ableton Live 12.4.6 Trial",
+  "hostBuild": "2026-09-10_0de5c8fa9a",
+  "os": "Windows 11 x64 (10.0.26200)",
+  "mode": "Built-in demo mode; saving and exporting disabled",
+  "dpiScale": 1,
+  "method": "Separate custom VST3 folder and fresh Live process for each retained result; loaded module path checked",
+  "variants": {
+    "released-bundle": {
+      "client_size": [
+        720,
+        340
+      ],
+      "opened": true,
+      "host": "Live 12.4.6 Trial demo mode",
+      "moduleSha256": "55e00cb554776e3616cad4e84713b33a266948c48f5adb622eabde3cfa7c67f7",
+      "customFolder": "build/ableton-trial/plugins/released-bundle"
+    },
+    "released-file": {
+      "client_size": [
+        26,
+        0
+      ],
+      "outer_size": [
+        42,
+        39
+      ],
+      "opened": true,
+      "rendered_controls": false,
+      "moduleSha256": "55e00cb554776e3616cad4e84713b33a266948c48f5adb622eabde3cfa7c67f7",
+      "customFolder": "build/ableton-trial/plugins/released-file"
+    },
+    "fixed-file": {
+      "client_size": [
+        720,
+        340
+      ],
+      "outer_size": [
+        736,
+        379
+      ],
+      "opened": true,
+      "rendered_controls": true,
+      "reopen_cycles": 5,
+      "advanced_toggles": 20,
+      "stream_edit": "ableton_demo",
+      "moduleSha256": "2f34a905704ba81cea8f977543d62f785791d5bc8c1e1d1597edbbb540fcf83c",
+      "customFolder": "build/ableton-trial/plugins/fixed-file"
+    },
+    "fixed-bundle": {
+      "client_size": [
+        720,
+        340
+      ],
+      "outer_size": [
+        736,
+        379
+      ],
+      "opened": true,
+      "rendered_controls": true,
+      "reopen_cycles": 5,
+      "two_instances": true,
+      "advanced_view": true,
+      "moduleSha256": "2f34a905704ba81cea8f977543d62f785791d5bc8c1e1d1597edbbb540fcf83c",
+      "customFolder": "build/ableton-trial/plugins/fixed-bundle"
+    }
+  }
+}

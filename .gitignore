@@ -5,6 +5,7 @@ out/
 
 # Dependencies
 node_modules/
+__pycache__/
 vst3sdk/
 
 # Local agent and reference content

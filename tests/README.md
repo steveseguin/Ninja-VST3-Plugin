@@ -1,5 +1,39 @@
 # WebRTC VST Plugin - Test Suite
 
+## Windows editor regression and gallery
+
+Build `webrtc_vst_windows_editor_test`, then run
+`ctest --test-dir build/webrtc_vst_win -C Release -R WindowsEditor --output-on-failure`.
+An interactive Windows desktop is required. The tests load the actual plugin,
+including a module copied without its resource directory, and check rendering,
+text fields, view switching, DPI scaling and repeated editor opens. They do not
+connect to remote audio or launch a DAW.
+
+Use `python scripts/capture_windows_gallery.py --ffmpeg C:/path/to/ffmpeg.exe`
+to regenerate the [gallery](../media/gallery/README.md) from that editor.
+
+## Receive-buffer and analyzer regressions
+
+`PeerAudioBufferUnitTest` checks production ring-buffer packet retention, stereo
+continuity, pre-fill and reset across 8–384 kHz. Build it with the
+`webrtc_vst_peer_audio_buffer_test` target. `npm run test:offline` exercises the
+playback-quality analyzer with in-memory clean and distorted PCM; it does not
+require native dependencies or a network connection.
+
+## Dependency-free resampler regression
+
+From the repository root, run this CPU-only test without a VST3 SDK, audio host,
+network connection, or microphone:
+
+```sh
+c++ -std=c++20 -Wall -Wextra -Werror -O2 tests/resampler_unit_test.cpp -o /tmp/webrtc_resampler_test
+/tmp/webrtc_resampler_test
+```
+
+It checks planar and interleaved block-boundary continuity, passthrough and
+resampled frame counts, and reset behavior. The same test is registered as
+`ResamplerUnitTest` in CTest and included in the macOS native test build.
+
 Comprehensive automated testing that simulates real VST3 host behavior (like Audacity) to catch real-world issues that unit tests might miss.
 
 ## Why These Tests Are Needed

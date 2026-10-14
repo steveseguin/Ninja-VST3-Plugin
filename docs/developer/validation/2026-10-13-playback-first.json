@@ -1,0 +1,27 @@
+{
+  "scope": "48 kHz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+  "latencyMs": {
+    "median": 60.17890013754368,
+    "p95": 60.56919996626675,
+    "min": 59.98539994470775,
+    "max": 60.59790006838739,
+    "spread": 0.6125001236796379,
+    "markers": 18
+  },
+  "thdnPercent": [
+    {
+      "median": 0.3805680934632454,
+      "p95": 0.4574267377332462,
+      "windows": 522
+    },
+    {
+      "median": 1.1370019462789398,
+      "p95": 1.431036437832037,
+      "windows": 522
+    }
+  ],
+  "silentBlocks": 0,
+  "totalBlocks": 6750,
+  "nonfinite": 0,
+  "clippedBlocks": 0
+}

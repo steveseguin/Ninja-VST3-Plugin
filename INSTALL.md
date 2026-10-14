@@ -36,8 +36,9 @@ Default install path:
 ### Option 2: Zip (manual install)
 
 1. Download `webrtc_vst-vX.Y.Z-windows-vst3.zip`.
-2. Extract `webrtc_vst.vst3`.
-3. Copy `webrtc_vst.vst3` to one of:
+2. Extract the entire `webrtc_vst.vst3` folder, including `Contents/Resources` and
+   `Contents/x86_64-win`. The inner binary has the same name as the outer folder.
+3. Copy the outer `webrtc_vst.vst3` folder to one of:
    - `%LOCALAPPDATA%\\Programs\\Common\\VST3\\` (user scope)
    - `C:\\Program Files\\Common Files\\VST3\\` (system scope, admin)
 4. Restart your DAW and rescan plugins if needed.

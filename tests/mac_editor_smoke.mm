@@ -52,14 +52,25 @@ static NSView* nativeEditor(NSView* view) {
     return nil;
 }
 
+// Running NSRunLoop alone services timers, but does not dispatch Cocoa's queued
+// activation, focus and window events. Behave like an actual host's event loop.
+static void pumpEvents(NSTimeInterval seconds) {
+    NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    do {
+        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:deadline
+            inMode:NSDefaultRunLoopMode dequeue:YES];
+        if (event) [NSApp sendEvent:event];
+    } while ([deadline timeIntervalSinceNow] > 0);
+    [NSApp updateWindows];
+}
+
 static void clickEditor(NSWindow* window, NSPoint point) {
-    NSView* target = nativeEditor([window contentView]);
     for (const auto type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp}) {
         NSEvent* event = [NSEvent mouseEventWithType:type location:point modifierFlags:0
             timestamp:0 windowNumber:[window windowNumber] context:nil eventNumber:1 clickCount:1 pressure:1];
         [window sendEvent:event];
     }
-    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    pumpEvents(0.05);
 }
 
 static bool typeField(NSWindow* window, NSPoint point, NSString* value) {
@@ -75,7 +86,7 @@ static bool typeField(NSWindow* window, NSPoint point, NSString* value) {
         timestamp:0 windowNumber:[window windowNumber] context:nil characters:@"\r"
         charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36];
     [window sendEvent:enter];
-    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    pumpEvents(0.05);
     return true;
 }
 
@@ -124,12 +135,16 @@ int main(int argc, char** argv) {
             }
             view->onSize(&rect);
             [window makeKeyAndOrderFront:nil];
+            NSDate* focusDeadline = [NSDate dateWithTimeIntervalSinceNow:5];
+            while ((!NSApp.active || !window.keyWindow) && [focusDeadline timeIntervalSinceNow] > 0)
+                pumpEvents(0.03);
+            if (!NSApp.active || !window.keyWindow) {
+                std::cerr << "Test host could not activate its Cocoa window\n";
+                return 1;
+            }
             [window makeFirstResponder:nativeEditor([window contentView])];
             view->onFocus(true); // Hosts must activate the VSTGUI frame for text commits.
-            [[NSNotificationCenter defaultCenter] postNotificationName:NSWindowDidBecomeKeyNotification object:window];
-            for (int tick = 0; tick < 10; ++tick) {
-                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.03]];
-            }
+            pumpEvents(0.3);
             for (int toggle = 0; toggle < 4; ++toggle) {
                 clickEditor(window, NSMakePoint(650, 310));
                 clickEditor(window, NSMakePoint(450, 222)); // web domain field
@@ -140,7 +155,8 @@ int main(int argc, char** argv) {
                         attributedSubstringForProposedRange:NSMakeRange(0, 127) actualRange:nil] string];
                 }
                 if (![fieldText isEqualToString:@"https://vdo.ninja/"]) {
-                    NSLog(@"Advanced field text: %@", fieldText);
+                    NSLog(@"Advanced field text: %@; cycle=%d toggle=%d active=%d key=%d responder=%@",
+                        fieldText, cycle, toggle, NSApp.active, window.keyWindow, responder);
                     std::cerr << "Advanced domain field did not become editable\n";
                     return 1;
                 }
@@ -174,7 +190,7 @@ int main(int argc, char** argv) {
                         controller->setParamNormalized(tag, 0.0);
                     }
                 }
-                [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+                pumpEvents(0.05);
                 method_setImplementation(opener, original);
                 const bool hostActionsInert = qrOpenRequests == 0 && [pasteboard changeCount] == pasteboardVersion;
                 if (!hostActionsInert) {

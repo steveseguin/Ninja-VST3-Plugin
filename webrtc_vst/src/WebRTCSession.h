@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AudioRingBuffer.h"
+#include "LinearResampler.h"
 #include "PluginConfig.h"
 #include "VDONinjaSignalingClient.h"
 #include "SpinLock.h"
@@ -57,30 +58,6 @@ public:
     bool isConnected() const;
 
 private:
-    class LinearResampler {
-    public:
-        void configure(double inputRate, double outputRate, int channels);
-        void reset();
-        bool isPassthrough() const { return passthrough_; }
-        size_t processPlanar(const float* const* inputs, size_t frames, int channels, std::vector<float>& outputInterleaved);
-        size_t processInterleaved(const float* data, size_t frames, int channels, std::vector<float>& outputInterleaved);
-        size_t processInterleaved(const std::vector<float>& data, int channels, std::vector<float>& outputInterleaved);
-
-    private:
-        size_t processBuffer(const float* source, size_t frames, int channels, std::vector<float>& outputInterleaved);
-
-        double inputRate_{48000.0};
-        double outputRate_{48000.0};
-        double step_{1.0};
-        double phase_{0.0};
-        bool configured_{false};
-        bool passthrough_{true};
-        bool havePrev_{false};
-        int channels_{0};
-        std::vector<float> prevSamples_;
-        std::vector<float> sourceBuffer_;
-    };
-
     struct PendingIce {
         std::string type;
         nlohmann::json payload;
@@ -92,6 +69,7 @@ private:
         std::shared_ptr<AudioRingBuffer> buffer;
         std::atomic<bool> active{true};
         std::atomic<bool> preFillReady{false}; // true once buffer has enough data
+        size_t preFillFrames{960}; // Set before peer callbacks; measured in host frames.
         uint64_t frameCount{0};
         uint64_t decodeErrorCount{0};
         uint64_t plcFrameCount{0};

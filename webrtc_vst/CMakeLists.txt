@@ -232,6 +232,12 @@ set(PLUGIN_HEADERS
 
 smtg_add_vst3plugin(${PLUGIN_NAME} ${PLUGIN_SOURCES} ${PLUGIN_HEADERS})
 
+if(WIN32)
+    enable_language(RC)
+    target_sources(${PLUGIN_NAME} PRIVATE resources/webrtc_vst.rc)
+    target_include_directories(${PLUGIN_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/resources)
+endif()
+
 target_include_directories(${PLUGIN_NAME}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src

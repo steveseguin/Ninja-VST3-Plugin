@@ -1,4 +1,5 @@
 #include "WebRTCSession.h"
+#include "PeerAudioBufferSizing.h"
 #include "BrowserCryptoCompat.h"
 #include "StreamIdGenerator.h"
 
@@ -36,9 +37,7 @@ namespace {
 constexpr size_t kFrameSizeSamples = 960; // 20ms at 48kHz
 constexpr int kOpusPayloadType = 111;
 constexpr uint32_t kAudioSsrc = 0x11ECACA; // Arbitrary but stable
-constexpr size_t kPeerBufferFrames = 2048; // ~42ms at 48kHz
 constexpr size_t kOutgoingFifoMaxSamples = 48000 * 2; // 1 second of stereo at 48kHz
-constexpr size_t kJitterPreFillFrames = 960; // ~20ms at 48kHz before playback starts
 constexpr size_t kMaxPeerSessions = 16;
 constexpr auto kPlayRefreshCooldown = std::chrono::seconds(30);
 
@@ -251,152 +250,6 @@ SanitizedStreamId sanitizeStreamId(const std::string& raw) {
 }
 
 } // namespace
-
-void WebRTCSession::LinearResampler::configure(double inputRate, double outputRate, int channels) {
-    inputRate_ = inputRate;
-    outputRate_ = outputRate;
-    channels_ = channels;
-    step_ = inputRate_ / outputRate_;
-    phase_ = 0.0;
-    configured_ = true;
-    passthrough_ = std::abs(inputRate_ - outputRate_) < 1e-6;
-    havePrev_ = false;
-    prevSamples_.assign(static_cast<size_t>(std::max(0, channels_)), 0.0f);
-}
-
-void WebRTCSession::LinearResampler::reset() {
-    phase_ = 0.0;
-    havePrev_ = false;
-    prevSamples_.assign(static_cast<size_t>(std::max(0, channels_)), 0.0f);
-}
-
-size_t WebRTCSession::LinearResampler::processPlanar(const float* const* inputs,
-                                                     size_t frames,
-                                                     int channels,
-                                                     std::vector<float>& outputInterleaved) {
-    if (!configured_ || channels != channels_) {
-        configure(inputRate_, outputRate_, channels);
-    }
-
-    if (passthrough_) {
-        outputInterleaved.resize(frames * static_cast<size_t>(channels));
-        for (size_t frame = 0; frame < frames; ++frame) {
-            for (int ch = 0; ch < channels; ++ch) {
-                outputInterleaved[frame * channels + ch] = inputs[ch][frame];
-            }
-        }
-        if (frames > 0) {
-            for (int ch = 0; ch < channels; ++ch) {
-                prevSamples_[ch] = inputs[ch][frames - 1];
-            }
-            havePrev_ = true;
-        }
-        phase_ = 0.0;
-        return frames;
-    }
-
-    if (frames == 0) {
-        return 0;
-    }
-
-    size_t start = 0;
-    if (!havePrev_) {
-        for (int ch = 0; ch < channels; ++ch) {
-            prevSamples_[ch] = inputs[ch][0];
-        }
-        havePrev_ = true;
-        start = 1;
-        if (frames == 1) {
-            return 0;
-        }
-    }
-
-    const size_t effectiveFrames = frames - start;
-    sourceBuffer_.resize((effectiveFrames + 1) * static_cast<size_t>(channels));
-    std::memcpy(sourceBuffer_.data(), prevSamples_.data(), sizeof(float) * static_cast<size_t>(channels));
-    for (size_t frame = 0; frame < effectiveFrames; ++frame) {
-        for (int ch = 0; ch < channels; ++ch) {
-            sourceBuffer_[(frame + 1) * channels + ch] = inputs[ch][frame + start];
-        }
-    }
-
-    return processBuffer(sourceBuffer_.data(), effectiveFrames + 1, channels, outputInterleaved);
-}
-
-size_t WebRTCSession::LinearResampler::processInterleaved(const float* data,
-                                                          size_t frames,
-                                                          int channels,
-                                                          std::vector<float>& outputInterleaved) {
-    if (!configured_ || channels != channels_) {
-        configure(inputRate_, outputRate_, channels);
-    }
-
-    if (passthrough_) {
-        outputInterleaved.assign(data, data + frames * static_cast<size_t>(channels));
-        if (frames > 0) {
-            std::memcpy(prevSamples_.data(), data + (frames - 1) * channels, sizeof(float) * static_cast<size_t>(channels));
-            havePrev_ = true;
-        }
-        phase_ = 0.0;
-        return frames;
-    }
-
-    if (frames == 0) {
-        return 0;
-    }
-
-    sourceBuffer_.resize((frames + 1) * static_cast<size_t>(channels));
-    if (!havePrev_) {
-        std::memcpy(prevSamples_.data(), data, sizeof(float) * static_cast<size_t>(channels));
-        havePrev_ = true;
-    }
-
-    std::memcpy(sourceBuffer_.data(), prevSamples_.data(), sizeof(float) * static_cast<size_t>(channels));
-    std::memcpy(sourceBuffer_.data() + channels, data, sizeof(float) * frames * static_cast<size_t>(channels));
-
-    return processBuffer(sourceBuffer_.data(), frames + 1, channels, outputInterleaved);
-}
-
-size_t WebRTCSession::LinearResampler::processInterleaved(const std::vector<float>& data,
-                                                          int channels,
-                                                          std::vector<float>& outputInterleaved) {
-    const size_t frames = data.size() / static_cast<size_t>(channels);
-    return processInterleaved(data.data(), frames, channels, outputInterleaved);
-}
-
-size_t WebRTCSession::LinearResampler::processBuffer(const float* source,
-                                                     size_t frames,
-                                                     int channels,
-                                                     std::vector<float>& outputInterleaved) {
-    outputInterleaved.clear();
-    if (frames < 2) {
-        return 0;
-    }
-
-    double pos = phase_;
-    const double frameCount = static_cast<double>(frames);
-    while (pos + 1.0 <= frameCount - 1.0) {
-        const size_t idx = static_cast<size_t>(pos);
-        const double frac = pos - static_cast<double>(idx);
-        const float* frame0 = source + idx * channels;
-        const float* frame1 = source + (idx + 1) * channels;
-        for (int ch = 0; ch < channels; ++ch) {
-            const float sample0 = frame0[ch];
-            const float sample1 = frame1[ch];
-            const float sample = static_cast<float>((1.0 - frac) * sample0 + frac * sample1);
-            outputInterleaved.push_back(sample);
-        }
-        pos += step_;
-    }
-
-    phase_ = pos - static_cast<double>(frames - 1);
-    if (phase_ < 0.0) {
-        phase_ = 0.0;
-    }
-
-    std::memcpy(prevSamples_.data(), source + (frames - 1) * channels, sizeof(float) * static_cast<size_t>(channels));
-    return outputInterleaved.empty() ? 0 : outputInterleaved.size() / static_cast<size_t>(channels);
-}
 
 WebRTCSession::WebRTCSession(AudioRingBuffer& receiveBuffer,
                                      LogSink logSink,
@@ -802,7 +655,9 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         session.audioContext->decoder = nullptr;
     }
     session.audioContext->resampler.configure(48000.0, sampleRate_, channelCount_);
-    session.audioContext->buffer = std::make_shared<AudioRingBuffer>(kPeerBufferFrames, channelCount_);
+    const auto bufferSizing = peerAudioBufferSizing(sampleRate_);
+    session.audioContext->preFillFrames = bufferSizing.preFillFrames;
+    session.audioContext->buffer = std::make_shared<AudioRingBuffer>(bufferSizing.capacityFrames, channelCount_);
 
     rtc::Configuration configuration;
     // createDataChannel can otherwise negotiate synchronously while mutex_ is
@@ -1078,7 +933,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
 
             // Mark pre-fill ready once buffer has enough data for smooth playback
             if (!ctx->preFillReady.load(std::memory_order_relaxed)) {
-                if (ctx->buffer->availableFrames(peerChannels) >= kJitterPreFillFrames) {
+                if (ctx->buffer->availableFrames(peerChannels) >= ctx->preFillFrames) {
                     ctx->preFillReady.store(true, std::memory_order_release);
                 }
             }
