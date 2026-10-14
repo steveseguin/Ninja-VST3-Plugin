@@ -26,6 +26,7 @@ const { cliExecutable, pluginBundle } = require("./build_paths");
         const env = Object.fromEntries(Object.entries(process.env).filter(([name])=>!/^WEBRTC_(VST|CLI_HOST)_/.test(name)));
         Object.assign(env,{WEBRTC_VST_MODE:"play",WEBRTC_VST_STREAM_ID:"ownedtls",WEBRTC_VST_LOG_STDOUT:"1",
             WEBRTC_VST_HANDSHAKE_URL:`wss://127.0.0.1:${server.address().port}/`,WEBRTC_VST_DISABLE_STUN:"1",
+            WEBRTC_CLI_HOST_MONITOR_STATUS:"1",
             WEBRTC_CLI_HOST_WALLCLOCK_RUNTIME_MS:"5000",WEBRTC_CLI_HOST_TIMEOUT_MS:"9000",WEBRTC_CLI_HOST_REALTIME_PACING:"1"});
         child=spawn(cliExecutable,[pluginBundle],{env,stdio:["ignore","pipe","pipe"]});
         timer=setTimeout(()=>child.kill("SIGKILL"),12000);
@@ -35,8 +36,11 @@ const { cliExecutable, pluginBundle } = require("./build_paths");
         assert.equal(accepted,0,"Plugin accepted an untrusted TLS certificate");
         assert.ok(attempted > 0,"No TLS connection attempt reached owned fixture\n" + logs);
         assert.match(logs,/certificate|SSL|TLS|Signaling error/i,"Expected explicit connection failure\n" + logs);
+        // Apple's TLS backend reports an OSStatus code rather than the words
+        // certificate/SSL/TLS. The owned server independently proves rejection.
+        assert.match(logs,/\[status\] Error: .*(?:certificate|SSL|TLS|OSStatus error -\d+)/i,"TLS failure did not reach controller status\n" + logs);
         assert.ok(!logs.includes("Connected to VDO.Ninja signaling server"),"Untrusted endpoint connected");
-        console.log("PASS: self-signed loopback TLS rejected; no trust-store changes or public fallback");
+        console.log("PASS: self-signed loopback TLS rejected; controller exposes TLS error; no trust-store changes or public fallback");
     } finally {
         clearTimeout(timer);
         if(child && child.exitCode === null) child.kill();

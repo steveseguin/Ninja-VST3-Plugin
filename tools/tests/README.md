@@ -225,3 +225,21 @@ test does not replace listening to speech/music or testing physical audio device
 node tools/tests/guarded_run.js npm run test:signaling-fuzz
 node tools/tests/guarded_run.js npm run test:audio-clicks
 ```
+
+`npm run test:peer-churn-audio` connects two real plugin hosts through an owned
+loopback signaling server. While their stereo audio plays, it sends three bursts
+of 128 requests replacing a separate peer. It requires distinct peer generations,
+a successful fresh offer after each burst, normal teardown, and uninterrupted
+audio in the existing pair. The constant-tone predictor checks every captured
+steady-state sample, including block boundaries. This takes about 28 seconds;
+signaling never leaves localhost, while media uses direct encrypted WebRTC.
+
+```bash
+node tools/tests/guarded_run.js npm run test:peer-churn-audio
+TSAN_OPTIONS=halt_on_error=1 WEBRTC_TEST_BUILD_DIR=build/webrtc_vst_mac_tsan \
+  node tools/tests/guarded_run.js npm run test:peer-churn-audio
+```
+
+`node tools/tests/integration/tls_rejection.test.js` also verifies that the actual
+controller status exposes the certificate/TLS error, beyond merely rejecting
+the owned self-signed endpoint.

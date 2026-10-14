@@ -127,6 +127,56 @@ See [test tooling](../../tools/tests/README.md) for sanitizer build selection,
 seed controls, native state-only fuzz and REAPER validation. Raw logs are local
 artifacts; the checked-in JSON retains the final measurements.
 
+## Additional short validation after 4db12c4
+
+The same Release, ASan/UBSan and TSan binaries were exercised again, without
+production-source changes. CI for 4db12c4 also passed macOS Build And Test and
+CodeQL. [Additional measurements](validation/2026-10-14-macos-extra.json) retain
+the format probes, peer-replacement captures and fuzz results.
+
+A new owned-localhost fixture holds a live Seed/Play pair while sending three
+bursts of 128 requests replacing a separate peer. Release produced 382 distinct
+replacement offers, TSan 381 and ASan/UBSan 379. Every run negotiated a fresh
+peer after each burst and exited normally. Each analyzed 960,000 frames per
+channel: 5,760,000 samples across the three runs, with no detected tone
+discontinuities, nonfinite values or clipping. The measured live-audio windows
+had no silent blocks. The runs peaked at 153, 347 and 393 MiB of combined owned
+workload RSS respectively; this includes the test harness and both hosts.
+
+All six real-media format probes passed their existing latency, distortion,
+silence and clipping gates:
+
+| Sample rate / host block | Local one-way latency p95 |
+| --- | --- |
+| 44.1 kHz / 128 | 71.17 ms |
+| 48 kHz / 32 | 68.31 ms |
+| 48 kHz / 256 | 66.88 ms |
+| 48 kHz / 1,024 | 148.29 ms |
+| 96 kHz / 64 | 69.49 ms |
+| 192 kHz / 256 | 64.70 ms |
+
+The larger callback uses the existing four-block scheduling reserve and its
+correspondingly higher latency allowance; passing does not imply imperceptible
+delay. These are same-machine measurements, excluding physical devices/WAN.
+
+The TLS fixture now also checks controller-visible error status. Its initial
+assertion expected the words certificate/SSL/TLS; macOS actually displayed
+`OSStatus error -9807`. The fixture was corrected to accept the native error
+format while independently requiring an attempted TLS connection and zero
+accepted WebSocket connections. No trust settings were changed.
+
+Two additional signaling-fuzz seeds passed: `20261014` under TSan and
+`3735928559` under ASan/UBSan, for 8,016 additional malformed/boundary inputs
+across Seed and Play. Both runs verified error visibility, reconnect and clean
+teardown. An offline Seed probe preserved dry host audio and produced no audio
+in the real-time Play receiver. No new plugin defects were found in this round;
+only test coverage and the validation record changed.
+
+Reproduce the new sustained-audio peer replacement check with
+`node tools/tests/guarded_run.js npm run test:peer-churn-audio`. See the test
+tooling README for selecting the TSan build. Each run lasts about 28 seconds;
+no additional long soak was performed.
+
 ## Scope
 
 These are objective synthetic audio checks, not a subjective speaker/headphone

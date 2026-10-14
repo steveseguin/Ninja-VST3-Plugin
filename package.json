@@ -26,7 +26,8 @@
     "test:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
     "test": "npm run test:audio-only",
     "test:signaling-fuzz": "node tools/tests/integration/signaling_fuzz.test.js",
-    "test:audio-clicks": "node tools/tests/integration/audio_clicks.test.js"
+    "test:audio-clicks": "node tools/tests/integration/audio_clicks.test.js",
+    "test:peer-churn-audio": "node tools/tests/integration/peer_churn_audio.test.js"
   },
   "keywords": [],
   "author": "",

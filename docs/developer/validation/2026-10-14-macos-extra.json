@@ -1,0 +1,430 @@
+{
+  "baseCommit": "4db12c4c71e90e91609f2a491d76ef70aa11983d",
+  "binarySha256": {
+    "webrtc_vst_mac": "d44ae6b1f01a37c8bdc0a5e1683d2622bf923bd0c3762fb7f8fc915fd9db1e4d",
+    "webrtc_vst_mac_asan": "41b113b6e0a1b8da399a7074fa3d492839ab1b86ad74ed9488ff7c21006cc335",
+    "webrtc_vst_mac_tsan": "1f0e2e5d9ccd49e38e7bff8a2ea45298d1d93542e6a9dcce897c3c498809e40c"
+  },
+  "peerChurn": {
+    "release": {
+      "passed": true,
+      "sent": 384,
+      "peerGenerations": 382,
+      "recoveryOffers": 3,
+      "analysis": [
+        {
+          "frames": 960000,
+          "nonfinite": 0,
+          "peak": 0.25404900312423706,
+          "maxStep": 0.03317738324403763,
+          "maxResidual": 9.67521508693503e-06,
+          "maxBoundaryResidual": 4.748051573855161e-06,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        },
+        {
+          "frames": 960000,
+          "nonfinite": 0,
+          "peak": 0.25572094321250916,
+          "maxStep": 0.04993002116680145,
+          "maxResidual": 2.2134790681790917e-05,
+          "maxBoundaryResidual": 1.475495441688457e-05,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steadyWindows": 20,
+      "silentBlocks": 0,
+      "maxCallbackUs": 17.459,
+      "peakOwnedRssMiB": 153,
+      "capture": "build/test-tools/peer-churn-1792006009782"
+    },
+    "tsan": {
+      "passed": true,
+      "sent": 384,
+      "peerGenerations": 381,
+      "recoveryOffers": 3,
+      "analysis": [
+        {
+          "frames": 960000,
+          "nonfinite": 0,
+          "peak": 0.25309956073760986,
+          "maxStep": 0.0330476313829422,
+          "maxResidual": 1.0963325538237978e-05,
+          "maxBoundaryResidual": 7.655257841521212e-06,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        },
+        {
+          "frames": 960000,
+          "nonfinite": 0,
+          "peak": 0.2557438910007477,
+          "maxStep": 0.049949903041124344,
+          "maxResidual": 2.391010323327114e-05,
+          "maxBoundaryResidual": 1.7736237865939586e-05,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steadyWindows": 20,
+      "silentBlocks": 0,
+      "maxCallbackUs": 102.292,
+      "peakOwnedRssMiB": 347,
+      "capture": "build/test-tools/peer-churn-1792006043623"
+    },
+    "asan": {
+      "passed": true,
+      "sent": 384,
+      "peerGenerations": 379,
+      "recoveryOffers": 3,
+      "analysis": [
+        {
+          "frames": 960000,
+          "nonfinite": 0,
+          "peak": 0.25210532546043396,
+          "maxStep": 0.032907336950302124,
+          "maxResidual": 6.12252087203724e-06,
+          "maxBoundaryResidual": 4.545135259381716e-06,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        },
+        {
+          "frames": 960000,
+          "nonfinite": 0,
+          "peak": 0.2552979290485382,
+          "maxStep": 0.0498463399708271,
+          "maxResidual": 2.8002128438786578e-05,
+          "maxBoundaryResidual": 2.504494414190539e-05,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        }
+      ],
+      "steadyWindows": 20,
+      "silentBlocks": 0,
+      "maxCallbackUs": 53.667,
+      "peakOwnedRssMiB": 393,
+      "capture": "build/test-tools/peer-churn-1792006084258"
+    }
+  },
+  "playbackFormats": [
+    {
+      "performance": {
+        "play": {
+          "wallSeconds": 32.1,
+          "cpuSeconds": 0.8799999999999999,
+          "peakRssBytes": 23560192
+        },
+        "seed": {
+          "wallSeconds": 39.1,
+          "cpuSeconds": 1.36,
+          "peakRssBytes": 23756800
+        }
+      },
+      "medianResidualLimit": 2,
+      "continuousWarmup": true,
+      "scope": "44100 Hz / 128 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 68.27991735190153,
+        "p95": 71.17075007408857,
+        "min": 68.17716732621193,
+        "max": 71.17199990898371,
+        "spread": 2.994832582771778,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.36707291512121387,
+          "p95": 0.3938800444985718,
+          "windows": 290
+        },
+        {
+          "median": 0.580236232830158,
+          "p95": 0.8516753079915304,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.035864971578121185,
+        0.053884051740169525
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 7234,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    },
+    {
+      "performance": {
+        "play": {
+          "wallSeconds": 32.09,
+          "cpuSeconds": 0.89,
+          "peakRssBytes": 23543808
+        },
+        "seed": {
+          "wallSeconds": 39.09,
+          "cpuSeconds": 1.31,
+          "peakRssBytes": 23625728
+        }
+      },
+      "medianResidualLimit": 1,
+      "continuousWarmup": true,
+      "scope": "48000 Hz / 32 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 68.30783328041434,
+        "p95": 68.31495789811015,
+        "min": 68.30358365550637,
+        "max": 68.31954093649983,
+        "spread": 0.01595728099346161,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.3188306364041972,
+          "p95": 0.4625019079835947,
+          "windows": 290
+        },
+        {
+          "median": 0.7667662372838084,
+          "p95": 0.9909788133192121,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.0331740640103817,
+        0.049914345145225525
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 31500,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    },
+    {
+      "performance": {
+        "play": {
+          "wallSeconds": 32.09,
+          "cpuSeconds": 0.8300000000000001,
+          "peakRssBytes": 23543808
+        },
+        "seed": {
+          "wallSeconds": 39.09,
+          "cpuSeconds": 1.28,
+          "peakRssBytes": 23674880
+        }
+      },
+      "medianResidualLimit": 1,
+      "continuousWarmup": true,
+      "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 66.61408301442862,
+        "p95": 66.88345782458782,
+        "min": 65.71662472561002,
+        "max": 67.03179096803069,
+        "spread": 1.3151662424206734,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.43922448976289885,
+          "p95": 0.6543532384973978,
+          "windows": 290
+        },
+        {
+          "median": 0.5880397229658438,
+          "p95": 0.9893709812158596,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.033050283789634705,
+        0.05001005530357361
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 3937,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    },
+    {
+      "performance": {
+        "play": {
+          "wallSeconds": 32.11,
+          "cpuSeconds": 0.78,
+          "peakRssBytes": 23527424
+        },
+        "seed": {
+          "wallSeconds": 39.1,
+          "cpuSeconds": 1.21,
+          "peakRssBytes": 23789568
+        }
+      },
+      "medianResidualLimit": 1,
+      "continuousWarmup": true,
+      "scope": "48000 Hz / 1024 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 126.3807499781251,
+        "p95": 148.28929118812084,
+        "min": 119.68054110184312,
+        "max": 148.4462497755885,
+        "spread": 28.765708673745394,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.4680046194163773,
+          "p95": 0.6426842558235358,
+          "windows": 290
+        },
+        {
+          "median": 0.5967559602561927,
+          "p95": 0.9205892306959574,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.03304569981992245,
+        0.0499405600130558
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 984,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    },
+    {
+      "performance": {
+        "play": {
+          "wallSeconds": 32.09,
+          "cpuSeconds": 0.96,
+          "peakRssBytes": 23609344
+        },
+        "seed": {
+          "wallSeconds": 39.09,
+          "cpuSeconds": 1.38,
+          "peakRssBytes": 23822336
+        }
+      },
+      "medianResidualLimit": 2,
+      "continuousWarmup": true,
+      "scope": "96000 Hz / 64 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 69.48612490668893,
+        "p95": 69.49295802041888,
+        "min": 69.48091695085168,
+        "max": 69.49529191479087,
+        "spread": 0.014374963939189911,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.38553901213227043,
+          "p95": 0.3873249368382373,
+          "windows": 290
+        },
+        {
+          "median": 0.8223925716127034,
+          "p95": 1.3453206684781658,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.016463344916701317,
+        0.02492034249007702
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 31500,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    },
+    {
+      "performance": {
+        "play": {
+          "wallSeconds": 32.1,
+          "cpuSeconds": 1.15,
+          "peakRssBytes": 23789568
+        },
+        "seed": {
+          "wallSeconds": 39.09,
+          "cpuSeconds": 1.6,
+          "peakRssBytes": 23822336
+        }
+      },
+      "medianResidualLimit": 2,
+      "continuousWarmup": true,
+      "scope": "192000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 64.68504201620817,
+        "p95": 64.69933269545436,
+        "min": 62.016041949391365,
+        "max": 68.6871251091361,
+        "spread": 6.6710831597447395,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.32873932630716723,
+          "p95": 0.5622496259184222,
+          "windows": 290
+        },
+        {
+          "median": 0.7335702324882232,
+          "p95": 1.28949983770525,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.008235976099967957,
+        0.012460188940167427
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 15749,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    }
+  ],
+  "signalingFuzz": {
+    "tsan": {
+      "seed": 20261014,
+      "results": [
+        {
+          "mode": "seed",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": true,
+          "qualityWindows": 14
+        },
+        {
+          "mode": "play",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": false,
+          "qualityWindows": 14
+        }
+      ]
+    },
+    "asan": {
+      "seed": 3735928559,
+      "results": [
+        {
+          "mode": "seed",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": true,
+          "qualityWindows": 14
+        },
+        {
+          "mode": "play",
+          "sent": 2004,
+          "announcements": 2,
+          "healthyOffer": false,
+          "qualityWindows": 14
+        }
+      ]
+    }
+  },
+  "tlsRejectionAndControllerStatus": true,
+  "offlineBounceIsolation": true,
+  "sanitizerScope": {
+    "builtDependencies": true,
+    "prebuiltOpenSsl": false,
+    "suppressions": false,
+    "asanLeakDetection": false
+  },
+  "scope": "Short synthetic same-machine tests; no physical listening/device/WAN validation; unchanged production binaries"
+}
