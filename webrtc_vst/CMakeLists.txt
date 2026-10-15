@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 if(CMAKE_HOST_APPLE AND NOT DEFINED ENV{MACOSX_DEPLOYMENT_TARGET})
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
-project(WebRTC_VST VERSION 0.2.7 LANGUAGES CXX)
+project(WebRTC_VST VERSION 0.2.8 LANGUAGES CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -81,6 +81,10 @@ set(SMTG_RUN_VST_VALIDATOR OFF CACHE BOOL "Skip running the VST3 validator durin
 
 add_subdirectory(${vst3sdk_SOURCE_DIR} ${CMAKE_BINARY_DIR}/vst3sdk)
 smtg_enable_vst3_sdk()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../scripts/vstgui_linux_run_loop.cmake")
+endif()
 
 if(APPLE)
     # SDK 3.8's VSTGUI uses codecvt, deprecated by recent Apple libc++.

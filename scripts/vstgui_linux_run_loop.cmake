@@ -1,0 +1,26 @@
+# VSTGUI 4.15 initializes X11 before installing the frame's run loop. Hosts
+# such as Audacity expose IRunLoop on IPlugFrame only, so that order dereferences
+# null on the first editor open. Build a corrected copy without editing the SDK.
+set(_x11_source "${VST3_SDK_ROOT}/vstgui4/vstgui/lib/platform/linux/x11frame.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_x11_source}")
+file(READ "${_x11_source}" _x11_original)
+set(_x11_before "\t\tRunLoop::init ();\n\t\tif (auto f = getPlatformFactory ().asLinuxFactory ())\n\t\t{\n\t\t\tif (f->getRunLoop () == nullptr)\n\t\t\t\tf->setRunLoop (cfg->runLoop);\n\t\t}")
+set(_x11_after "\t\tif (auto f = getPlatformFactory ().asLinuxFactory ())\n\t\t{\n\t\t\tif (f->getRunLoop () == nullptr)\n\t\t\t\tf->setRunLoop (cfg->runLoop);\n\t\t}\n\t\tRunLoop::init ();")
+string(FIND "${_x11_original}" "${_x11_before}" _x11_match)
+if(_x11_match EQUAL -1)
+    string(FIND "${_x11_original}" "${_x11_after}" _x11_fixed)
+    if(_x11_fixed EQUAL -1)
+        message(FATAL_ERROR "Review the VSTGUI X11 run-loop fix for this SDK version")
+    endif()
+else()
+    string(REPLACE "${_x11_before}" "${_x11_after}" _x11_patched "${_x11_original}")
+    set(_x11_copy "${CMAKE_CURRENT_BINARY_DIR}/vstgui-patches/x11frame.cpp")
+    file(CONFIGURE OUTPUT "${_x11_copy}" CONTENT "${_x11_patched}" @ONLY)
+    get_target_property(_vstgui_sources vstgui SOURCES)
+    list(FILTER _vstgui_sources EXCLUDE REGEX "(^|/)platform/linux/x11frame\\.cpp$")
+    set_property(TARGET vstgui PROPERTY SOURCES "${_vstgui_sources}")
+    target_sources(vstgui PRIVATE "${_x11_copy}")
+    get_filename_component(_x11_directory "${_x11_source}" DIRECTORY)
+    set_source_files_properties("${_x11_copy}" TARGET_DIRECTORY vstgui
+        PROPERTIES INCLUDE_DIRECTORIES "${_x11_directory}")
+endif()

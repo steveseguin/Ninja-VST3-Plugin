@@ -11,9 +11,9 @@ Download the Linux `.tar.gz` and its `SHA256SUMS.txt` from the same release.
 Verify the archive in the download directory:
 
 ```bash
-sha256sum -c webrtc_vst-v0.2.7-linux-SHA256SUMS.txt
+sha256sum -c webrtc_vst-v0.2.8-linux-SHA256SUMS.txt
 mkdir -p ~/.vst3
-tar -xzf webrtc_vst-v0.2.7-linux-x86_64-vst3.tar.gz -C ~/.vst3
+tar -xzf webrtc_vst-v0.2.8-linux-x86_64-vst3.tar.gz -C ~/.vst3
 ```
 
 Keep the entire `webrtc_vst.vst3` bundle, including `Contents/Resources`.
@@ -60,8 +60,9 @@ before publishing it.
 
 ## X11 editor regressions
 
-`LinuxEditorSmoke` opens the actual plugin 64 times and verifies painted pixels
-after closing/replacing other open editors. Run it under Xvfb through CTest.
+`LinuxEditorSmoke` and `LinuxFactoryRunLoopSmoke` each open the actual plugin
+64 times and verify painted pixels after closing/replacing other open editors.
+Run them under Xvfb through CTest.
 It requires the host's Linux run loop and XEmbed support; a headless validator
 cannot cover these editor operations.
 
@@ -79,3 +80,11 @@ internal queue, leaving the host's file descriptor polling asleep and an
 uncovered editor blank until another event arrived. The pixel test checks
 redrawing without that extra event. Linker wrapping is confined to the Linux
 plugin's own static calls; it does not intercept the host application's calls.
+
+Audacity 3.7.9 exposes its run loop on `IPlugFrame`, while REAPER also exposes
+one through the factory context. VSTGUI initializes X11 before installing the
+frame's loop, causing a null dereference on the first Audacity editor open.
+`scripts/vstgui_linux_run_loop.cmake` reverses those two operations in a
+generated build copy, preserving the SDK checkout. Configuration stops for
+review if a different SDK changes the affected code. Both host-interface
+arrangements are covered by the native editor tests.

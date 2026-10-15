@@ -70,3 +70,4 @@ jobs:
             build/webrtc_vst_linux/Testing/Temporary/*.log
             build/test-tools/**/results.json
             build/test-tools/**/*.log
+            build/test-tools/peer-churn-*/*.pcmblocks

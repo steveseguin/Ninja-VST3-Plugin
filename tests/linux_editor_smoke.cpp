@@ -162,7 +162,11 @@ public:
 int main(int argc, char** argv) {
     setenv("WEBRTC_VST_HANDSHAKE_URL", "ws://127.0.0.1:1", 1);
     auto host = owned(new Host);
-    Vst::PluginContextFactory::instance().setPluginContext(static_cast<Vst::HostApplication*>(host.get()));
+    // Audacity exposes IRunLoop on IPlugFrame, not the factory/host context.
+    // The first editor must initialize correctly in that valid arrangement.
+    auto context = owned(new Vst::HostApplication);
+    Vst::HostApplication* hostContext = argc > 2 ? host.get() : context.get();
+    Vst::PluginContextFactory::instance().setPluginContext(hostContext);
     int screenIndex = 0;
     auto* xcb = xcb_connect(nullptr, &screenIndex);
     require(!xcb_connection_has_error(xcb), "An X11 display is required (use xvfb-run)");
@@ -173,7 +177,7 @@ int main(int argc, char** argv) {
         auto module = VST3::Hosting::Module::create(argc > 1 ? argv[1] : WEBRTC_VST_DEFAULT_PLUGIN_PATH, error);
         require(module != nullptr, error.c_str());
         const auto& factory = module->getFactory();
-        factory.setHostContext(static_cast<Vst::HostApplication*>(host.get()));
+        factory.setHostContext(hostContext);
         std::vector<std::unique_ptr<Vst::PlugProvider>> providers;
         for (int i = 0; i < 4; ++i) {
             auto provider = std::make_unique<Vst::PlugProvider>(factory, factory.classInfos().front(), true);
