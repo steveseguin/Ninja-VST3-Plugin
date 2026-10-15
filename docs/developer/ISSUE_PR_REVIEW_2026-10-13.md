@@ -5,6 +5,10 @@ Reports and PR descriptions were treated as hypotheses. Changes below were
 checked against production code and exercised locally on Windows x64 with
 MSVC 2022, Release configuration, and VST3 SDK 3.8.0 build 66.
 
+For the current GitHub disposition, see the
+[2026-10-15 triage follow-up](#repository-triage-follow-up-2026-10-15).
+The earlier sections retain their original review snapshots.
+
 ## Disposition
 
 | Item | Independent finding | Change |
@@ -473,3 +477,25 @@ prior nine Windows native checks, both Mac CI builds and five-minute strict
 audio soak apply to this unchanged production binary. This pass does not
 certify physical audio drivers, macOS DAWs, Studio One, Audacity or impaired
 WAN conditions. FEC remains disabled.
+
+## Repository triage follow-up: 2026-10-15
+
+Rechecked the open PR revisions, conversation comments, submitted reviews and
+inline comments against `main` at `07ae2a5`. No new defect reports were present.
+
+- Closed [PR #3](https://github.com/steveseguin/Ninja-VST3-Plugin/pull/3#issuecomment-6182185600),
+  [PR #4](https://github.com/steveseguin/Ninja-VST3-Plugin/pull/4#issuecomment-6182186363)
+  and [PR #5](https://github.com/steveseguin/Ninja-VST3-Plugin/pull/5#issuecomment-6182187171)
+  as already incorporated in `d6b52d5` and covered by subsequent releases.
+  Comments link the implementation, regression evidence and relevant follow-ups;
+  no stale branch was merged and no branch was deleted.
+- [Issue #6](https://github.com/steveseguin/Ninja-VST3-Plugin/issues/6#issuecomment-6182187742)
+  remains open. Posted the v0.2.8 Windows download, complete-bundle installation
+  instructions and a retest request. The missing-resource failure is reproduced
+  and fixed, but the reporter's exact Live Beta build remains unconfirmed.
+
+Fresh Windows checks passed: `ResamplerUnitTest`, `PeerAudioBufferUnitTest`,
+`AudioImpairmentTest`, `WindowsEditorSmoke` and `WindowsEditorWithoutResources`
+(5/5), plus all 15 offline playback-analyzer regressions. Existing Mac, Linux
+and CodeQL checks for `07ae2a5` are green. This follow-up changes documentation
+and GitHub item disposition, with no plugin runtime changes.

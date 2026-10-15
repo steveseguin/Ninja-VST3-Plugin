@@ -1,46 +1,32 @@
 # WebRTC VST for VDO.Ninja
 
-Audio-first VST3 bridge between DAW hosts and VDO.Ninja signaling/WebRTC transport.
+Send audio from your DAW to [VDO.Ninja](https://vdo.ninja), or receive remote
+streams and room audio in your DAW. For talkback, remote direction and mix review.
 
-## Features
+**[Download for Windows, macOS or Linux](https://github.com/steveseguin/Ninja-VST3-Plugin/releases)**
+· [Installation guide](https://steveseguin.github.io/Ninja-VST3-Plugin/getting-started.html)
 
-- **Seed & Play modes** - Publish DAW audio to VDO.Ninja or monitor remote streams
-- **Multi-peer mixing** - Receives multiple peers in a room, each with independent Opus decoding, mixed to stereo output
-- **Opus codec** - 48 kHz stereo encoding/decoding with automatic sample rate conversion
-- **End-to-end encryption** - Password-based AES encryption compatible with VDO.Ninja E2EE
-- **Room support** - Join rooms with automatic peer discovery and hashed room/stream IDs
-- **Cross-platform** - Windows (x64), macOS (Apple Silicon and Intel), and Linux (x64), VST3 format
+## Screenshots
 
-## What this repo provides
+| Receive with Play | Send with Publish |
+| --- | --- |
+| ![Play receiving audio in REAPER](media/gallery/reaper-play.png) | ![Publish sending audio in REAPER](media/gallery/reaper-publish.png) |
 
-- `webrtc_vst/`: VST3 plugin source.
-- `tools/cli_host/`: Headless CLI host for testing without a DAW.
-- `tests/`: Integration and stress tests.
-- `tools/tests/`: Node-based integration tests.
-- `js_sdk/`: Minimal vendored VDO.Ninja SDK runtime used by tests.
-- `docs/`: Marketing/download page intended for GitHub Pages.
+Actual plugin windows in REAPER. [More screenshots and short videos](media/gallery/README.md).
 
-## Build and test quick start
+## Get started
 
-- Build/test doc: [docs/developer/BUILD_AND_TEST.md](./docs/developer/BUILD_AND_TEST.md)
-- macOS build, install and signing: [docs/developer/MACOS.md](./docs/developer/MACOS.md)
-- Linux build, installation and packaging: [docs/developer/LINUX.md](./docs/developer/LINUX.md)
-- Current hardening, audio measurements and testing gaps: [docs/developer/HARDENING_VALIDATION.md](./docs/developer/HARDENING_VALIDATION.md)
-- SDK policy: Steinberg VST3 SDK 3.8+ (MIT) only
-- Primary automation tests: `npm run test:integration`
-- Live room smoke test: `npm run test:integration:live`
+1. Install the complete `.vst3` bundle and rescan plugins in your DAW.
+2. Add **VDO.Ninja WebRTC Bridge** and choose **Publish** to send or **Play** to receive.
+3. Enter the stream ID or room name and matching password for your session.
 
-## Downloads
+Supports Opus stereo, sample-rate conversion and room mixing. Requires a VST3
+host with 32-bit float processing; Linux uses X11.
 
-- [Application screenshots and short video](media/gallery/README.md)
-- [October 2026 issue/PR review and validation](docs/developer/ISSUE_PR_REVIEW_2026-10-13.md)
+## Documentation
 
-- Releases: https://github.com/steveseguin/Ninja-VST3-Plugin/releases
-- Docs landing page (when GitHub Pages is enabled): `docs/index.html`
-- Install instructions: [INSTALL.md](./INSTALL.md)
-- Self-hosted domains, salts and signaling: [Advanced settings](./docs/developer/ADVANCED_SETTINGS.md)
+- [Advanced settings and self-hosting](docs/developer/ADVANCED_SETTINGS.md)
+- [Build and test](docs/developer/BUILD_AND_TEST.md) · [macOS](docs/developer/MACOS.md) · [Linux](docs/developer/LINUX.md)
+- [Release validation and known limits](docs/developer/RELEASE_VALIDATION_0.2.8.md)
 
-## License and contributions
-
-- License: [LICENSE](./LICENSE)
-- CLA / contribution policy: [CONTRIBUTING.md](./CONTRIBUTING.md)
+[License](LICENSE) · [Contributing / CLA](CONTRIBUTING.md)
