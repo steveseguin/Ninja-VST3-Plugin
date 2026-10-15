@@ -173,6 +173,33 @@ void checkRecoveryTail() {
         "Concealment tail was lost or played after the newly arrived packet");
 }
 
+void checkRecoveryBurst() {
+    // A short scheduler/network delay can leave a partly consumed PLC frame
+    // when several real packets arrive together. Retain the concealed tail
+    // followed by every decoded sample, without increasing startup pre-fill.
+    for (double rate : {44100., 48000., 96000., 192000., 384000.}) {
+        for (int channels : {1, 2}) {
+            const auto packets = encode(channels, 24);
+            Receiver expected(rate, channels), actual(rate, channels);
+            expected.warm(packets); actual.warm(packets);
+            const size_t packetFrames = static_cast<size_t>(rate / 50);
+            auto reference = expected.pull(packetFrames);
+            for (int i = 21; i < 24; ++i) {
+                expected.deliver(packets[i]);
+                append(reference, expected.pull(packetFrames));
+            }
+            auto captured = actual.pull(256);
+            for (int i = 21; i < 24; ++i) actual.deliver(packets[i]);
+            const size_t remaining = 4 * packetFrames - 256;
+            require(Access::available(actual.session, "a") == remaining,
+                    "Recovery burst overwrote concealed or decoded audio");
+            append(captured, actual.pull(remaining));
+            require(maxDifference(reference, captured) < 1e-6,
+                    "Recovery burst changed sample order");
+        }
+    }
+}
+
 void checkPeerIsolation() {
     const auto packets = encode(2, 30);
     Receiver combined, a, b;
@@ -207,7 +234,7 @@ void checkConcurrentReceiveAndPull() {
         for (int i = 0; i < 4000; ++i) {
             for (const float sample : receiver.pull(128))
                 if (!std::isfinite(sample) || std::abs(sample) >= 1) valid = false;
-            if (Access::available(receiver.session, "a") > 2048) valid = false;
+            if (Access::available(receiver.session, "a") > 4096) valid = false;
         }
     });
     start.store(true, std::memory_order_release);
@@ -229,7 +256,7 @@ void checkMalformedOpusRecovery() {
         // encode legal Opus. This boundary is after SRTP authentication.
         (void)Access::deliver(receiver.session, "a", bytes);
         for (float value : receiver.pull(256)) require(std::isfinite(value), "Malformed Opus produced nonfinite output");
-        require(Access::available(receiver.session,"a") <= 2048, "Malformed Opus exceeded ring bound");
+        require(Access::available(receiver.session,"a") <= 4096, "Malformed Opus exceeded ring bound");
     }
     double energy = 0;
     size_t samples = 0;
@@ -307,6 +334,7 @@ int main(int argc, char** argv) {
     };
     check("clean decode equals independent Opus decoder", checkCleanDecode);
     check("arrival during partially consumed concealment", checkRecoveryTail);
+    check("three-packet recovery burst preserves concealment tail and decoded audio", checkRecoveryBurst);
     check("independent peer concealment", checkPeerIsolation);
     check("concurrent receive and pull remain finite and bounded", checkConcurrentReceiveAndPull);
     check("5000 malformed Opus payloads remain bounded and recover", checkMalformedOpusRecovery);

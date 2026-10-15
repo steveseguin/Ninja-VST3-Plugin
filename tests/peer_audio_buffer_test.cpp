@@ -42,28 +42,28 @@ void checkInterleavedPush() {
 void checkRate(double rate) {
     const auto sizing = webrtc_vst::peerAudioBufferSizing(rate);
     const auto packetFrames = static_cast<size_t>(std::ceil(rate / 50.0));
-    require(sizing.capacityFrames >= 2 * packetFrames,
-            "Receive ring cannot hold two resampled 20 ms packets");
+    require(sizing.capacityFrames >= 4 * packetFrames,
+            "Receive ring cannot hold four resampled 20 ms packets");
     require(sizing.preFillFrames <= sizing.capacityFrames, "Pre-fill can never complete");
     require(sizing.preFillFrames >= packetFrames, "High-rate pre-fill is shorter than 20 ms");
     if (rate <= 48000) {
-        require(sizing.capacityFrames == 2048 && sizing.preFillFrames == 960,
-                "Existing low-rate minimum sizes changed");
+        require(sizing.capacityFrames == 4096 && sizing.preFillFrames == 960,
+                "Low-rate recovery capacity or startup pre-fill changed");
     }
 
     webrtc_vst::AudioRingBuffer buffer(sizing.capacityFrames, 2);
-    // A packet callback pushes its entire resampled block at once. Let two
-    // callbacks finish before the consumer runs, just as the 48 kHz ring allows.
+    // A packet callback pushes its entire resampled block at once. Retain a
+    // four-packet burst at every host rate before the consumer runs.
     std::vector<float> left(packetFrames), right(packetFrames);
     const float* input[] = {left.data(), right.data()};
-    for (int packet = 0; packet < 2; ++packet) {
+    for (int packet = 0; packet < 4; ++packet) {
         for (size_t i = 0; i < packetFrames; ++i) {
             left[i] = static_cast<float>(packet * packetFrames + i) / 20000.0f;
             right[i] = -left[i];
         }
         buffer.push(input, packetFrames, 2);
     }
-    const size_t expected = 2 * packetFrames;
+    const size_t expected = 4 * packetFrames;
     require(buffer.availableFrames(2) == expected, "A resampled packet was truncated");
     std::vector<float> outLeft(expected), outRight(expected);
     float* output[] = {outLeft.data(), outRight.data()};
@@ -81,7 +81,7 @@ void checkHostBursts() {
     for (size_t block : {size_t{64}, size_t{256}, size_t{512}, size_t{1024}, size_t{2048}, size_t{8192}}) {
         const auto sizing = webrtc_vst::peerAudioBufferSizing(48000, block);
         require(sizing.preFillFrames == 960, "Host block size increased startup latency");
-        require(sizing.capacityFrames == std::max(size_t{2048}, 4 * block), "Host burst capacity mismatch");
+        require(sizing.capacityFrames == std::max(size_t{4096}, 4 * block), "Host burst capacity mismatch");
         if (block <= 512) continue;
         webrtc_vst::AudioRingBuffer ring(sizing.capacityFrames, 2);
         // One packet already queued, followed by a multi-packet host burst.
