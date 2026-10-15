@@ -86,6 +86,24 @@ demonstrate Audacity audio playback.
 See the [packaged-release validation](../../docs/developer/RELEASE_VALIDATION_0.2.6.md)
 for the exact binary hash and the measured audio checks in REAPER and the CLI host.
 
+## Windows and Linux v0.2.8
+
+These captures use the downloaded release packages. Linux applications ran
+on an isolated X11 desktop under Ubuntu 24.04 / WSL, with synthetic audio.
+REAPER used Dummy Audio and a muted master output. Audacity checks cover
+editor opening/closing; they do not certify its audio processing.
+
+![Linux REAPER with the v0.2.8 receiver](linux-reaper-v0.2.8.png)
+
+![Linux Audacity with the v0.2.8 editor](linux-audacity-v0.2.8.png)
+
+![Windows Audacity with the signed v0.2.8 editor](windows-audacity-v0.2.8.png)
+
+[Short Linux REAPER editor recording](linux-reaper-v0.2.8.mp4) (8 seconds, silent).
+
+See the [release validation report](../../docs/developer/RELEASE_VALIDATION_0.2.8.md)
+for package hashes, measured audio results and host-test scope.
+
 ## Reproduce native-host captures
 
 Build `webrtc_vst_windows_editor_test`, then run:

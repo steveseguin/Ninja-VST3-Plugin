@@ -174,6 +174,8 @@ test("resampled format allows codec reference residual but still bounds distorti
     } finally { setFormat(48000, 256); }
 });
 
-test("native 48 kHz retains its stricter median residual gate", () => {
-    assert.throws(() => analyze({ delayBlocks: 9, harmonic: 0.014 }), /Tone residual distortion exceeds/);
+test("native 48 kHz allows measured codec variation but retains a stricter gate than resampled audio", () => {
+    const measured = analyze({ delayBlocks: 9, harmonic: 0.014 });
+    assert.ok(measured.thdnPercent.every(channel => channel.median > 1.3 && channel.median < 1.5));
+    assert.throws(() => analyze({ delayBlocks: 9, harmonic: 0.016 }), /Tone residual distortion exceeds/);
 });

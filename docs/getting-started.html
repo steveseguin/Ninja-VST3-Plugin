@@ -48,6 +48,7 @@
     </p>
     <div class="hero-actions">
       <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/latest/download/webrtc_vst-windows-setup.exe">Download for Windows</a>
+      <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/v0.2.8/webrtc_vst-v0.2.8-linux-x86_64-vst3.tar.gz">Linux &mdash; x86-64</a>
       <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.6/webrtc_vst-v0.2.6-macos-arm64-notarized.dmg">Mac &mdash; Apple Silicon</a>
       <a class="btn btn-primary" href="https://github.com/steveseguin/Ninja-VST3-Plugin/releases/download/mac-v0.2.6/webrtc_vst-v0.2.6-macos-x86_64-notarized.dmg">Mac &mdash; Intel</a>
       <a class="btn btn-ghost" href="./index.html">Back To Main Page</a>
@@ -89,7 +90,25 @@
           <p>Restart your DAW and rescan its VST3 plugins. Add <strong>VDO.Ninja WebRTC Bridge</strong> to a track. Logic Pro and GarageBand cannot load VST3 plugins.</p>
         </article>
       </div>
-      <p class="hero-meta">The v0.2.5 Mac DMGs are Developer ID signed, Apple-notarized, and carry stapled approval tickets. REAPER send/receive and saved-project reopening have been validated on Mac. Other Mac DAWs and macOS 11 still need manual validation. Do not disable Gatekeeper to install the plugin.</p>
+      <p class="hero-meta">The v0.2.6 Mac DMGs are Developer ID signed, Apple-notarized, and carry stapled approval tickets. REAPER send/receive and saved-project reopening have been validated on Mac. Other Mac DAWs and macOS 11 still need manual validation. Do not disable Gatekeeper to install the plugin.</p>
+    </section>
+
+    <section id="linux-install" class="panel">
+      <h2>1) Install on Linux</h2>
+      <div class="steps">
+        <article class="step">
+          <p class="step-index">A</p>
+          <p>Download the Linux x86-64 archive and checksum file from the same release. Use Ubuntu 22.04 or a compatible distribution and an X11-capable VST3 host.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">B</p>
+          <p>Extract the complete <code>webrtc_vst.vst3</code> folder into <code>~/.vst3/</code>. Keep its <code>Contents</code> and resources together.</p>
+        </article>
+        <article class="step">
+          <p class="step-index">C</p>
+          <p>Restart your DAW and rescan VST3 plugins. Add <strong>VDO.Ninja WebRTC Bridge</strong>. See the <a href="https://github.com/steveseguin/Ninja-VST3-Plugin/blob/main/docs/developer/LINUX.md">Linux guide</a> for checksum commands and required system libraries.</p>
+        </article>
+      </div>
     </section>
 
     <section class="panel">
@@ -101,7 +120,7 @@
         </article>
         <article class="step">
           <p class="step-index">2</p>
-          <p>Windows: ensure the path includes <code>%LOCALAPPDATA%\Programs\Common\VST3</code>. Mac: install in <code>~/Library/Audio/Plug-Ins/VST3/</code>, the standard user VST3 folder.</p>
+          <p>Windows: ensure the path includes <code>%LOCALAPPDATA%\Programs\Common\VST3</code>. Mac: install in <code>~/Library/Audio/Plug-Ins/VST3/</code>. Linux: use <code>~/.vst3/</code>.</p>
         </article>
         <article class="step">
           <p class="step-index">3</p>

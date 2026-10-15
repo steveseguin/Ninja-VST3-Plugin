@@ -1,0 +1,1172 @@
+{
+  "release": "v0.2.8",
+  "validatedUtc": "2026-10-15",
+  "source": "6e7aab1a941ad4d732fc5b54b19ad15b6a91837c",
+  "scope": "Downloaded Windows x64 and Linux x86-64 packages, same-machine synthetic media; Linux Ubuntu 24.04 WSL2/X11; no hardware or WAN certification",
+  "ci": {
+    "windows": 38658499909,
+    "linuxArchive": 38658364147,
+    "linuxTagIndependent": 38658499913,
+    "macBothArchitectures": 38658364134,
+    "codeql": 38658364161
+  },
+  "sha256": {
+    "webrtc_vst-v0.2.8-linux-x86_64-vst3.tar.gz": "0e56075f487fc82c054eec05479461a43afded488df8174e0b1b203343b93b96",
+    "webrtc_vst-v0.2.8-windows-vst3.zip": "1026bd709625fd4948f92f1a1b154f9f84e190496c05615cdb9565e375fcaba3",
+    "webrtc_vst-windows-setup.exe": "af5aee49158c69c3eca1303111914d9eb68b164128e51a72397f1a4da7986314"
+  },
+  "completedVirusTotalAnalyses": [
+    {
+      "file": "webrtc_vst-v0.2.8-windows-vst3.zip",
+      "sha256": "1026bd709625fd4948f92f1a1b154f9f84e190496c05615cdb9565e375fcaba3",
+      "status": "completed",
+      "stats": {
+        "malicious": 0,
+        "suspicious": 0,
+        "undetected": 65,
+        "harmless": 0,
+        "timeout": 3,
+        "confirmed-timeout": 0,
+        "failure": 0,
+        "type-unsupported": 7
+      },
+      "date": 1792024068
+    },
+    {
+      "file": "webrtc_vst-windows-setup.exe",
+      "sha256": "af5aee49158c69c3eca1303111914d9eb68b164128e51a72397f1a4da7986314",
+      "status": "completed",
+      "stats": {
+        "malicious": 0,
+        "suspicious": 0,
+        "undetected": 71,
+        "harmless": 0,
+        "timeout": 0,
+        "confirmed-timeout": 0,
+        "failure": 0,
+        "type-unsupported": 4
+      },
+      "date": 1792024069
+    },
+    {
+      "file": "webrtc_vst-v0.2.8-linux-x86_64-vst3.tar.gz",
+      "sha256": "0e56075f487fc82c054eec05479461a43afded488df8174e0b1b203343b93b96",
+      "status": "completed",
+      "stats": {
+        "malicious": 0,
+        "suspicious": 0,
+        "undetected": 62,
+        "harmless": 0,
+        "timeout": 0,
+        "confirmed-timeout": 0,
+        "failure": 0,
+        "type-unsupported": 13
+      },
+      "date": 1792023696
+    }
+  ],
+  "signatures": [
+    {
+      "File": "webrtc_vst.vst3",
+      "Status": "UnknownError",
+      "Message": "A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider",
+      "Signer": "OU=socialstream.ninja, E=steve@seguin.email, L=Canada, O=Steve Seguin, CN=Social Stream Ninja",
+      "TimestampSigner": "CN=DigiCert SHA256 RSA4096 Timestamp Responder 2026 1, O=\"DigiCert, Inc.\", C=US",
+      "SignToolExitCode": 1
+    },
+    {
+      "File": "webrtc_vst-windows-setup.exe",
+      "Status": "UnknownError",
+      "Message": "A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider",
+      "Signer": "OU=socialstream.ninja, E=steve@seguin.email, L=Canada, O=Steve Seguin, CN=Social Stream Ninja",
+      "TimestampSigner": "CN=DigiCert SHA256 RSA4096 Timestamp Responder 2026 1, O=\"DigiCert, Inc.\", C=US",
+      "SignToolExitCode": 1
+    }
+  ],
+  "windows": {
+    "nativeCiTests": 11,
+    "validatorPassed": 537,
+    "validatorFailed": 0,
+    "integrationPassed": true,
+    "hardeningPassed": true,
+    "ownedLiveRoomRms": 0.171644,
+    "installerExitCode": 0,
+    "installedMatchesZip": true,
+    "matrix": [
+      {
+        "performance": {},
+        "medianResidualLimit": 2,
+        "continuousWarmup": true,
+        "scope": "44100 Hz / 128 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 67.87789985537529,
+          "p95": 70.7253001164645,
+          "min": 67.5564999692142,
+          "max": 70.77029999345541,
+          "spread": 3.213800024241209,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.5440314501786669,
+            "p95": 0.5477564961431276,
+            "windows": 290
+          },
+          {
+            "median": 0.7247843529724762,
+            "p95": 0.8454484085566873,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.03569172974675894,
+          0.05407143384218216
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 7234,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1.5,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 32 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 79.39079985953867,
+          "p95": 79.7410998493433,
+          "min": 79.06540017575026,
+          "max": 79.74279997870326,
+          "spread": 0.6773998029530048,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.4881831175993982,
+            "p95": 0.6212789634628376,
+            "windows": 290
+          },
+          {
+            "median": 0.8507508556123611,
+            "p95": 1.1052788213530043,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.033249976113438606,
+          0.050153277814388275
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 31499,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1.5,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 74.26770008169115,
+          "p95": 74.46320005692542,
+          "min": 73.89699993655086,
+          "max": 74.69429983757436,
+          "spread": 0.7972999010235071,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.49510147374140084,
+            "p95": 0.8475841141769463,
+            "windows": 290
+          },
+          {
+            "median": 0.6764191691605722,
+            "p95": 1.0081673693799522,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.033249976113438606,
+          0.050153277814388275
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 3937,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1.5,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 1024 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 118.83260007016361,
+          "p95": 139.95309988968074,
+          "min": 118.05030005052686,
+          "max": 140.27410000562668,
+          "spread": 22.22379995509982,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.37227878452994645,
+            "p95": 0.9464395545631551,
+            "windows": 290
+          },
+          {
+            "median": 0.859440618368678,
+            "p95": 1.0194670161765431,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.03323979303240776,
+          0.05009373649954796
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 985,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 2,
+        "continuousWarmup": true,
+        "scope": "96000 Hz / 64 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 79.10219999030232,
+          "p95": 79.47969995439053,
+          "min": 78.78060010261834,
+          "max": 79.52539995312691,
+          "spread": 0.7447998505085707,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.5240927288742965,
+            "p95": 0.924595101364166,
+            "windows": 290
+          },
+          {
+            "median": 0.6122189212920326,
+            "p95": 0.8087193472518094,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.01662324834614992,
+          0.025077806785702705
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 31500,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 2,
+        "continuousWarmup": true,
+        "scope": "192000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 78.26889981515706,
+          "p95": 78.4443998709321,
+          "min": 77.77179987169802,
+          "max": 78.46400002017617,
+          "spread": 0.6922001484781504,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.6127319457250255,
+            "p95": 0.8607440819319621,
+            "windows": 290
+          },
+          {
+            "median": 0.6435837077753417,
+            "p95": 1.1195896832270893,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.008310475386679173,
+          0.012532329186797142
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 15750,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      }
+    ],
+    "strictSoak": {
+      "seconds": 300,
+      "windows": 299,
+      "steadyWindows": 290,
+      "worstCallbackUs": 249.9,
+      "silentBlocks": 0,
+      "totalBlocks": 54520,
+      "minRms": 0.177708,
+      "maxFrequencyError": 0.6649999999999636
+    },
+    "clicks": {
+      "rate": 48000,
+      "block": 256,
+      "results": [
+        {
+          "frames": 1007872,
+          "nonfinite": 0,
+          "peak": 0.25442567467689514,
+          "maxStep": 0.033246804028749466,
+          "maxResidual": 1.5403936808766616e-05,
+          "maxBoundaryResidual": 7.035102784325176e-06,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        },
+        {
+          "frames": 1007872,
+          "nonfinite": 0,
+          "peak": 0.25655898451805115,
+          "maxStep": 0.05011831596493721,
+          "maxResidual": 2.074384167410903e-05,
+          "maxBoundaryResidual": 1.6851468019274396e-05,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    "mediaFaultsPassed": true,
+    "peerChurn": {
+      "replacementRequests": 384,
+      "distinctOffers": 384,
+      "recoveryOffers": 3,
+      "uninterruptedAudio": true
+    },
+    "audacity3": {
+      "version": "3.7.9",
+      "plugin": "0.2.8",
+      "cycles": [
+        {
+          "cycle": 1,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 2,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 3,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 4,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        },
+        {
+          "cycle": 5,
+          "opened": true,
+          "closed": true,
+          "hostAlive": true
+        }
+      ],
+      "exitCode": 0,
+      "scope": "Editor open/close with owned live stream configured; no playback measurement"
+    },
+    "audacity4Registration": [
+      {
+        "state": "Validated",
+        "version": "0.2.8",
+        "realtimeCapable": "true"
+      },
+      {
+        "state": "Validated",
+        "version": "0.2.8",
+        "realtimeCapable": "true"
+      },
+      {
+        "state": "Validated",
+        "version": "0.2.8",
+        "realtimeCapable": "true"
+      },
+      {
+        "state": "Validated",
+        "version": "0.2.8",
+        "realtimeCapable": "true"
+      },
+      {
+        "state": "Validated",
+        "version": "0.2.8",
+        "realtimeCapable": "true"
+      }
+    ],
+    "reaper": {
+      "result.txt": [
+        "Pair 4: window peak=0.250729",
+        "PASS: DAW -> WebRTC -> DAW custom-salt audio; peak=0.25035998225212",
+        "PASS: audio resumed after fresh saved-project load; sustained windows=20"
+      ],
+      "result-restart.txt": [
+        "Pair 4: window peak=0.250729",
+        "PASS: DAW -> WebRTC -> DAW custom-salt audio; peak=0.25072899460793",
+        "PASS: audio resumed after fresh saved-project load; sustained windows=12"
+      ]
+    }
+  },
+  "linux": {
+    "nativeCiTests": 11,
+    "validatorPassed": 537,
+    "validatorFailed": 0,
+    "packagedEditorOpens": 128,
+    "integrationPassed": true,
+    "ownedLiveRoomPassed": true,
+    "audacity3": {
+      "version": "3.7.9",
+      "plugin": "0.2.8",
+      "cycles": [
+        {
+          "opened": true,
+          "closed": true
+        },
+        {
+          "opened": true,
+          "closed": true
+        },
+        {
+          "opened": true,
+          "closed": true
+        },
+        {
+          "opened": true,
+          "closed": true
+        },
+        {
+          "opened": true,
+          "closed": true
+        }
+      ],
+      "exitCode": 0,
+      "scope": "Editor smoke with owned synthetic live stream configured; no playback measurement"
+    },
+    "matrix": [
+      {
+        "performance": {},
+        "medianResidualLimit": 2,
+        "continuousWarmup": true,
+        "scope": "44100 Hz / 128 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 66.87762000001385,
+          "p95": 69.7011089996522,
+          "min": 66.69650999992882,
+          "max": 69.7858739995354,
+          "spread": 3.089363999606576,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.4358840181463236,
+            "p95": 0.4730779845533808,
+            "windows": 290
+          },
+          {
+            "median": 0.6498762266671286,
+            "p95": 0.8483608268219756,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.03571359347552061,
+          0.05395291745662689
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 7234,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1.5,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 32 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 68.39931899958174,
+          "p95": 68.45908200011763,
+          "min": 68.17070800025249,
+          "max": 68.54273900080443,
+          "spread": 0.37203100055194227,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.3758124064467,
+            "p95": 0.7427201282555571,
+            "windows": 290
+          },
+          {
+            "median": 1.0287195848630395,
+            "p95": 1.162820578573096,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.033246515318751335,
+          0.05013228580355644
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 31499,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1.5,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 51.15494099936768,
+          "p95": 51.1718909992851,
+          "min": 51.13891600012721,
+          "max": 51.17358999996213,
+          "spread": 0.03467399983492214,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.3734074353574979,
+            "p95": 0.9476423657707835,
+            "windows": 290
+          },
+          {
+            "median": 0.8638841500974064,
+            "p95": 0.9998989149896789,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.03324900381267071,
+          0.050111159682273865
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 3937,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1.5,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 1024 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 118.7380370001847,
+          "p95": 139.98390899996593,
+          "min": 118.6549340000056,
+          "max": 140.01284200003283,
+          "spread": 21.357908000027237,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.3655141342181093,
+            "p95": 0.4160115740361785,
+            "windows": 290
+          },
+          {
+            "median": 0.982887969521689,
+            "p95": 1.1884420948120693,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.03293550759553909,
+          0.04998328536748886
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 985,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 2,
+        "continuousWarmup": true,
+        "scope": "96000 Hz / 64 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 48.860369000067294,
+          "p95": 48.88435100019706,
+          "min": 48.810021000463166,
+          "max": 48.88806599956297,
+          "spread": 0.07804499909980223,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.47603103377205824,
+            "p95": 0.5016470431064352,
+            "windows": 290
+          },
+          {
+            "median": 1.0427375038385032,
+            "p95": 1.6191207411838078,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.016459353268146515,
+          0.024956757202744484
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 31499,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 2,
+        "continuousWarmup": true,
+        "scope": "192000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 68.12137300039467,
+          "p95": 68.14458099961485,
+          "min": 68.06273900019733,
+          "max": 68.33535099940491,
+          "spread": 0.2726119992075837,
+          "markers": 10
+        },
+        "thdnPercent": [
+          {
+            "median": 0.31365397814844237,
+            "p95": 0.4516298700241059,
+            "windows": 290
+          },
+          {
+            "median": 0.7138565886862579,
+            "p95": 0.9874449880077873,
+            "windows": 290
+          }
+        ],
+        "maxAdjacentStep": [
+          0.008235728368163109,
+          0.012479815632104874
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 15749,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      }
+    ],
+    "clicks": {
+      "rate": 48000,
+      "block": 256,
+      "results": [
+        {
+          "frames": 1007872,
+          "nonfinite": 0,
+          "peak": 0.2546294331550598,
+          "maxStep": 0.033250387758016586,
+          "maxResidual": 1.6264477387728515e-05,
+          "maxBoundaryResidual": 8.71674399666178e-06,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        },
+        {
+          "frames": 1007872,
+          "nonfinite": 0,
+          "peak": 0.2566305100917816,
+          "maxStep": 0.05014171823859215,
+          "maxResidual": 2.007655617713988e-05,
+          "maxBoundaryResidual": 1.430930938789432e-05,
+          "suspiciousSamples": 0,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    "shortSoak": {
+      "seconds": 32,
+      "windows": 31,
+      "steadyWindows": 22,
+      "worstCallbackUs": 74.257,
+      "silentBlocks": 0,
+      "totalBlocks": 4136,
+      "minRms": 0.176632,
+      "maxFrequencyError": 0.6649999999999636
+    },
+    "initialQualityFailures": [
+      {
+        "performance": {},
+        "medianResidualLimit": 1,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 52.31934299990826,
+          "p95": 52.36355099987122,
+          "min": 52.25558500023908,
+          "max": 52.37834200033831,
+          "spread": 0.1227570000992273,
+          "markers": 18
+        },
+        "thdnPercent": [
+          {
+            "median": 0.3811009611319844,
+            "p95": 0.5971917835501679,
+            "windows": 522
+          },
+          {
+            "median": 1.0277946082813896,
+            "p95": 1.1951116331751925,
+            "windows": 522
+          }
+        ],
+        "maxAdjacentStep": [
+          0.033246077597141266,
+          0.0501059852540493
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 6750,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      {
+        "performance": {},
+        "medianResidualLimit": 1,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 52.884048000123585,
+          "p95": 52.917819999947824,
+          "min": 52.67201200013005,
+          "max": 53.14829000008103,
+          "spread": 0.4762779999509803,
+          "markers": 18
+        },
+        "thdnPercent": [
+          {
+            "median": 0.45076283420755064,
+            "p95": 0.4668360296497696,
+            "windows": 522
+          },
+          {
+            "median": 1.1933744987109103,
+            "p95": 1.5553823952244588,
+            "windows": 522
+          }
+        ],
+        "maxAdjacentStep": [
+          0.03293550759553909,
+          0.04998328536748886
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 6750,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      }
+    ],
+    "sharedSender": {
+      "play": {
+        "performance": {},
+        "medianResidualLimit": 1,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 52.152636000300845,
+          "p95": 52.184383000167145,
+          "min": 52.065535000110685,
+          "max": 52.186693999829004,
+          "spread": 0.12115899971831823,
+          "markers": 17
+        },
+        "thdnPercent": [
+          {
+            "median": 0.48888497096759626,
+            "p95": 0.621365191257092,
+            "windows": 522
+          },
+          {
+            "median": 0.8711167902914796,
+            "p95": 1.048081553180213,
+            "windows": 522
+          }
+        ],
+        "maxAdjacentStep": [
+          0.033250365406274796,
+          0.050134673714637756
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 6750,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      },
+      "baseline": {
+        "performance": {},
+        "medianResidualLimit": 1,
+        "continuousWarmup": true,
+        "scope": "48000 Hz / 256 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+        "latencyMs": {
+          "median": 52.49923199971818,
+          "p95": 52.51267199992071,
+          "min": 52.408017000288964,
+          "max": 52.538679000008415,
+          "spread": 0.13066199971945025,
+          "markers": 17
+        },
+        "thdnPercent": [
+          {
+            "median": 0.47964002561430946,
+            "p95": 0.6117159577517446,
+            "windows": 522
+          },
+          {
+            "median": 0.8113998998435363,
+            "p95": 0.9665970194829967,
+            "windows": 522
+          }
+        ],
+        "maxAdjacentStep": [
+          0.033250365406274796,
+          0.050134673714637756
+        ],
+        "silentBlocks": 0,
+        "totalBlocks": 6750,
+        "nonfinite": 0,
+        "clippedBlocks": 0
+      }
+    },
+    "artifact": {
+      "version": "0.2.8",
+      "archiveSha256": "0e56075f487fc82c054eec05479461a43afded488df8174e0b1b203343b93b96",
+      "pluginSha256": "7bba81019b341ea3eb863b616e3279d9b0b189780fa0422accab814f9d5e5aef",
+      "libraries": [
+        "\tlinux-vdso.so.1 (0x00007ffc7aff3000)",
+        "\tlibxcb.so.1 => /lib/x86_64-linux-gnu/libxcb.so.1 (0x00007945f222c000)",
+        "\tlibxcb-util.so.1 => /lib/x86_64-linux-gnu/libxcb-util.so.1 (0x00007945f2224000)",
+        "\tlibxcb-cursor.so.0 => /lib/x86_64-linux-gnu/libxcb-cursor.so.0 (0x00007945f221d000)",
+        "\tlibxcb-xkb.so.1 => /lib/x86_64-linux-gnu/libxcb-xkb.so.1 (0x00007945f21ff000)",
+        "\tlibxkbcommon.so.0 => /lib/x86_64-linux-gnu/libxkbcommon.so.0 (0x00007945f21b6000)",
+        "\tlibxkbcommon-x11.so.0 => /lib/x86_64-linux-gnu/libxkbcommon-x11.so.0 (0x00007945f21aa000)",
+        "\tlibglib-2.0.so.0 => /lib/x86_64-linux-gnu/libglib-2.0.so.0 (0x00007945f14b7000)",
+        "\tlibcairo.so.2 => /lib/x86_64-linux-gnu/libcairo.so.2 (0x00007945f1373000)",
+        "\tlibpangocairo-1.0.so.0 => /lib/x86_64-linux-gnu/libpangocairo-1.0.so.0 (0x00007945f2199000)",
+        "\tlibpangoft2-1.0.so.0 => /lib/x86_64-linux-gnu/libpangoft2-1.0.so.0 (0x00007945f1358000)",
+        "\tlibpango-1.0.so.0 => /lib/x86_64-linux-gnu/libpango-1.0.so.0 (0x00007945f12ed000)",
+        "\tlibgobject-2.0.so.0 => /lib/x86_64-linux-gnu/libgobject-2.0.so.0 (0x00007945f128a000)",
+        "\tlibfontconfig.so.1 => /lib/x86_64-linux-gnu/libfontconfig.so.1 (0x00007945f1239000)",
+        "\tlibexpat.so.1 => /lib/x86_64-linux-gnu/libexpat.so.1 (0x00007945f120b000)",
+        "\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007945f0e00000)",
+        "\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007945f1122000)",
+        "\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007945f10f4000)",
+        "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007945f0a00000)",
+        "\t/lib64/ld-linux-x86-64.so.2 (0x00007945f226b000)",
+        "\tlibXau.so.6 => /lib/x86_64-linux-gnu/libXau.so.6 (0x00007945f218f000)",
+        "\tlibXdmcp.so.6 => /lib/x86_64-linux-gnu/libXdmcp.so.6 (0x00007945f2187000)",
+        "\tlibxcb-render-util.so.0 => /lib/x86_64-linux-gnu/libxcb-render-util.so.0 (0x00007945f10ed000)",
+        "\tlibxcb-render.so.0 => /lib/x86_64-linux-gnu/libxcb-render.so.0 (0x00007945f10de000)",
+        "\tlibxcb-image.so.0 => /lib/x86_64-linux-gnu/libxcb-image.so.0 (0x00007945f10d8000)",
+        "\tlibpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x00007945f0d66000)",
+        "\tlibz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x00007945f10bc000)",
+        "\tlibpng16.so.16 => /lib/x86_64-linux-gnu/libpng16.so.16 (0x00007945f1084000)",
+        "\tlibfreetype.so.6 => /lib/x86_64-linux-gnu/libfreetype.so.6 (0x00007945f0c9a000)",
+        "\tlibX11.so.6 => /lib/x86_64-linux-gnu/libX11.so.6 (0x00007945f08c2000)",
+        "\tlibXext.so.6 => /lib/x86_64-linux-gnu/libXext.so.6 (0x00007945f0c86000)",
+        "\tlibXrender.so.1 => /lib/x86_64-linux-gnu/libXrender.so.1 (0x00007945f0c7a000)",
+        "\tlibxcb-shm.so.0 => /lib/x86_64-linux-gnu/libxcb-shm.so.0 (0x00007945f107f000)",
+        "\tlibpixman-1.so.0 => /lib/x86_64-linux-gnu/libpixman-1.so.0 (0x00007945f0813000)",
+        "\tlibharfbuzz.so.0 => /lib/x86_64-linux-gnu/libharfbuzz.so.0 (0x00007945f0706000)",
+        "\tlibgio-2.0.so.0 => /lib/x86_64-linux-gnu/libgio-2.0.so.0 (0x00007945f0536000)",
+        "\tlibfribidi.so.0 => /lib/x86_64-linux-gnu/libfribidi.so.0 (0x00007945f0c5a000)",
+        "\tlibthai.so.0 => /lib/x86_64-linux-gnu/libthai.so.0 (0x00007945f0c4f000)",
+        "\tlibffi.so.8 => /lib/x86_64-linux-gnu/libffi.so.8 (0x00007945f0c43000)",
+        "\tlibbsd.so.0 => /lib/x86_64-linux-gnu/libbsd.so.0 (0x00007945f0c2d000)",
+        "\tlibbz2.so.1.0 => /lib/x86_64-linux-gnu/libbz2.so.1.0 (0x00007945f0c17000)",
+        "\tlibbrotlidec.so.1 => /lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x00007945f0528000)",
+        "\tlibgraphite2.so.3 => /lib/x86_64-linux-gnu/libgraphite2.so.3 (0x00007945f0502000)",
+        "\tlibgmodule-2.0.so.0 => /lib/x86_64-linux-gnu/libgmodule-2.0.so.0 (0x00007945f04fb000)",
+        "\tlibmount.so.1 => /lib/x86_64-linux-gnu/libmount.so.1 (0x00007945f04ae000)",
+        "\tlibselinux.so.1 => /lib/x86_64-linux-gnu/libselinux.so.1 (0x00007945f0481000)",
+        "\tlibdatrie.so.1 => /lib/x86_64-linux-gnu/libdatrie.so.1 (0x00007945f0478000)",
+        "\tlibmd.so.0 => /lib/x86_64-linux-gnu/libmd.so.0 (0x00007945f0469000)",
+        "\tlibbrotlicommon.so.1 => /lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x00007945f0446000)",
+        "\tlibblkid.so.1 => /lib/x86_64-linux-gnu/libblkid.so.1 (0x00007945f040b000)"
+      ],
+      "glibcVersions": [
+        "GLIBC_2.14",
+        "GLIBC_2.15",
+        "GLIBC_2.16",
+        "GLIBC_2.17",
+        "GLIBC_2.2.5",
+        "GLIBC_2.25",
+        "GLIBC_2.27",
+        "GLIBC_2.29",
+        "GLIBC_2.3",
+        "GLIBC_2.3.2",
+        "GLIBC_2.3.4",
+        "GLIBC_2.32",
+        "GLIBC_2.33",
+        "GLIBC_2.34",
+        "GLIBC_2.4",
+        "GLIBC_2.7"
+      ]
+    },
+    "reaper": {
+      "result.txt": [
+        "elapsed=35.0 position=35.0 seed_peak=0.250000 return_peak=0.251702 seed_status=Peer connected (publishing) play_status=Receiving audio",
+        "PASS: DAW -> WebRTC -> DAW custom-salt audio; peak=0.25170224905014",
+        "PASS: audio resumed after fresh saved-project load; sustained windows=21"
+      ],
+      "result-restart.txt": [
+        "Pair 4: window peak=0.252163",
+        "PASS: DAW -> WebRTC -> DAW custom-salt audio; peak=0.25324481725693",
+        "PASS: audio resumed after fresh saved-project load; sustained windows=13"
+      ]
+    }
+  },
+  "initialFailures": {
+    "windowsToneLegacyOnePercentGate": {
+      "performance": {},
+      "medianResidualLimit": 1,
+      "continuousWarmup": true,
+      "scope": "48000 Hz / 32 frames, same machine, real backup signaling, direct encrypted media; excludes audio devices/WAN",
+      "latencyMs": {
+        "median": 68.88779997825623,
+        "p95": 69.07219998538494,
+        "min": 68.47729999572039,
+        "max": 69.07359999604523,
+        "spread": 0.5963000003248453,
+        "markers": 10
+      },
+      "thdnPercent": [
+        {
+          "median": 0.394250723168777,
+          "p95": 0.46148808955049436,
+          "windows": 290
+        },
+        {
+          "median": 1.1873431808432502,
+          "p95": 1.5207523425292155,
+          "windows": 290
+        }
+      ],
+      "maxAdjacentStep": [
+        0.03291676566004753,
+        0.04991286247968674
+      ],
+      "silentBlocks": 0,
+      "totalBlocks": 31500,
+      "nonfinite": 0,
+      "clippedBlocks": 0
+    },
+    "windowsConcurrentHostSilentBlock": {
+      "summary": {
+        "seconds": 32,
+        "windows": 31,
+        "steadyWindows": 22,
+        "worstCallbackUs": 130.9,
+        "silentBlocks": 1,
+        "totalBlocks": 4136,
+        "minRms": 0.177228,
+        "maxFrequencyError": 6.980000000000018
+      },
+      "timing": [
+        {
+          "index": 5457,
+          "seconds": 29.10697040008381,
+          "rms": [
+            0.0,
+            0.0
+          ],
+          "nearbyGapsMs": {
+            "seed": {
+              "max": 31.16959985345602,
+              "min": 0.004499917849898338,
+              "sequence": [
+                5.597400013357401,
+                5.145699949935079,
+                5.636499961838126,
+                5.054499953985214,
+                5.602700170129538,
+                5.102399969473481,
+                5.569699918851256,
+                5.086400080472231,
+                5.553199909627438,
+                5.056600086390972,
+                5.575699964538217,
+                5.177400074899197,
+                5.050499923527241,
+                5.6211999617516994,
+                5.08960010483861,
+                5.664599826559424,
+                5.097800167277455,
+                5.435599945485592,
+                5.2501000463962555,
+                5.567499902099371,
+                5.078600021079183,
+                5.616399925202131,
+                5.071200197562575,
+                5.631599808111787,
+                5.078100133687258,
+                31.16959985345602,
+                0.010400079190731049,
+                0.027799978852272034,
+                0.004499917849898338,
+                0.007200054824352264,
+                7.35500012524426,
+                0.037499936297535896,
+                4.669500049203634,
+                6.373399868607521,
+                3.6423001438379288,
+                5.1424999255687,
+                5.566200008615851,
+                5.094599910080433,
+                5.7357000187039375,
+                5.794299999251962,
+                5.2108000963926315,
+                4.843099974095821,
+                6.542700110003352,
+                4.111099988222122,
+                5.59299997985363,
+                5.027699982747436,
+                5.587500054389238,
+                5.057599861174822,
+                5.689200013875961,
+                5.076800007373095,
+                5.152099998667836,
+                5.562500096857548,
+                5.1727998070418835,
+                5.566000007092953,
+                5.169600015506148,
+                5.53410011343658,
+                5.089199868962169,
+                5.564100109040737,
+                5.074699874967337,
+                5.645900033414364
+              ]
+            },
+            "play": {
+              "max": 29.278900008648634,
+              "min": 0.003700144588947296,
+              "sequence": [
+                5.548699991777539,
+                5.112799815833569,
+                5.631700158119202,
+                5.149599863216281,
+                5.551900016143918,
+                5.133700091391802,
+                5.529399961233139,
+                5.124400136992335,
+                5.551299778744578,
+                5.074900109320879,
+                5.5553000420331955,
+                5.081899929791689,
+                5.655999993905425,
+                5.128999939188361,
+                5.593399982899427,
+                5.1425001583993435,
+                5.091500002890825,
+                5.843400023877621,
+                5.337799899280071,
+                5.100199952721596,
+                5.139500135555863,
+                5.566200008615851,
+                5.027899984270334,
+                5.988699849694967,
+                4.683300154283643,
+                5.608899984508753,
+                29.278900008648634,
+                0.007200054824352264,
+                0.011599855497479439,
+                0.003700144588947296,
+                0.005699926987290382,
+                7.3269999120384455,
+                1.5446001198142767,
+                6.044599926099181,
+                3.5963000264018774,
+                5.5698000360280275,
+                5.1473998464643955,
+                5.535200005397201,
+                5.110400030389428,
+                5.19770011305809,
+                5.553999915719032,
+                5.168300122022629,
+                5.611599888652563,
+                5.240099970251322,
+                5.436199950054288,
+                5.079600028693676,
+                5.545000080019236,
+                5.08500006981194,
+                5.543399835005403,
+                5.131500074639916,
+                5.717199994251132,
+                5.1079001277685165,
+                5.554699804633856,
+                5.184900015592575,
+                5.567500134930015,
+                5.147599847987294,
+                4.992100177332759,
+                5.655399989336729,
+                5.033599911257625,
+                5.5859999265521765
+              ]
+            }
+          }
+        }
+      ],
+      "interpretation": "One zero block with nearby 31.17 ms Seed and 29.28 ms Play callback gaps; consistent with scheduling stalls exceeding the four-block reserve. Exact OS cause not proven. Isolated repeat and final 300-second strict soak passed."
+    }
+  },
+  "codecCalibration": {
+    "reference": "tools/tests/diagnostics/codec_quality_reference.cpp",
+    "encodingStarts": 16,
+    "analysisOriginsPerStart": 15,
+    "oldAndNewPackagedCodecMeasurementsIdentical": true,
+    "maximumNativeMedianPercent": 1.20855,
+    "matchingFailingCapture": {
+      "encodingOffset": 768,
+      "analysisOffset": 320,
+      "medianPercent": [
+        0.450763,
+        1.19337
+      ],
+      "p95Percent": [
+        0.466836,
+        1.55538
+      ]
+    },
+    "nativeMedianLimitBeforePercent": 1,
+    "nativeMedianLimitAfterPercent": 1.5,
+    "resampledMedianLimitPercent": 2,
+    "p95LimitPercent": 3,
+    "otherGatesUnchanged": true,
+    "analyzerRegressionsPassed": 15
+  },
+  "gallery": {
+    "linux-reaper-v0.2.8.png": {
+      "bytes": 108104,
+      "sha256": "c35bc04e1901a727f84c54afcce7a2f5aba5affdeaa6a9d548ad488672f3cb2e"
+    },
+    "linux-reaper-v0.2.8.mp4": {
+      "bytes": 182895,
+      "sha256": "5dbdbbaf6fc2e1d8d98508cc7a3544ec6fc0fdd39775069accf8b7714fd5a7a9"
+    },
+    "linux-audacity-v0.2.8.png": {
+      "bytes": 31883,
+      "sha256": "7428c6ddec46f19043038aabdfdeb6773ff6dd4fffbf45fac9244058a8c1703e"
+    },
+    "windows-audacity-v0.2.8.png": {
+      "bytes": 24599,
+      "sha256": "59a0444dfb9136ff0d6688dd2b70db27874c395db6818c616523efa140aa0480"
+    }
+  },
+  "limitations": [
+    "32-bit float processing only",
+    "No Opus in-band FEC; PLC and RED primary-payload extraction",
+    "Fixed prefill and bounded queues; no adaptive jitter buffer/general reordering",
+    "Linux X11/XEmbed only; native Wayland and ARM Linux unvalidated",
+    "No hardware end-to-end latency or WAN certification",
+    "Windows signing root not locally trusted",
+    "One captured overload-related silent block is preserved above"
+  ]
+}
