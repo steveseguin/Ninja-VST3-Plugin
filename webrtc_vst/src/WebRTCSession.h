@@ -25,6 +25,7 @@
 
 #include <nlohmann/json.hpp>
 #include <opus.h>
+#include <rtc/configuration.hpp>
 
 namespace rtc {
 class PeerConnection;
@@ -34,6 +35,8 @@ class DataChannel;
 } // namespace rtc
 
 namespace webrtc_vst {
+
+class WhepReceiver;
 
 class WebRTCSession {
 public:
@@ -98,6 +101,10 @@ private:
         std::shared_ptr<rtc::RtpPacketizationConfig> rtpConfig;
         std::shared_ptr<rtc::DataChannel> dataChannel;
         std::shared_ptr<PeerAudioContext> audioContext;
+        std::shared_ptr<WhepReceiver> whepReceiver;
+        std::shared_ptr<rtc::Track> whepVideoTrack;
+        bool whepTransport{false};
+        std::string whepParentKey, whepChildKey;
         std::string uuid;
         std::string sessionId;
         std::string streamId;
@@ -122,7 +129,9 @@ private:
     PeerKey makePeerKey(const std::string& uuid, const std::string& session) const;
     PeerSession* ensurePeerSession(const std::string& uuid,
                                    const std::string& session,
-                                   bool createLocalTracks);
+                                   bool createLocalTracks, bool whepTransport = false);
+    void configureIncomingTrackLocked(const PeerKey& keyCopy, std::shared_ptr<rtc::Track> track);
+    void handleWhepSettings(const nlohmann::json& message, const PeerKey& sourceKey = {});
     void closePeerSession(const PeerKey& key);
     void peerCleanupMain();
 
@@ -171,6 +180,7 @@ private:
     AudioRingBuffer outgoingBuffer_{48000, 2};
 
     std::unique_ptr<VDONinjaSignalingClient> signalingClient_;
+    std::vector<rtc::IceServer> turnServers_; // guarded by mutex_
 
     std::string selfUuid_;
 

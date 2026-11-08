@@ -81,7 +81,10 @@ Signaling failure does not immediately destroy active media. Reconnect restores
 room/publishing intent; a healthy Play peer is retained without requesting a
 duplicate. A replacement connection for the same stream retires the old peer;
 distinct room streams remain independent. Failed/closed Play peers request
-recovery. This is not full ICE restart or TURN support.
+recovery. This is not full ICE restart support. TURN server discovery runs on the
+signaling worker before role announcement, outside the session lock. It uses
+bounded HTTP timeouts and a cache; stop joins the signaling worker before
+destroying the session. The libjuice backend supports TURN/UDP only.
 
 ## Shutdown and remaining audit boundaries
 
@@ -128,6 +131,12 @@ that destroys the factory. Test-host class enumeration is serialized because the
 SDK's UTF converter is shared; plugin instance lifecycle remains concurrent.
 
 ## Regression commands
+
+WHEP receive peers own a bounded HTTP worker. Closing a peer marks it cancelled
+and retires it; the peer cleanup thread joins HTTP work and deletes the WHEP
+resource before clearing RTC callbacks. Neither HTTP requests nor worker joins
+run under the session/audio lock. A pending WHEP receiver still counts toward
+the existing peer limit. Video transport packets are discarded without decoding.
 
 ```bash
 ctest --test-dir build/webrtc_vst_mac -C Release --output-on-failure

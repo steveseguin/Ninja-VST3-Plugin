@@ -2,6 +2,13 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+add_executable(webrtc_vst_turn_server_fixture turn_server_fixture.cpp)
+target_link_libraries(webrtc_vst_turn_server_fixture PRIVATE
+    LibDataChannel::LibDataChannel LibJuice::LibJuice ixwebsocket nlohmann_json::nlohmann_json Threads::Threads)
+target_compile_features(webrtc_vst_turn_server_fixture PRIVATE cxx_std_20)
+add_test(NAME TurnServerParsingTest COMMAND webrtc_vst_turn_server_fixture --self-test)
+set_tests_properties(TurnServerParsingTest PROPERTIES TIMEOUT 15 LABELS "unit;network")
+
 add_executable(webrtc_vst_callback_assignment_test callback_assignment_test.cpp)
 target_include_directories(webrtc_vst_callback_assignment_test PRIVATE ${libdatachannel_SOURCE_DIR}/include)
 target_link_libraries(webrtc_vst_callback_assignment_test PRIVATE Threads::Threads)
@@ -56,6 +63,7 @@ set_tests_properties(SettingsUnitTest PROPERTIES TIMEOUT 30 LABELS "unit;setting
 add_executable(webrtc_vst_integration_test
     integration_test.cpp
 )
+add_dependencies(webrtc_vst_integration_test webrtc_vst_turn_server_fixture)
 
 target_include_directories(webrtc_vst_integration_test
     PRIVATE

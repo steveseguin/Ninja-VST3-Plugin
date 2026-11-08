@@ -1,6 +1,6 @@
 {
   "name": "vst",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Integration tooling for WebRTC VST",
   "main": "index.js",
   "scripts": {
@@ -19,7 +19,11 @@
     "test:play-request-audio-only": "node tools/tests/integration/play_request_audio_only.test.js",
     "test:play-ignore-video": "node tools/tests/integration/play_ignores_video_track.test.js",
     "test:play-room-live": "node tools/tests/integration/play_room_audio_live.test.js",
-    "test:integration:audio-only": "npm run test:play-request-audio-only && npm run test:play-ignore-video",
+    "test:receive-negotiation": "node tools/tests/integration/receive_negotiation.test.js",
+    "test:native-receive": "node tools/tests/integration/receive_negotiation.test.js --native-matrix",
+    "test:receive-failures": "node tools/tests/integration/receive_negotiation.test.js --failure-diagnostics",
+    "test:whep-receive": "node tools/tests/integration/whep_receive.test.js",
+    "test:integration:audio-only": "npm run test:receive-negotiation && npm run test:play-request-audio-only && npm run test:play-ignore-video",
     "test:integration:local": "npm run test:cli-loopback && npm run test:publish-audio",
     "test:integration:live": "npm run test:play-room-live",
     "test:integration": "npm run test:security && npm run test:sdk && npm run test:advanced-settings && npm run test:integration:audio-only && npm run test:integration:local",

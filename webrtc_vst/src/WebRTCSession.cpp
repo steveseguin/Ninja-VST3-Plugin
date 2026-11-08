@@ -2,6 +2,8 @@
 #include "PeerAudioBufferSizing.h"
 #include "BrowserCryptoCompat.h"
 #include "StreamIdGenerator.h"
+#include "TurnServers.h"
+#include "WhepReceiver.h"
 
 #include <rtc/rtc.hpp>
 #include <rtc/rtppacketizationconfig.hpp>
@@ -562,6 +564,14 @@ void WebRTCSession::resetAllPeerConnections() {
 void WebRTCSession::closePeerSession(const PeerKey& key) {
     auto it = peerSessions_.find(key);
     if (it == peerSessions_.end()) return;
+    const auto childKey = std::exchange(it->second.whepChildKey, {});
+    if (!childKey.empty()) closePeerSession(childKey);
+    if (!it->second.whepParentKey.empty()) {
+        auto parent = peerSessions_.find(it->second.whepParentKey);
+        if (parent != peerSessions_.end() && parent->second.whepChildKey == key)
+            parent->second.whepChildKey.clear();
+    }
+    if (it->second.whepReceiver) it->second.whepReceiver->cancel();
     if (it->second.audioContext)
         it->second.audioContext->active.store(false, std::memory_order_release);
     sessionByUuid_.erase(it->second.uuid);
@@ -586,12 +596,14 @@ void WebRTCSession::peerCleanupMain() {
         }
         // No session/queue lock is held. Reset waits for in-flight callbacks,
         // which can now acquire mutex_, observe the removed peer and return.
+        // Join bounded WHEP HTTP work before tearing down its RTC callbacks.
+        retired.whepReceiver.reset();
         if (retired.connection) {
             retired.connection->resetCallbacks();
             try { retired.connection->close(); }
             catch (...) { log("Peer close failed during cleanup"); }
         }
-        for (const auto& track : {retired.localAudioTrack, retired.remoteAudioTrack}) if (track) {
+        for (const auto& track : {retired.localAudioTrack, retired.remoteAudioTrack, retired.whepVideoTrack}) if (track) {
             track->onFrame(nullptr);
             track->resetCallbacks();
         }
@@ -603,7 +615,7 @@ void WebRTCSession::peerCleanupMain() {
 
 WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& uuid,
                                                              const std::string& sessionHint,
-                                                             bool createLocalTracks) {
+                                                             bool createLocalTracks, bool whepTransport) {
     const std::string resolvedSession = sessionHint.empty() ? generateSessionId() : sessionHint;
     const PeerKey key = makePeerKey(uuid, resolvedSession);
 
@@ -636,6 +648,8 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
     session.uuid = uuid;
     session.sessionId = resolvedSession;
     session.streamId = hashedStreamId_.empty() ? config_.streamId : hashedStreamId_;
+    session.whepTransport = whepTransport;
+    if (whepTransport) session.streamId.clear(); // Keep the publisher's control peer alive.
     session.nextTimestamp = 0;
 
     // Create per-peer audio decode context
@@ -656,12 +670,17 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
     // held. Certificate generation uses the RTC worker pool, whose callbacks
     // also need mutex_: a peer burst can exhaust that pool and deadlock.
     configuration.disableAutoNegotiation = true;
+    // VDO.Ninja opens a data channel first, then adds media after receiving
+    // our audio/video preferences. Negotiate SRTP during the initial DTLS
+    // handshake so tracks added by that later offer have a media transport.
+    configuration.forceMediaTransport = true;
     if (!truthyEnvEnabled("WEBRTC_VST_DISABLE_STUN")) {
         configuration.iceServers.emplace_back("stun:stun.l.google.com:19302");
-        configuration.iceServers.emplace_back("stun:stun1.l.google.com:19302");
+        configuration.iceServers.emplace_back("stun:stun.cloudflare.com:3478");
     } else {
         log("STUN disabled via WEBRTC_VST_DISABLE_STUN");
     }
+    configuration.iceServers.insert(configuration.iceServers.end(), turnServers_.begin(), turnServers_.end());
 
     session.connection = std::make_shared<rtc::PeerConnection>(configuration);
     auto keyCopy = key;
@@ -673,6 +692,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         std::optional<std::string> statusMessage;
         bool resetMediaFlags = false;
         bool refreshPlayRequest = false;
+        bool wasWhep = false;
         std::string refreshReason;
         {
             std::lock_guard<SpinLock> lock(mutex_);
@@ -708,11 +728,17 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     break;
                 case rtc::PeerConnection::State::Failed:
                     log("Peer connection failed: " + keyCopy);
+                    {
+                        const auto ice = it->second.connection->iceState();
+                        if (ice == rtc::PeerConnection::IceState::Connected || ice == rtc::PeerConnection::IceState::Completed)
+                            statusMessage = "Peer failed after ICE connected (DTLS/media)";
+                        else statusMessage = "Peer connection failed (ICE connectivity)";
+                    }
                     it->second.negotiationReady = false;
+                    wasWhep = it->second.whepTransport;
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
-                    statusMessage = "Peer connection failed";
-                    if (config_.mode == ConnectionMode::Play) {
+                    if (!wasWhep && config_.mode == ConnectionMode::Play) {
                         if (signalingClient_ && signalingClient_->isConnected()) {
                             refreshPlayRequest = true;
                             refreshReason = "peer failed";
@@ -722,10 +748,11 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                 case rtc::PeerConnection::State::Closed:
                     log("Peer connection closed: " + keyCopy);
                     it->second.negotiationReady = false;
+                    wasWhep = it->second.whepTransport;
                     closePeerSession(keyCopy);
                     resetMediaFlags = true;
                     statusMessage = "Peer connection closed";
-                    if (config_.mode == ConnectionMode::Play) {
+                    if (!wasWhep && config_.mode == ConnectionMode::Play) {
                         if (signalingClient_ && signalingClient_->isConnected()) {
                             refreshPlayRequest = true;
                             refreshReason = "peer closed";
@@ -752,6 +779,13 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
 
     });
 
+    session.connection->onIceStateChange([this, keyCopy](rtc::PeerConnection::IceState state) {
+        if (shuttingDown_.load(std::memory_order_acquire)) return;
+        std::ostringstream detail;
+        detail << "ICE state for " << keyCopy << ": " << state;
+        log(detail.str());
+    });
+
     session.connection->onGatheringStateChange([this, keyCopy](rtc::PeerConnection::GatheringState state) {
         if (shuttingDown_.load(std::memory_order_acquire)) {
             return;
@@ -771,6 +805,7 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
             return;
         }
         it->second.localDescriptionSet = true;
+        if (it->second.whepTransport) return; // SDP belongs to HTTP, not VDO signaling.
         sendPeerDescription(it->second, description.typeString(), std::string(description));
     });
 
@@ -783,13 +818,22 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
         if (it == peerSessions_.end()) {
             return;
         }
+        if (it->second.whepTransport) return; // Full candidates are carried by the WHEP POST.
 
         nlohmann::json candidateJson;
         candidateJson["candidate"] = candidate.candidate();
         if (!candidate.mid().empty()) {
             candidateJson["sdpMid"] = candidate.mid();
         }
-        candidateJson["sdpMLineIndex"] = 0;
+        if (const auto description = it->second.connection->localDescription()) {
+            for (int index = 0; index < description->mediaCount(); ++index) {
+                const auto mid = std::visit([](const auto* media) { return media->mid(); }, description->media(index));
+                if (mid == candidate.mid()) {
+                    candidateJson["sdpMLineIndex"] = index;
+                    break;
+                }
+            }
+        }
 
         const bool isPublisher = config_.mode == ConnectionMode::Publish;
         sendIceCandidate(it->second, candidateJson, isPublisher ? "local" : "remote");
@@ -800,107 +844,11 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
             return;
         }
         std::lock_guard<SpinLock> lock(mutex_);
-        auto it = peerSessions_.find(keyCopy);
-        if (it == peerSessions_.end()) {
-            return;
-        }
-
-        const auto trackType = track->description().type();
-        if (trackType != "audio") {
-            log("Ignoring non-audio remote track: " + trackType);
-            return;
-        }
-        log("Remote audio track attached for peer " + keyCopy);
-        track->onOpen([this]() {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            log("Remote audio track opened");
-        });
-        track->onClosed([this]() {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            log("Remote audio track closed");
-        });
-        track->onError([this](const std::string& error) {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-            log("Remote audio track error: " + error);
-        });
-
-        auto depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
-        track->chainMediaHandler(depacketizer);
-
-        auto ctx = it->second.audioContext;
-        int peerChannels = channelCount_;
-
-        auto decodeAndQueue = [this, ctx, peerChannels](const uint8_t* encoded,
-                                     size_t encodedSize, bool fromFrame, const char* sourceTag) {
-            return decodeAndQueueAudio(ctx, peerChannels, encoded, encodedSize, fromFrame, sourceTag);
-        };
-
-        track->onFrame([decodeAndQueue](rtc::binary data, rtc::FrameInfo) {
-            const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
-            decodeAndQueue(bytes, data.size(), true, "onFrame");
-        });
-
-        track->onMessage([this, ctx, decodeAndQueue](rtc::message_variant message) {
-            if (shuttingDown_.load(std::memory_order_acquire)) {
-                return;
-            }
-
-            std::visit([this, &ctx, &decodeAndQueue](auto&& payload) {
-                using T = std::decay_t<decltype(payload)>;
-                if constexpr (!std::is_same_v<T, rtc::binary>) {
-                    return;
-                } else {
-                    const auto maybeView = parseRtpPayloadView(payload);
-                    if (!maybeView) {
-                        return;
-                    }
-
-                    bool shouldAttemptFallback = false;
-                    {
-                        std::lock_guard<SpinLock> lock(ctx->mutex);
-                        ++ctx->rtpPacketCount;
-                        if (!ctx->loggedFirstRtpPacket) {
-                            ctx->loggedFirstRtpPacket = true;
-                            log("First RTP packet received on remote track: pt=" +
-                                std::to_string(maybeView->payloadType) +
-                                ", bytes=" + std::to_string(maybeView->size));
-                        } else if ((ctx->rtpPacketCount % 2000) == 0) {
-                            log("RTP packet count on remote track: " + std::to_string(ctx->rtpPacketCount));
-                        }
-
-                        shouldAttemptFallback = !ctx->onFrameDecodeSeen && ctx->rtpPacketCount > 20;
-                    }
-
-                    if (!shouldAttemptFallback) {
-                        return;
-                    }
-
-                    const auto* packetBytes = reinterpret_cast<const uint8_t*>(payload.data());
-                    const auto* audioPayload = packetBytes + maybeView->offset;
-                    const size_t audioPayloadSize = maybeView->size;
-
-                    if (decodeAndQueue(audioPayload, audioPayloadSize, false, "rtp")) {
-                        return;
-                    }
-
-                    if (auto redPrimary = extractRedPrimaryPayload(audioPayload, audioPayloadSize)) {
-                        const auto* redBytes = reinterpret_cast<const uint8_t*>(redPrimary->data());
-                        decodeAndQueue(redBytes, redPrimary->size(), false, "rtp-red");
-                    }
-                }
-            }, message);
-        });
-        it->second.remoteAudioTrack = track;
+        configureIncomingTrackLocked(keyCopy, std::move(track));
     });
 
     // For play mode, handle incoming datachannel and send viewer preferences
-    if (!createLocalTracks && config_.mode == ConnectionMode::Play) {
+    if (!createLocalTracks && !whepTransport && config_.mode == ConnectionMode::Play) {
         session.connection->onDataChannel([this, keyCopy](std::shared_ptr<rtc::DataChannel> dc) {
             if (shuttingDown_.load(std::memory_order_acquire)) {
                 return;
@@ -956,14 +904,22 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, std::string>) {
                         constexpr size_t kMaxLogChars = 512;
-                        if (arg.size() <= kMaxLogChars) {
-                            log("Datachannel message: " + arg);
-                        } else {
-                            log("Datachannel message: " + arg.substr(0, kMaxLogChars) + "...(truncated)");
-                        }
-
                         try {
-                            auto msg = nlohmann::json::parse(arg);
+                            auto msg = parseBoundedJson(arg, 256 * 1024);
+                            if (!msg.is_object()) return;
+                            // WHEP URLs/tokens are private; never dump these messages.
+                            if (msg.contains("whepSettings")) {
+                                handleWhepSettings(msg, keyCopy);
+                                return;
+                            }
+                            log("Datachannel message: " + arg.substr(0, kMaxLogChars));
+
+                            // Match webrtc.js liveness probes before filtering
+                            // SDP/ICE messages. A connected viewer must answer.
+                            if (msg.is_object() && msg.contains("ping")) {
+                                dc->send(nlohmann::json{{"pong", msg["ping"]}}.dump());
+                                return;
+                            }
 
                             const bool hasSignalingPayload =
                                 msg.contains("description") ||
@@ -1091,14 +1047,116 @@ WebRTCSession::PeerSession* WebRTCSession::ensurePeerSession(const std::string& 
     return &session;
 }
 
+void WebRTCSession::configureIncomingTrackLocked(const PeerKey& keyCopy, std::shared_ptr<rtc::Track> track) {
+    auto it = peerSessions_.find(keyCopy);
+    if (it == peerSessions_.end()) {
+        return;
+    }
+
+    const auto trackType = track->description().type();
+    if (trackType != "audio") {
+        log("Ignoring non-audio remote track: " + trackType);
+        return;
+    }
+    log("Remote audio track attached for peer " + keyCopy);
+    track->onOpen([this]() {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
+        log("Remote audio track opened");
+    });
+    track->onClosed([this]() {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
+        log("Remote audio track closed");
+    });
+    track->onError([this](const std::string& error) {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
+        log("Remote audio track error: " + error);
+    });
+
+    auto depacketizer = std::make_shared<rtc::OpusRtpDepacketizer>();
+    track->chainMediaHandler(depacketizer);
+
+    auto ctx = it->second.audioContext;
+    int peerChannels = channelCount_;
+
+    auto decodeAndQueue = [this, ctx, peerChannels](const uint8_t* encoded,
+                                 size_t encodedSize, bool fromFrame, const char* sourceTag) {
+        return decodeAndQueueAudio(ctx, peerChannels, encoded, encodedSize, fromFrame, sourceTag);
+    };
+
+    track->onFrame([decodeAndQueue](rtc::binary data, rtc::FrameInfo) {
+        const auto* bytes = reinterpret_cast<const uint8_t*>(data.data());
+        decodeAndQueue(bytes, data.size(), true, "onFrame");
+    });
+
+    track->onMessage([this, ctx, decodeAndQueue](rtc::message_variant message) {
+        if (shuttingDown_.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        std::visit([this, &ctx, &decodeAndQueue](auto&& payload) {
+            using T = std::decay_t<decltype(payload)>;
+            if constexpr (!std::is_same_v<T, rtc::binary>) {
+                return;
+            } else {
+                const auto maybeView = parseRtpPayloadView(payload);
+                if (!maybeView) {
+                    return;
+                }
+
+                bool shouldAttemptFallback = false;
+                {
+                    std::lock_guard<SpinLock> lock(ctx->mutex);
+                    ++ctx->rtpPacketCount;
+                    if (!ctx->loggedFirstRtpPacket) {
+                        ctx->loggedFirstRtpPacket = true;
+                        log("First RTP packet received on remote track: pt=" +
+                            std::to_string(maybeView->payloadType) +
+                            ", bytes=" + std::to_string(maybeView->size));
+                    } else if ((ctx->rtpPacketCount % 2000) == 0) {
+                        log("RTP packet count on remote track: " + std::to_string(ctx->rtpPacketCount));
+                    }
+
+                    shouldAttemptFallback = !ctx->onFrameDecodeSeen && ctx->rtpPacketCount > 20;
+                }
+
+                if (!shouldAttemptFallback) {
+                    return;
+                }
+
+                const auto* packetBytes = reinterpret_cast<const uint8_t*>(payload.data());
+                const auto* audioPayload = packetBytes + maybeView->offset;
+                const size_t audioPayloadSize = maybeView->size;
+
+                if (decodeAndQueue(audioPayload, audioPayloadSize, false, "rtp")) {
+                    return;
+                }
+
+                if (auto redPrimary = extractRedPrimaryPayload(audioPayload, audioPayloadSize)) {
+                    const auto* redBytes = reinterpret_cast<const uint8_t*>(redPrimary->data());
+                    decodeAndQueue(redBytes, redPrimary->size(), false, "rtp-red");
+                }
+            }
+        }, message);
+    });
+    it->second.remoteAudioTrack = track;
+}
+
 void WebRTCSession::flushPendingIceLocked(PeerSession& session) {
     for (const auto& pending : session.pendingRemoteIce) {
-        processCandidateMessage(session, pending.payload);
+        queueOrApplyCandidate(session, pending.payload);
     }
     session.pendingRemoteIce.clear();
 }
 
 void WebRTCSession::queueOrApplyCandidate(PeerSession& session, const nlohmann::json& candidateObject) {
+    if (!candidateObject.is_object() || !candidateObject.contains("candidate") ||
+        !candidateObject["candidate"].is_string() || candidateObject["candidate"].get_ref<const std::string&>().empty()) return;
     if (!session.remoteDescriptionSet) {
         if (session.pendingRemoteIce.size() >= 256) {
             if (!session.loggedPendingIceLimit) { log("Pre-SDP ICE limit reached (256)"); session.loggedPendingIceLimit = true; }
@@ -1113,13 +1171,15 @@ void WebRTCSession::queueOrApplyCandidate(PeerSession& session, const nlohmann::
         return;
     }
 
-    rtc::Candidate candidate(candidateStr);
-    if (candidateObject.contains("sdpMid")) {
-        candidate.hintMid(candidateObject["sdpMid"].get<std::string>());
-    }
-
-    if (session.connection) {
-        session.connection->addRemoteCandidate(candidate);
+    try {
+        rtc::Candidate candidate(candidateStr);
+        if (candidateObject.contains("sdpMid") && candidateObject["sdpMid"].is_string()) {
+            candidate.hintMid(candidateObject["sdpMid"].get<std::string>());
+        }
+        if (session.connection) session.connection->addRemoteCandidate(candidate);
+    } catch (const std::exception&) {
+        // One malformed candidate must not discard the remaining bundle/queue.
+        log("Ignoring malformed ICE candidate");
     }
 }
 
@@ -1137,9 +1197,7 @@ void WebRTCSession::processCandidateMessage(PeerSession& session, const nlohmann
         if (candidateMessage["candidate"].is_object()) {
             queueOrApplyCandidate(session, candidateMessage["candidate"]);
         } else if (candidateMessage["candidate"].is_string()) {
-            nlohmann::json wrapper;
-            wrapper["candidate"] = candidateMessage["candidate"];
-            queueOrApplyCandidate(session, wrapper);
+            queueOrApplyCandidate(session, candidateMessage);
         }
     }
 }
@@ -1205,6 +1263,7 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         peerSessions_.clear();
         sessionByUuid_.clear();
         pendingGlobalIce_.clear();
+        turnServers_.clear();
         roomJoined_ = false;
         roleAnnounced_ = false;
         lastPlayRefreshAt_ = {};
@@ -1218,6 +1277,21 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
             [this]() {
                 if (shuttingDown_.load(std::memory_order_acquire)) {
                     return;
+                }
+                if (!truthyEnvEnabled("WEBRTC_VST_DISABLE_STUN") || std::getenv("WEBRTC_VST_TURN_SERVER_LIST_URL")) {
+                    std::string listUrl;
+                    {
+                        std::lock_guard<SpinLock> lock(mutex_);
+                        listUrl = turnServerListUrl(config_.handshakeUrl, config_.webBaseUrl);
+                    }
+                    if (!listUrl.empty()) {
+                        auto servers = loadTurnServers(listUrl);
+                        if (shuttingDown_.load(std::memory_order_acquire)) return;
+                        log(servers.empty() ? "TURN discovery unavailable; using direct/STUN connectivity" :
+                            "TURN UDP relays configured: " + std::to_string(servers.size()));
+                        std::lock_guard<SpinLock> lock(mutex_);
+                        turnServers_ = std::move(servers);
+                    }
                 }
                 { std::lock_guard<SpinLock> lock(mutex_); roomJoined_ = false; roleAnnounced_ = false; }
                 log("Connected to VDO.Ninja signaling server");
@@ -1398,7 +1472,7 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
     std::optional<std::string> logLine;
     {
         std::lock_guard<std::mutex> lock(signalingLogMutex_);
-        if (logSignalingMessages_) {
+        if (logSignalingMessages_ && !originalMessage.contains("whepSettings")) {
             try {
                 const std::string dump = originalMessage.dump();
                 if (lastReceivedSignalingJson_.equals(dump)) {
@@ -1429,6 +1503,11 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
     if (message.contains("vector")) {
         maybeDecryptDescription(message);
         maybeDecryptCandidates(message);
+    }
+
+    if (message.contains("whepSettings")) {
+        handleWhepSettings(message);
+        return;
     }
 
     if (message.contains("id") && message["id"].is_string()) {
@@ -1492,6 +1571,94 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
         handleRemoteCandidateBundle(message);
     } else if (message.contains("candidate")) {
         handleRemoteCandidate(message);
+    }
+}
+
+void WebRTCSession::handleWhepSettings(const nlohmann::json& message, const PeerKey& sourceKey) {
+    PeerKey createdKey;
+    try {
+        auto control = message;
+        // WSS fallback encrypts the WHOLE control envelope inside whepSettings;
+        // data channels already provide authenticated/encrypted transport.
+        if (sourceKey.empty()) {
+            if (message.contains("vector")) {
+                if (!effectivePassword() || !message["whepSettings"].is_string()) return;
+                control = parseBoundedJson(decryptPayload(message["whepSettings"].get<std::string>(),
+                    message.at("vector").get<std::string>()), 256 * 1024);
+                if (!control.is_object() || control.value("session", "") != message.value("session", "")) return;
+            } else if (effectivePassword()) return;
+        }
+        if (!control.contains("whepSettings") || !control["whepSettings"].is_object()) return;
+        const auto& settings = control["whepSettings"];
+        if (settings.value("type", "") != "whep" || settings.value("media", "") == "screen") return;
+        const auto uuid = message.value("UUID", message.value("uuid", std::string{}));
+        const auto generation = message.value("session", std::string{});
+        const bool stopWhep = settings.contains("url") && settings["url"].is_boolean() && !settings["url"].get<bool>();
+        std::string url, token;
+        if (!stopWhep) {
+            url = settings.at("url").get<std::string>();
+            if (settings.contains("token") && settings["token"] != false && !settings["token"].is_null())
+                token = settings["token"].get<std::string>();
+            if (WhepReceiver::origin(url).empty() || token.size() > 4096 ||
+                token.find_first_of("\r\n") != std::string::npos) return;
+        }
+
+        std::lock_guard<SpinLock> lock(mutex_);
+        if (shuttingDown_ || !started_ || config_.mode != ConnectionMode::Play) return;
+        PeerKey parentKey = sourceKey;
+        if (parentKey.empty()) {
+            if (uuid.empty() || generation.empty()) return;
+            parentKey = makePeerKey(uuid, generation);
+        }
+        auto parent = peerSessions_.find(parentKey);
+        if (parent == peerSessions_.end() || parent->second.whepTransport) return;
+        if ((!uuid.empty() && uuid != parent->second.uuid) ||
+            (!generation.empty() && generation != parent->second.sessionId)) return;
+        if (control.contains("streamID") && control["streamID"] != parent->second.streamId) return;
+
+        if (!parent->second.whepChildKey.empty()) {
+            auto previous = peerSessions_.find(parent->second.whepChildKey);
+            if (!stopWhep && previous != peerSessions_.end() && previous->second.whepReceiver &&
+                previous->second.whepReceiver->matches(url, token)) return;
+            const auto previousKey = parent->second.whepChildKey;
+            closePeerSession(previousKey);
+        }
+        if (stopWhep) return;
+        const auto childUuid = "whep-" + generateSessionId();
+        auto* child = ensurePeerSession(childUuid, generateSessionId(), false, true);
+        if (!child) return;
+        const auto childKey = makePeerKey(child->uuid, child->sessionId);
+        createdKey = childKey;
+        child->whepParentKey = parentKey;
+        peerSessions_.at(parentKey).whepChildKey = childKey;
+        child->whepReceiver = std::make_shared<WhepReceiver>(url, token);
+        // Some SFUs require both sections for an A/V source. Receive video as
+        // transport data only; it is never decoded or mixed into the DAW.
+        rtc::Description::Video video("video", rtc::Description::Direction::RecvOnly);
+        video.addVP8Codec(96);
+        video.addH264Codec(102);
+        child->whepVideoTrack = child->connection->addTrack(video);
+        child->whepVideoTrack->onMessage([](auto) {});
+        rtc::Description::Audio audio("audio", rtc::Description::Direction::RecvOnly);
+        audio.addOpusCodec(kOpusPayloadType);
+        configureIncomingTrackLocked(childKey, child->connection->addTrack(audio));
+        child->whepReceiver->start(child->connection, [this, childKey](const std::string& error) {
+            if (shuttingDown_) return;
+            {
+                std::lock_guard<SpinLock> errorLock(mutex_);
+                if (!peerSessions_.contains(childKey)) return;
+                closePeerSession(childKey);
+            }
+            log(error);
+            emitStatus(error);
+        });
+        log("Starting WHEP audio receive");
+    } catch (...) {
+        if (!createdKey.empty()) {
+            std::lock_guard<SpinLock> lock(mutex_);
+            closePeerSession(createdKey);
+        }
+        log("Ignoring invalid WHEP settings");
     }
 }
 
@@ -1627,7 +1794,7 @@ void WebRTCSession::handleRemoteDescription(const nlohmann::json& message) {
 }
 
 void WebRTCSession::handleRemoteCandidateBundle(const nlohmann::json& message) {
-    if (!message.contains("candidates")) {
+    if (!message.contains("candidates") || !message["candidates"].is_array()) {
         return;
     }
 
@@ -1657,7 +1824,7 @@ void WebRTCSession::handleRemoteCandidate(const nlohmann::json& message) {
         auto mapped = sessionByUuid_.find(uuid);
         if (mapped != sessionByUuid_.end()) {
             auto mappedIt = peerSessions_.find(mapped->second);
-            if (mappedIt != peerSessions_.end()) {
+            if (mappedIt != peerSessions_.end() && sessionId.empty()) {
                 return &mappedIt->second;
             }
         }
@@ -2056,6 +2223,11 @@ size_t WebRTCSession::pullIncomingAudio(float* const* outputs, size_t frames, in
         std::lock_guard<SpinLock> lock(mutex_);
         peerSources.reserve(peerSessions_.size());
         for (auto& [key, session] : peerSessions_) {
+            if (!session.whepChildKey.empty()) {
+                const auto child = peerSessions_.find(session.whepChildKey);
+                if (child != peerSessions_.end() && child->second.audioContext &&
+                    child->second.audioContext->preFillReady.load(std::memory_order_acquire)) continue;
+            }
             if (session.audioContext && session.audioContext->buffer &&
                 session.audioContext->preFillReady.load(std::memory_order_acquire)) {
                 peerSources.push_back({session.audioContext->buffer, session.audioContext});

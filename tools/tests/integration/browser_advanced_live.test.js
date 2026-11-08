@@ -12,14 +12,15 @@ const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { once } = require("node:events");
 const { rootDir, cliExecutable, pluginBundle } = require("./build_paths");
-const { chromium } = require(process.env.WEBRTC_TEST_PLAYWRIGHT ||
+const { chromium, _android } = require(process.env.WEBRTC_TEST_PLAYWRIGHT ||
     path.join(rootDir, "build/test-tools/browser/node_modules/playwright-core"));
 
 const webBase = process.env.WEBRTC_TEST_WEB_BASE_URL || "https://backup.vdo.ninja/";
 const wss = process.env.WEBRTC_TEST_WSS || "wss://apibackup.vdo.ninja/";
 const password = process.env.WEBRTC_TEST_BROWSER_PASSWORD ?? "browser-test-password"; // Empty explicitly tests the normal VDO.Ninja default.
+const browserStack = process.env.WEBRTC_TEST_BROWSERSTACK === "1";
 const uiLink = process.env.WEBRTC_TEST_UI_LINK ? new URL(JSON.parse(fs.readFileSync(process.env.WEBRTC_TEST_UI_LINK, "utf8")).link) : null;
-const outDir = path.join(rootDir, "build/browser-advanced-validation");
+const outDir = path.join(rootDir, "build/browser-advanced-validation", browserStack ? "browserstack" : ".");
 fs.mkdirSync(outDir, { recursive: true });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const results = [];
@@ -79,6 +80,19 @@ function makeLink(mode, stream, salt, effectiveSalt, includeHash = true) {
 
 async function openPage(url, label, expectedSalt) {
     const context = await browser.newContext();
+    // Validate a local VDO.Ninja checkout without changing its client code or
+    // origin-dependent salt/signaling behavior. Missing assets fail explicitly.
+    if (process.env.WEBRTC_TEST_WEB_SOURCE_DIR) {
+        const sourceRoot = path.resolve(process.env.WEBRTC_TEST_WEB_SOURCE_DIR);
+        await context.route(new URL(webBase).origin + "/**", async route => {
+            const pathname = decodeURIComponent(new URL(route.request().url()).pathname);
+            let file = path.resolve(sourceRoot, "." + pathname);
+            if (file !== sourceRoot && !file.startsWith(sourceRoot + path.sep)) return route.abort();
+            if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, "index.html");
+            if (!fs.existsSync(file)) return route.fulfill({ status: 404, body: "Missing local web asset" });
+            await route.fulfill({ path: file });
+        });
+    }
     await context.grantPermissions(["microphone"], { origin: new URL(webBase).origin });
     await context.addInitScript(() => {
         window.__testPCs = [];
@@ -230,13 +244,43 @@ const watchdog = setTimeout(() => { console.error("Browser validation timed out"
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => cleanup().finally(() => process.exit(1)));
 
 (async () => {
-    browser = await chromium.launch({
-        ...(process.env.WEBRTC_TEST_CHROME ? { executablePath: process.env.WEBRTC_TEST_CHROME } : { channel: "chrome" }),
-        headless: true,
-        args: ["--renderer-process-limit=2", "--disable-gpu", "--autoplay-policy=no-user-gesture-required", "--use-fake-device-for-media-stream",
-            "--use-fake-ui-for-media-stream", "--mute-audio"]
-    });
-    browserVersion = browser.version();
+    if (browserStack) {
+        assert.ok(process.env.BROWSERSTACK_USERNAME && process.env.BROWSERSTACK_ACCESS_KEY,
+            "BrowserStack requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY in the local environment");
+        const caps = {
+            browserName: "chrome", realMobile: "true",
+            deviceName: process.env.BROWSERSTACK_DEVICE || "Samsung Galaxy S23",
+            osVersion: process.env.BROWSERSTACK_OS_VERSION || "13.0",
+            name: "VDO.Ninja Android browser source to Windows VST3",
+            build: "vst-receive-negotiation",
+            "browserstack.username": process.env.BROWSERSTACK_USERNAME,
+            "browserstack.accessKey": process.env.BROWSERSTACK_ACCESS_KEY
+        };
+        let device;
+        try {
+            device = await _android.connect("wss://cdp.browserstack.com/playwright?caps=" +
+                encodeURIComponent(JSON.stringify(caps)), { timeout: 90000 });
+        } catch {
+            // Playwright connection errors can contain the URL with credentials.
+            throw new Error("BrowserStack Android connection failed; check account access, device availability and Playwright compatibility");
+        }
+        browser = {
+            newContext: async () => {
+                await device.shell("am force-stop com.android.chrome");
+                return device.launchBrowser({ args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] });
+            },
+            close: () => device.close()
+        };
+        browserVersion = "BrowserStack Android Chrome: " + caps.deviceName + " / " + caps.osVersion;
+    } else {
+        browser = await chromium.launch({
+            ...(process.env.WEBRTC_TEST_CHROME ? { executablePath: process.env.WEBRTC_TEST_CHROME } : { channel: "chrome" }),
+            headless: true,
+            args: ["--renderer-process-limit=2", "--disable-gpu", "--autoplay-policy=no-user-gesture-required", "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream", "--mute-audio"]
+        });
+        browserVersion = browser.version();
+    }
     console.log("Browser:", browserVersion, "Web:", webBase, "Signaling:", wss);
     if (uiLink) {
         const salt = uiLink.searchParams.get("salt");
@@ -251,7 +295,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => cleanup().f
     ].filter(test => process.env.WEBRTC_TEST_CASE ? test.name === process.env.WEBRTC_TEST_CASE : !test.unsupported);
     assert.ok(cases.length, "Unknown WEBRTC_TEST_CASE");
     for (const test of cases) {
-        await pluginToBrowser(test);
+        if (!browserStack) await pluginToBrowser(test);
         await browserToPlugin(test);
     }
 })().catch(error => { failure = error.message; console.error(error); process.exitCode = 1; }).finally(async () => {
@@ -259,7 +303,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => cleanup().f
     const suffix = ["custom", "escaped", "automatic", "unicode"].includes(process.env.WEBRTC_TEST_CASE)
         ? "-" + process.env.WEBRTC_TEST_CASE : "";
     fs.writeFileSync(path.join(outDir, "results" + suffix + ".json"), JSON.stringify({
-        date: new Date().toISOString(), browser: browserVersion, webBase, wss,
+        date: new Date().toISOString(), browser: browserVersion, browserStack, webBase, wss,
         success: !failure, failure, results,
         note: "AES key phrases use browser-compatible UTF-16 low bytes; hashes remain UTF-8."
     }, null, 2) + "\n");
