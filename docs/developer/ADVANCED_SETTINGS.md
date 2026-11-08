@@ -292,7 +292,7 @@ official Playwright Android connection, real VDO.Ninja signaling, and a syntheti
 audio source. `WEBRTC_TEST_WEB_SOURCE_DIR` also works for this route; no local
 HTTP server/tunnel is needed. This path requires BrowserStack Automate access.
 It passed on Samsung Galaxy S23 / Android 13 Chrome with the unmodified local
-web checkout and a custom password (received RMS 0.161364). It does not test
+web checkout and a custom password (signed 0.2.11 package, received RMS 0.158686). It does not test
 the native Android app or establish compatibility with app v109.
 
 `WEBRTC_TEST_CASE=unicode` selects the Unicode case, now included in the default
@@ -300,7 +300,11 @@ suite. `WEBRTC_TEST_UI_LINK` can consume the actual native editor's copied link
 and exercise the real browser password prompt.
 
 Run workloads sequentially through `node tools/tests/guarded_run.js <command>`.
-The guard checks memory/swap/disk headroom and limits total owned-process RSS.
+The guard enforces one workload, a timeout and disk headroom. On macOS it also
+checks memory/swap headroom and limits total owned-process RSS; those memory
+measurements are not implemented on Windows.
+For long tests, set `WEBRTC_GUARD_SECONDS` above the requested duration plus
+startup/cleanup time; its default is 240 seconds.
 It must not be used to justify running multiple heavy suites in parallel on an
 8 GB workstation. See `HARDENING_VALIDATION.md` for the interrupted soak history
 and the latest measured results; older validation notes are historical.
@@ -310,4 +314,52 @@ new project tab with a tone generator, Seed and Play plugin instances, a custom
 salt/domain, and a silent master. It checks the WebRTC return level, cycles the
 editors/bypass, saves a project and reopens it to verify the settings. Logs and the
 test project are written under `build/reaper-validation/`. Other project tabs
-are left alone. Repeat on other hosts and physical Intel Macs before release.
+are left alone. Repeat on other hosts and physical Intel Macs before extending
+the corresponding release validation claims.
+
+### Windows 0.2.11 release validation (2026-11-08)
+
+[Release 0.2.11](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/tag/v0.2.11)
+was published from `df221cbeda919a6a353b8cdf25dc02fecb589230` after the
+[clean Windows build and all 13 native tests](https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/42520197089)
+passed. Linux, both macOS architectures and CodeQL also passed; the public assets
+for this release are Windows x64 only. JS integration and live-room audio passed.
+
+Downloaded signed artifacts were checked separately from the developer build:
+
+- The installer and ZIP contain the same plugin bytes. Version metadata is
+  0.2.11, with no external OpenSSL or Visual C++ runtime DLL dependency. The
+  expected signer and timestamp were verified; this workstation does not trust
+  the signing root. Both VirusTotal analyses completed with zero malicious or
+  suspicious detections; some ZIP scan engines timed out or did not support it.
+- REAPER 7.82 passed four simultaneous send/receive pairs, editor/bypass cycles,
+  project save/reopen and a fresh host process. Audacity 3.7.9 passed five editor
+  open/close cycles and clean shutdown after its first-run dialog was handled.
+- The supplied native Android microphone stream produced 39 active one-second
+  windows during a 40-second REAPER check. No microphone audio was recorded.
+  The installed diagnostic collector exported DTLS completion and decoded-audio
+  events, and the host exited cleanly.
+- BrowserStack Samsung Galaxy S23 / Android 13 Chrome published synthetic audio
+  through the unmodified local web checkout to the downloaded plugin.
+
+Release testing also reproduced heap corruption in SDK 3.8's shared Windows
+timer list during concurrent creation/destruction. Windows controller polling
+now uses synchronized timer registration and invokes callbacks outside the lock.
+The regression covers 200,000 timer lifetimes, owner-thread delivery and
+cancellation from a callback. See `THREADING.md` for the lifecycle contract.
+
+Additional tests of the unchanged published binary passed after publication:
+
+- BrowserStack Google Pixel 8 / Android 14 Chrome, received RMS 0.157463.
+- Five-minute stereo soak with two forced signaling disconnects: 290 steady
+  one-second windows, 54,520 blocks, no silent blocks or nonfinite samples;
+  maximum measured tone-frequency error 0.665 Hz.
+- Receive negotiation with both forced-TURN routes and discovery failure, plus
+  seven WHEP success/error/replacement cases including video and encrypted WSS.
+- Actual relayed SRTP with 5% packet loss, 15 ms jitter and a three-second media
+  outage, followed by successful recovery.
+- 384 peer replacement requests and three subsequent recovery offers while
+  live audio remained uninterrupted.
+- 8,016 malformed signaling mutations/boundaries across two reproducible fuzz
+  seeds in Seed and Play modes, checking status reporting, reconnect, finite
+  audio and normal process shutdown.

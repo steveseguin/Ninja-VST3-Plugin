@@ -27,6 +27,7 @@ host with 32-bit float processing; Linux uses X11.
 
 - [Advanced settings and self-hosting](docs/developer/ADVANCED_SETTINGS.md)
 - [Build and test](docs/developer/BUILD_AND_TEST.md) · [macOS](docs/developer/MACOS.md) · [Linux](docs/developer/LINUX.md)
-- [Release validation and known limits](docs/developer/RELEASE_VALIDATION_0.2.8.md)
+- [Connection review, diagnostics and 0.2.11 validation](docs/developer/ADVANCED_SETTINGS.md#connection-compatibility-review-2026-11-08)
+- [Archived 0.2.8 validation](docs/developer/RELEASE_VALIDATION_0.2.8.md)
 
 [License](LICENSE) · [Contributing / CLA](CONTRIBUTING.md)
