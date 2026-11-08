@@ -62,6 +62,12 @@ bounce, so this is not a network-isolation switch.
   outside it. Stop/join the WebSocket worker outside that lock.
 - Status is queued internally and sent to the host from the controller's poll.
   Hosts without a UI event loop can explicitly send `PollStatus` for telemetry.
+- Windows controller polling uses a synchronized timer registry, with callbacks
+  outside its lock. Each timer remains owned by its creating UI thread; separate
+  controllers can have separate UI threads. The SDK 3.8 Windows timer's global
+  unsynchronized list corrupts the heap during concurrent creation/destruction;
+  a focused reproducer confirmed this during the November release investigation.
+  `WindowsUiTimerTest` covers concurrent lifetimes and cancellation in a callback.
 - Copy/QR side effects require a native editor gesture. Host parameter writes
   remain inert, even though hosts can write non-automatable parameter IDs.
 

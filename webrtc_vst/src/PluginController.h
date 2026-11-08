@@ -3,6 +3,8 @@
 #include "ParameterIDs.h"
 #include "PluginConfig.h"
 #include "PrivateQrPages.h"
+#include "WindowsUiTimer.h"
+#include <memory>
 #include <optional>
 
 #include <public.sdk/source/vst/vsteditcontroller.h>
@@ -68,7 +70,11 @@ private:
     PrivateQrPages qrPages_;
     PluginConfig committedAdvanced_;
     bool advancedDirty_{false};
+#ifdef _WIN32
+    std::unique_ptr<WindowsUiTimer> statusTimer_;
+#else
     Steinberg::Timer* statusTimer_{nullptr};
+#endif
 };
 
 extern const Steinberg::FUID kWebRTCControllerUID;

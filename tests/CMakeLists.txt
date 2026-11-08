@@ -248,6 +248,12 @@ set_tests_properties(FuzzTest PROPERTIES
 )
 
 if(WIN32)
+    add_executable(webrtc_vst_windows_timer_test windows_ui_timer_test.cpp)
+    target_compile_features(webrtc_vst_windows_timer_test PRIVATE cxx_std_20)
+    target_link_libraries(webrtc_vst_windows_timer_test PRIVATE user32 Threads::Threads)
+    add_test(NAME WindowsUiTimerTest COMMAND webrtc_vst_windows_timer_test)
+    set_tests_properties(WindowsUiTimerTest PROPERTIES TIMEOUT 60 LABELS "windows;threading")
+
     add_executable(webrtc_vst_windows_editor_test windows_editor_smoke.cpp
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp
         ${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp

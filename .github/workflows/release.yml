@@ -82,6 +82,7 @@ jobs:
             webrtc_vst_callback_assignment_test `
             webrtc_vst_settings_test `
             webrtc_vst_windows_editor_test `
+            webrtc_vst_windows_timer_test `
             webrtc_vst_fuzz_test `
             webrtc_vst_integration_test `
             webrtc_vst_stress_test

@@ -451,11 +451,17 @@ bool StringParameter::fromString(const Steinberg::Vst::TChar* text, Steinberg::V
 WebRTCController::WebRTCController() = default;
 
 WebRTCController::~WebRTCController() {
+#ifndef _WIN32
     if (statusTimer_) statusTimer_->release();
+#endif
 }
 
 Steinberg::tresult PLUGIN_API WebRTCController::terminate() {
+#ifdef _WIN32
+    statusTimer_.reset();
+#else
     if (statusTimer_) { statusTimer_->release(); statusTimer_ = nullptr; }
+#endif
     return EditControllerEx1::terminate();
 }
 
@@ -573,7 +579,11 @@ Steinberg::tresult PLUGIN_API WebRTCController::initialize(Steinberg::FUnknown* 
 
     updateShareLinks();
 
+#ifdef _WIN32
+    statusTimer_ = std::make_unique<WindowsUiTimer>(100, [this] { onTimer(nullptr); });
+#else
     statusTimer_ = Steinberg::Timer::create(this, 100);
+#endif
     return Steinberg::kResultOk;
 }
 
