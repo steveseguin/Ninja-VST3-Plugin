@@ -4,6 +4,7 @@
 #include "StreamIdGenerator.h"
 #include "TurnServers.h"
 #include "WhepReceiver.h"
+#include "DiagnosticLog.h"
 
 #include <rtc/rtc.hpp>
 #include <rtc/rtppacketizationconfig.hpp>
@@ -64,25 +65,6 @@ std::string generateSessionId() {
         session.push_back(alphabet[dist(rng)]);
     }
     return session;
-}
-
-std::string generateUUID() {
-    unsigned char bytes[16];
-    RAND_bytes(bytes, sizeof(bytes));
-    // Set version 4 (random) and variant bits per RFC 4122
-    bytes[6] = (bytes[6] & 0x0F) | 0x40;
-    bytes[8] = (bytes[8] & 0x3F) | 0x80;
-    static constexpr char hex[] = "0123456789abcdef";
-    std::string uuid;
-    uuid.reserve(36);
-    for (int i = 0; i < 16; ++i) {
-        if (i == 4 || i == 6 || i == 8 || i == 10) {
-            uuid.push_back('-');
-        }
-        uuid.push_back(hex[bytes[i] >> 4]);
-        uuid.push_back(hex[bytes[i] & 0x0F]);
-    }
-    return uuid;
 }
 
 rtc::binary toBinary(const unsigned char* data, size_t size) {
@@ -260,7 +242,16 @@ WebRTCSession::WebRTCSession(AudioRingBuffer& receiveBuffer,
     : receiveBuffer_(receiveBuffer),
       logSink_(std::move(logSink)),
       configUpdateSink_(std::move(configSink)),
-      statusSink_(std::move(statusSink)) {}
+      statusSink_(std::move(statusSink)) {
+    if (truthyEnvEnabled("WEBRTC_VST_LOG_RTC")) {
+        static std::once_flag loggerOnce;
+        std::call_once(loggerOnce, [] {
+            rtc::InitLogger(rtc::LogLevel::Debug, [](rtc::LogLevel, std::string message) {
+                writeDiagnosticLine("[RTC] " + message);
+            });
+        });
+    }
+}
 
 WebRTCSession::~WebRTCSession() {
     log("WebRTCSession::~WebRTCSession() destructor - enter");
@@ -313,18 +304,15 @@ void WebRTCSession::log(const std::string& line) const {
 }
 
 void WebRTCSession::sendSignalingMessageLocked(const nlohmann::json& payload) {
-    // mutex_ protects both client ownership and the UUID through the send.
+    // mutex_ protects client ownership through the send.
     // A callback may already be in flight when stop() marks shutdown.
     if (shuttingDown_.load(std::memory_order_acquire) || !started_ || !signalingClient_) {
         return;
     }
 
-    // Inject "from" UUID into every outgoing message — VDO.Ninja's signaling
-    // server drops messages without this field.
+    // The signaling server supplies the sender UUID on delivery. A locally
+    // generated "from" can disagree with that identity on native publishers.
     nlohmann::json enriched = payload;
-    if (!selfUuid_.empty()) {
-        enriched["from"] = selfUuid_;
-    }
 
     std::optional<std::string> logLine;
     {
@@ -1267,8 +1255,6 @@ void WebRTCSession::start(const PluginConfig& config, double sampleRate, int cha
         roomJoined_ = false;
         roleAnnounced_ = false;
         lastPlayRefreshAt_ = {};
-        selfUuid_ = generateUUID();
-        log("Generated self UUID: " + selfUuid_);
 
         publishingAudio_.store(false, std::memory_order_relaxed);
         receivingAudio_.store(false, std::memory_order_relaxed);
@@ -1428,7 +1414,6 @@ void WebRTCSession::stop() {
             opusEncoder_ = nullptr;
         }
 
-        selfUuid_.clear();
         hashedRoomId_.clear();
         hashedStreamId_.clear();
         lastPlayRefreshAt_ = {};
@@ -1516,7 +1501,6 @@ void WebRTCSession::handleSignalingMessage(const nlohmann::json& originalMessage
         {
             std::lock_guard<SpinLock> lock(mutex_);
             assignedId = message["id"].get<std::string>();
-            selfUuid_ = assignedId;
             shouldRefreshPlay = started_ &&
                                 config_.mode == ConnectionMode::Play &&
                                 roleAnnounced_ &&

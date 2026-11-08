@@ -17,7 +17,7 @@ const { cliExecutable, pluginBundle } = require("./build_paths");
 const { startTestTone } = require("../helpers/paced_tone");
 
 async function check(name, { videoFirst = false, dataFirst = false, encrypted = false, relay = false, discoveryFailure = false, candidateBundle = false,
-    earlyIce = false, omitSession = false, reorder = false, audioFirst = false, sendRecv = false, password = "", failureProbe = false } = {}) {
+    earlyIce = false, omitSession = false, reorder = false, audioFirst = false, sendRecv = false, password = "", failureProbe = false, nativeRouting = false } = {}) {
     const key = crypto.createHash("sha256").update((password || "someEncryptionKey123") + "vdo.ninja").digest();
     const withoutCandidates = description => ({ ...description,
         sdp: description.sdp.split("\r\n").filter(line => !/^a=(candidate:|end-of-candidates)/.test(line)).join("\r\n") });
@@ -78,19 +78,21 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
     if (videoFirst) peer.addTransceiver(video, { direction: "sendonly" });
     if (!dataFirst) peer.addTransceiver(audio, { direction: sendRecv ? "sendrecv" : "sendonly" });
     if (audioFirst) peer.addTransceiver(video, { direction: "sendonly" });
-    const dc = dataFirst ? peer.createDataChannel("sendChannel") : null;
+    const dc = dataFirst || nativeRouting ? peer.createDataChannel("sendChannel") : null;
     const tone = startTestTone(source);
     let child, logs = "", failure, started = false, answerSeen = false, preferencesSeen = false, mediaAnswerSeen = false, pongSeen = false;
     let chain = Promise.resolve();
+    let misrouted = 0;
     if (dc) dc.onmessage = ({ data }) => {
         chain = chain.then(async () => {
             const message = decode(data);
             if (typeof message.audio === "boolean") {
                 assert.equal(message.audio, true);
                 assert.equal(message.video, false);
-                assert.equal(peer.getSenders().length, 0, "Media sent before preferences");
                 preferencesSeen = true;
                 dc.send(JSON.stringify({ ping: 123456789 }));
+                if (!dataFirst) return;
+                assert.equal(peer.getSenders().length, 0, "Media sent before preferences");
                 peer.addTransceiver(audio, { direction: "sendonly" });
                 const offer = await peer.createOffer();
                 await peer.setLocalDescription(offer);
@@ -112,6 +114,14 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
         socket.on("message", raw => {
             chain = chain.then(async () => {
                 const message = decode(raw);
+                if (nativeRouting && message.request !== "play") {
+                    // The official relay rewrites UUID to its assigned sender
+                    // identity. Android prefers a supplied `from` over UUID;
+                    // an invented `from` therefore addresses no native peer.
+                    const delivered = { ...message, UUID: "server-assigned-viewer" };
+                    const nativePeerKey = delivered.from ?? delivered.UUID;
+                    if (nativePeerKey !== "server-assigned-viewer") { misrouted++; return; }
+                }
                 if (message.request === "play" && !started) {
                     started = true;
                     const offer = await peer.createOffer();
@@ -224,6 +234,7 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
         await chain;
         if (failure) throw failure;
         assert.equal(code, 0, logs);
+        assert.equal(misrouted, 0, "Native publisher could not route the answer/candidates: invented sender identity");
         assert.ok(answerSeen, "No answer\n" + logs);
         if (failureProbe) {
             assert.match(logs, failureProbe === "ice" ? /Peer connection failed \(ICE connectivity\)/ : /Peer failed after ICE connected \(DTLS\/media\)/);
@@ -236,6 +247,7 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
             assert.ok(mediaAnswerSeen, "No media answer over data channel");
             assert.ok(pongSeen, "Publisher liveness ping was not answered");
         }
+        if (nativeRouting) assert.ok(preferencesSeen && pongSeen, "Native control channel did not open");
         assert.match(logs, /Peer connection connected:/);
         assert.doesNotMatch(logs, /no media transport|Failed to apply remote offer|Peer connection failed:/);
         const rms = Number(logs.match(/output_rms=([\d.]+)/)?.[1]);
@@ -268,12 +280,17 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
 }
 
 (async () => {
+    if (process.argv.includes("--sender-routing")) {
+        await check("native microphone publisher with server-assigned sender routing", { encrypted: true, nativeRouting: true });
+        return;
+    }
     if (process.env.WEBRTC_TEST_FAILURE_DIAGNOSTICS === "1" || process.argv.includes("--failure-diagnostics")) {
         await check("unreachable native ICE candidates", { encrypted: true, failureProbe: "ice" });
         await check("native DTLS fingerprint mismatch", { encrypted: true, failureProbe: "dtls" });
         return;
     }
     if (process.env.WEBRTC_TEST_NATIVE_MATRIX === "1" || process.argv.includes("--native-matrix")) {
+        await check("native microphone publisher with server-assigned sender routing", { encrypted: true, nativeRouting: true });
         await check("native microphone-only, custom password, pre-SDP ICE", { encrypted: true, password: "owned-native-password", earlyIce: true });
         await check("legacy native microphone-only without session field", { omitSession: true, earlyIce: true });
         await check("native sendrecv audio, reordered/duplicate/stale ICE", { encrypted: true, sendRecv: true, reorder: true });
@@ -287,6 +304,7 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
     }
     await check("data-channel preferences before media", { dataFirst: true });
     await check("encrypted data-channel preferences before media", { dataFirst: true, encrypted: true });
+    await check("native microphone publisher with server-assigned sender routing", { encrypted: true, nativeRouting: true });
     await check("native audio-only");
     await check("valid ICE survives malformed bundle entries and null mids", { encrypted: true, candidateBundle: true });
     await check("encrypted native video-first offer", { videoFirst: true, encrypted: true });

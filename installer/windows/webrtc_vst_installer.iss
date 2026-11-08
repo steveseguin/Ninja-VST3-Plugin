@@ -44,6 +44,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#SourceVstBundle}\*"; DestDir: "{app}\webrtc_vst.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "desktop.ini"
 Source: "..\..\scripts\configure_windows_firewall.ps1"; DestDir: "{app}\VDO.Ninja Tools"; Flags: ignoreversion
+Source: "..\..\scripts\collect_windows_diagnostics.ps1"; DestDir: "{app}\VDO.Ninja Tools"; Flags: ignoreversion
 
 [Tasks]
 Name: "hostfirewall"; Description: "Allow a DAW or plugin host through Windows Firewall on Private networks (optional; requires administrator permission)"; Flags: unchecked

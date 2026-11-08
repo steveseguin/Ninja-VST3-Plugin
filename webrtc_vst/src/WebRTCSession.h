@@ -182,7 +182,6 @@ private:
     std::unique_ptr<VDONinjaSignalingClient> signalingClient_;
     std::vector<rtc::IceServer> turnServers_; // guarded by mutex_
 
-    std::string selfUuid_;
 
     mutable SpinLock mutex_;
     std::atomic<bool> shuttingDown_{false};

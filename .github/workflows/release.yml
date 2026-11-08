@@ -92,6 +92,12 @@ jobs:
           ctest --test-dir build/webrtc_vst_win -C Release --output-on-failure --parallel 1
           if ($LASTEXITCODE -ne 0) { throw "Native release tests failed" }
 
+      - name: Validate Windows support tools
+        shell: pwsh
+        run: |
+          .\tests\windows_firewall_test.ps1
+          .\tests\windows_diagnostics_test.ps1
+
       - name: Prepare code-signing certificate
         id: signing-cert
         shell: pwsh

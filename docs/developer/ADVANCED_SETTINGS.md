@@ -137,8 +137,10 @@ mixed video/audio offers, malformed ICE bundles, ping/pong, a real local TURN
 server with direct paths blocked, and a discovery outage. The unmodified local
 web checkout has also passed synthetic audio in both directions against the
 native plugin. Released 0.2.8 failed the forced-relay control with no audio.
-These results do not identify the exact failure on the reported phone: Android app
-v109 remains an assumption and has not been reproduced on a device.
+The original reporter's installed version remains unconfirmed. A live Android
+microphone-only stream supplied during the investigation reproduced the failure:
+0.2.8 and the unpublished 0.2.9 candidate reached ICE connected, then timed out
+in DTLS with zero decoded audio, while the browser received audio.
 
 ### Native Android investigation and WHEP receive
 
@@ -150,6 +152,38 @@ port. The Android application's
 as a literal custom relay. This source identifies itself as 5.0.109+109;
 the installed app version is still unconfirmed. The user confirmed that
 Meshcast is disabled; WHEP is therefore not an explanation for this report.
+
+The confirmed compatibility bug was the plugin's invented `from` UUID. The
+official signaling server supplies its own sender `UUID`; Android's
+`signaling.dart:onMessage` prefers `from` when present, causing the answer and
+candidates to miss the publisher's existing peer. The reference web client's
+`webrtc.js:sendMsg` only injects `from` in its separate generic custom-WSS mode.
+The plugin implements the server-routed VDO.Ninja protocol, including when its
+server URL is overridden; it now omits `from`. Removing that field completed
+DTLS and decoded more than 2,000 microphone frames on the same live source.
+`receive_negotiation.test.js --sender-routing` models this native routing rule
+with synthetic audio and fails against the released 0.2.8 binary.
+
+`WEBRTC_VST_LOG_RTC=1` adds opt-in native transport diagnostics to stdout,
+including DTLS handshake errors. Use it together with `WEBRTC_VST_LOG_STDOUT=1`
+when reproducing a connection failure. Transport logs can contain network
+addresses; avoid enabling raw signaling logs for ordinary support reports.
+
+The Windows installer includes `VDO.Ninja Tools/collect_windows_diagnostics.ps1`.
+Close the DAW first, then run this from PowerShell (or use the repository copy):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\collect_windows_diagnostics.ps1 -HostPath 'C:\Program Files\REAPER (x64)\reaper.exe'
+```
+
+It opens a fresh host with diagnostics enabled. Reproduce the problem and close
+the host normally; the script exports a ZIP under Documents/VDO.Ninja Diagnostics.
+Only the last 2,000 recognized connection events and basic host/Windows versions
+are retained. It records no audio and exports no stream IDs, passwords, URLs,
+addresses, raw signaling or arbitrary host messages. Existing hosts are never
+stopped. If the DAW bridges plugins into another executable, capture that host's
+output separately and use `-InputLog <log-file>` to export it. Empty captures are
+reported explicitly. `tests/windows_diagnostics_test.ps1` checks the export filter.
 
 `npm run test:native-receive` exercises direct microphone-only offers, a custom
 password, ICE arriving before SDP, legacy messages without session IDs,
