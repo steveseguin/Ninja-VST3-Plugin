@@ -40,7 +40,7 @@ async function gathered(pc) {
     }
 }
 
-async function check(name, { wssControl = false, video = false, failureResponse = "", replace = false } = {}) {
+async function check(name, { wssControl = false, video = false, failureResponse = "", replace = false, restartMarker = false } = {}) {
     const sessions = [], timers = [], expectedToken = "owned-whep-token";
     let posts = 0, deletes = 0, chain = Promise.resolve(), failure, socket, child, output = "", pong = false;
     const control = new wrtc.RTCPeerConnection({ iceServers: [] });
@@ -100,7 +100,7 @@ async function check(name, { wssControl = false, video = false, failureResponse 
             if (message.pong === 777) { pong = true; return; }
             if (message.audio !== true) return;
             assert.equal(message.video, false);
-            const valid = { type: "whep", url: endpoint, token: expectedToken };
+            const valid = { type: "whep", url: endpoint, token: expectedToken, ...(restartMarker ? { started: 1000 } : {}) };
             // Fixed malformed corpus and stale identities must not cause HTTP.
             for (const malformed of [null, [], 17, {}, { ...valid, token: "bad\r\nInjected: header" },
                 { ...valid, url: "file:///etc/passwd" }, { ...valid, url: "http://example.com/whep" },
@@ -114,6 +114,10 @@ async function check(name, { wssControl = false, video = false, failureResponse 
             sendControl(valid);
             dc.send(JSON.stringify({ ping: 777 }));
             if (replace) timers.push(setTimeout(() => sendControl({ ...valid, url: endpoint + "?replacement=1" }), 2500));
+            if (restartMarker) timers.push(setTimeout(() => {
+                sendControl({ ...valid, started: 2000 });
+                sendControl({ ...valid, started: "2000" }); // Same browser marker; no third allocation.
+            }, 2500));
         }).catch(error => { failure ||= error; });
     };
     signaling.on("connection", ws => {
@@ -144,7 +148,7 @@ async function check(name, { wssControl = false, video = false, failureResponse 
         const [code] = await once(child, "close"); await chain;
         if (failure) throw failure;
         assert.equal(code, 0, output);
-        assert.equal(posts, replace ? 2 : 1, "Unexpected WHEP allocations");
+        assert.equal(posts, replace || restartMarker ? 2 : 1, "Unexpected WHEP allocations");
         assert.ok(pong, "Control peer was lost during WHEP setup");
         assert.ok(!output.includes(expectedToken), "Bearer token leaked into plugin logs");
         const rms = Number(output.match(/output_rms=([\d.]+)/)?.[1] || 0);
@@ -178,6 +182,8 @@ async function check(name, { wssControl = false, video = false, failureResponse 
         ["data-channel WHEP audio", {}],
         ["encrypted WSS WHEP with video", { wssControl: true, video: true }],
         ["WHEP URL replacement", { replace: true, video: true }],
+        ["WHEP restart marker", { restartMarker: true }],
+        ["encrypted WSS WHEP restart marker", { restartMarker: true, wssControl: true }],
         ...["unauthorized", "redirect", "bad-sdp", "oversized"].map(failureResponse => [failureResponse, { failureResponse }])
     ];
     for (const [name, options] of cases) {

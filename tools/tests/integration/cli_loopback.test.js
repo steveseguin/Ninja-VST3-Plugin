@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("fs");
+const assert = require("node:assert/strict");
 const { spawn } = require("child_process");
 
 const { rootDir, cliExecutable, pluginBundle } = require("./build_paths");
@@ -31,7 +32,8 @@ const minRms = parseFloat(process.env.WEBRTC_TEST_MIN_RMS || "0.01");
 const toneHz = process.env.WEBRTC_TEST_TONE_HZ || "1000";
 const blockSleepMs = process.env.WEBRTC_TEST_BLOCK_SLEEP_MS || "5";
 const disableStun = process.env.WEBRTC_TEST_DISABLE_STUN ?? "1";
-const password = process.env.WEBRTC_TEST_PASSWORD ?? ""; // default disables encryption for loopback.
+const password = process.env.WEBRTC_TEST_PASSWORD ?? ""; // Empty uses normal VDO.Ninja encryption.
+const roomName = process.env.WEBRTC_TEST_ROOM_NAME || "";
 
 const activeChildren = new Set();
 function register(child) {
@@ -79,6 +81,7 @@ function spawnCli(label, extraEnv) {
     const env = {
         ...process.env,
         WEBRTC_VST_STREAM_ID: streamId,
+        WEBRTC_VST_ROOM_NAME: roomName,
         WEBRTC_VST_HANDSHAKE_URL: handshakeUrl,
         WEBRTC_VST_PASSWORD: password,
         WEBRTC_VST_DISABLE_STUN: disableStun,
@@ -95,6 +98,7 @@ function spawnCli(label, extraEnv) {
         stdio: ["ignore", "pipe", "pipe"]
     });
     register(child);
+    child.testOutput = "";
 
     const logPrefix = "[" + label + "] ";
 
@@ -102,6 +106,7 @@ function spawnCli(label, extraEnv) {
         stream.setEncoding("utf8");
         let buffer = "";
         stream.on("data", (chunk) => {
+            child.testOutput += chunk;
             writer(logPrefix + chunk.replace(/\n/g, "\n" + logPrefix));
         });
     };
@@ -209,6 +214,9 @@ function delay(ms) {
     if (monitor.rms < minRms) {
         throw new Error("RMS " + monitor.rms.toFixed(6) + " below threshold " + minRms);
     }
+    assert.match(play.testOutput, /Sent viewer preferences:.*"audio":true.*"video":false/);
+    assert.match(play.testOutput, /Remote audio track opened/);
+    assert.doesNotMatch(seed.testOutput + play.testOutput, /Failed to apply remote answer/);
 
     console.log("[PASS] Loopback received audio. RMS=" + monitor.rms.toFixed(4) + ", samples=" + monitor.samples);
     cleanupChildren();

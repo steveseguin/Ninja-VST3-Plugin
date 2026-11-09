@@ -2,12 +2,15 @@
 
 #include "AdvancedSettings.h"
 #include "BoundedJson.h"
+#include "BrowserTimezone.h"
+#include "BrowserTurnFallback.h"
 #include <rtc/configuration.hpp>
 #include <ixwebsocket/IXHttpClient.h>
 #include <ixwebsocket/IXSocketTLSOptions.h>
 #include <chrono>
 #include <cstdlib>
 #include <mutex>
+#include <functional>
 
 namespace webrtc_vst {
 
@@ -55,22 +58,27 @@ inline std::vector<rtc::IceServer> parseTurnServers(const std::string& body) {
     return result;
 }
 
-// Call only from the signaling worker, outside the session/audio locks.
-// Cache successful discovery for one hour, matching the web client; briefly
-// cache failures so unavailable discovery does not hammer the service.
-inline std::vector<rtc::IceServer> loadTurnServers(const std::string& url) {
+inline std::vector<rtc::IceServer> turnDiscoveryFallback(const std::string& url,
+                                                        int timezone = browserTimezoneOffset()) {
+    // Do not send private/custom deployments to public relays without opting in.
     const auto host = endpointHost(url);
-    if (!url.starts_with("https://") && !(url.starts_with("http://") &&
-        (host == "127.0.0.1" || host == "[::1]" || host == "localhost"))) return {};
-    static std::mutex cacheMutex;
-    static std::string cachedUrl;
-    static std::vector<rtc::IceServer> cachedServers;
-    static std::chrono::steady_clock::time_point expires;
-    {
-        std::lock_guard lock(cacheMutex);
-        if (cachedUrl == url && std::chrono::steady_clock::now() < expires) return cachedServers;
-    }
+    if (!url.starts_with("https://") || (host != "turnservers.vdo.ninja" &&
+        host != "turnservers.rtc.ninja" && host != "turnservers.socialstream.ninja")) return {};
+    auto fallback = nlohmann::json::parse(kBrowserTurnFallback);
+    auto& entries = fallback["servers"];
+    const auto distance = [timezone](const nlohmann::json& entry) {
+        const auto delta = std::abs(entry.value("tz", 0) - timezone);
+        return std::min(delta, std::abs(delta - 1440));
+    };
+    std::stable_sort(entries.begin(), entries.end(), [&](const auto& a, const auto& b) {
+        return distance(a) < distance(b);
+    });
+    return parseTurnServers(fallback.dump());
+}
 
+// HTTP work is kept separate so cache expiry is tested with a controlled clock
+// and owned responses, without waiting an hour or contacting public relays.
+inline std::vector<rtc::IceServer> fetchTurnServers(const std::string& url) {
     std::vector<rtc::IceServer> servers;
     try {
         ix::HttpClient client;
@@ -95,12 +103,33 @@ inline std::vector<rtc::IceServer> loadTurnServers(const std::string& url) {
                                          std::to_string(timestamp), args);
         if (!args->cancel && response && response->statusCode == 200 && response->errorCode == ix::HttpErrorCode::Ok)
             servers = parseTurnServers(body);
-    } catch (const std::exception&) { /* Keep direct/STUN connectivity available. */ }
+    } catch (const std::exception&) { /* Use the browser's backup list below. */ }
+    return servers;
+}
+
+// Worker only; never call with the session/audio lock held.
+inline std::vector<rtc::IceServer> loadTurnServers(const std::string& url,
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now(),
+    const std::function<std::vector<rtc::IceServer>(const std::string&)>& fetch = fetchTurnServers) {
+    const auto host = endpointHost(url);
+    if (!url.starts_with("https://") && !(url.starts_with("http://") &&
+        (host == "127.0.0.1" || host == "[::1]" || host == "localhost"))) return {};
+    static std::mutex cacheMutex;
+    static std::string cachedUrl;
+    static std::vector<rtc::IceServer> cachedServers;
+    static std::chrono::steady_clock::time_point expires;
+    {
+        std::lock_guard lock(cacheMutex);
+        if (cachedUrl == url && now < expires) return cachedServers;
+    }
+    auto servers = fetch(url);
+    const bool discovered = !servers.empty();
+    if (!discovered) servers = turnDiscoveryFallback(url);
     {
         std::lock_guard lock(cacheMutex);
         cachedUrl = url;
         cachedServers = servers;
-        expires = std::chrono::steady_clock::now() + (servers.empty() ? std::chrono::seconds(30) : std::chrono::seconds(3600));
+        expires = now + (discovered ? std::chrono::seconds(3600) : std::chrono::seconds(30));
     }
     return servers;
 }

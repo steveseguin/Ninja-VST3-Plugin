@@ -2,6 +2,20 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+add_executable(webrtc_vst_protocol_failure_test protocol_failure_test.cpp
+    ../webrtc_vst/src/WebRTCSession.cpp
+    ../webrtc_vst/src/VDONinjaSignalingClient.cpp
+    ../webrtc_vst/src/AudioRingBuffer.cpp)
+target_link_libraries(webrtc_vst_protocol_failure_test PRIVATE
+    LibDataChannel::LibDataChannel ixwebsocket nlohmann_json::nlohmann_json
+    opus Threads::Threads OpenSSL::Crypto)
+target_compile_features(webrtc_vst_protocol_failure_test PRIVATE cxx_std_20)
+target_compile_definitions(webrtc_vst_protocol_failure_test PRIVATE
+    VDON_BROWSER_CRYPTO_VECTORS="${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/fixtures/browser_crypto_vectors.json"
+    VDON_BROWSER_WHEP_VECTORS="${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/fixtures/browser_whep_vectors.json")
+add_test(NAME ProtocolFailureTest COMMAND webrtc_vst_protocol_failure_test)
+set_tests_properties(ProtocolFailureTest PROPERTIES TIMEOUT 30 LABELS "unit;protocol")
+
 add_executable(webrtc_vst_turn_server_fixture turn_server_fixture.cpp)
 target_link_libraries(webrtc_vst_turn_server_fixture PRIVATE
     LibDataChannel::LibDataChannel LibJuice::LibJuice ixwebsocket nlohmann_json::nlohmann_json Threads::Threads)

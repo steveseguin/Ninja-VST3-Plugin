@@ -11,3 +11,8 @@ Demo pages, docs, and upstream test helpers were removed from this repository to
 The vendored SDK includes local request-dispatch security fixes; it is not an
 unmodified official build. Upstream v1.4.0 license notices are included alongside
 the files. See the repository's AGPL license and the scope of the SDK exception.
+
+Protocol corrections follow the VDO.Ninja application, not SDK-specific signaling
+extensions. Unsupported identity options are rejected; application data uses
+WebRTC only. `npm run test:sdk` checks the vendored SDK against the same reviewed
+signaling contract as the native plugin receive tests.

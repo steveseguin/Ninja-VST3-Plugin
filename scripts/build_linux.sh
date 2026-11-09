@@ -16,6 +16,7 @@ cmake -S webrtc_vst -B "$build_dir" -G Ninja \
     -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
 cmake --build "$build_dir" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-4}" --target \
     webrtc_vst webrtc_vst_cli_host validator webrtc_vst_linux_editor_test webrtc_vst_callback_assignment_test \
+    webrtc_vst_protocol_failure_test webrtc_vst_turn_server_fixture \
     webrtc_vst_audio_impairment_test webrtc_vst_peer_audio_buffer_test \
     webrtc_vst_resampler_test webrtc_vst_audio_ring_test webrtc_vst_settings_test \
     webrtc_vst_integration_test webrtc_vst_stress_test webrtc_vst_fuzz_test

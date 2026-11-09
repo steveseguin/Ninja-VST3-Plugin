@@ -121,7 +121,7 @@ relay selection and recovery; it is not an audit of every web application featur
 
 | Area | Plugin behavior and remaining differences |
 | --- | --- |
-| Negotiation | Data channel opens first; Play sends `{audio:true,video:false}`. SRTP is now initialized during the first DTLS handshake so later audio offers work on the same peer. Native direct-media offers also work. |
+| Negotiation | Data channel opens first; Play sends `{audio:true,video:false}` over `sendChannel`. Discovery signaling sends only `request:"play"` and `streamID`. SRTP is now initialized during the first DTLS handshake so later audio offers work on the same peer. Native direct-media offers also work. |
 | ICE candidates | Retains mid information, computes the correct outgoing media-line index, isolates malformed bundle entries, tolerates null mids, and avoids applying explicitly mismatched sessions to the current UUID's peer. Pre-offer queues remain bounded. |
 | Liveness | Play now returns the web client's `{pong:ping}` response. This is not a complete ICE-restart implementation. |
 | Default STUN | Google `stun.l.google.com:19302` and Cloudflare `stun.cloudflare.com:3478`, matching the web defaults. The pinned libdatachannel/libjuice implementation shuffles the list and chooses one STUN server per peer; this is not multi-server failover. |
@@ -202,6 +202,9 @@ recvonly video/audio sections for A/V relay compatibility, and decodes only
 Opus audio. Once WHEP audio is ready, the parent peer's audio is excluded from
 the mix to prevent duplication. HTTP runs on a worker; close/replacement joins
 it and deletes the allocated HTTP resource on the peer cleanup thread.
+Duplicate detection includes the browser's `started` publication marker, so a
+restarted source at the same URL/token creates a fresh receiver. Equivalent
+numeric and string markers do not allocate another HTTP session.
 
 HTTPS endpoints and loopback HTTP are supported, with system TLS verification,
 bounded responses/timeouts, bearer tokens, duplicate suppression and same-origin
@@ -363,3 +366,63 @@ Additional tests of the unchanged published binary passed after publication:
 - 8,016 malformed signaling mutations/boundaries across two reproducible fuzz
   seeds in Seed and Play modes, checking status reporting, reconnect, finite
   audio and normal process shutdown.
+
+
+### Protocol compatibility and recovery in 0.2.12
+
+The reference is VDO.Ninja `3ea79516`, particularly `session.watch`,
+`receiveChannel.onmessage`, publisher preference handling and the TURN fallback
+list. The SDK is an implementation, not the protocol specification.
+
+- Discovery sends only `request: "play"` and `streamID`. A publisher first offers
+  `sendChannel`; boolean preferences then enable audio and a media offer.
+- Data-channel offers, answers and ICE use the channel owner. The UUID carried
+  inside a browser's data-channel message can still be its destination. Treating
+  it as a sender created a second peer and invalid ICE answers during media
+  renegotiation. Encrypted and unencrypted regression cases cover this path.
+- Default signaling uses routed `UUID`. No client identity or unconditional
+  `from` is injected. The vendored SDK rejects unsupported identity options and
+  removes application-data fallback over signaling. Outer-envelope guards reject
+  invented fields while leaving `pipe` payloads unrestricted.
+- AES byte conversion follows the browser for Unicode salts and Latin-1 text.
+  Encryption failure sends nothing. Relay selection follows browser timezone
+  behavior and fallback servers; discovery credentials refresh during long
+  sessions. Private discovery endpoints do not silently enable public fallbacks.
+- Retries survive signaling outages and throttling. Stalled initial connections,
+  failed peers and publisher absence trigger bounded, retained retry intent.
+  Current sessions reject stale messages. Healthy audio survives a signaling
+  reconnect. Publisher recovery uses existing offers and `iceRestartRequest`.
+- WHEP restart markers replace a resource even when its URL is unchanged. Marker
+  values, including Unicode whitespace, are checked against browser results.
+
+Focused and full integration validation passed on Windows: real Chrome in both
+sending directions, encrypted owned live-room audio, native microphone-only
+negotiation, video-bearing offers, forced TURN with direct connectivity blocked,
+discovery failure, malformed envelopes, encryption failure and SDK regression
+checks. BrowserStack Samsung Galaxy S23 / Android 13 Chrome published through the
+unmodified VDO.Ninja checkout into the plugin with received RMS 0.166392.
+
+`npm run test:network-reconnect` uses owned UDP proxies to block STUN, DTLS, SCTP
+and SRTP together. It covers short blackouts, four successive IP/port changes,
+combined signaling/media outages, missing publishers, encrypted room recovery,
+stale sessions, stopped-session cancellation and initial connection timeouts.
+Address changes recovered measured audio in about nine seconds. A fixture that
+never supports pong remained connected while healthy and recovered after a
+blackout in about 29 seconds via ICE state. These are controlled measurements,
+not physical cellular handover guarantees.
+
+The plugin's libjuice transport supports UDP TURN, not TURN TCP/TLS or in-place
+ICE restart. Recovery creates a fresh peer session using the existing protocol.
+A peer is monitored by ping deadlines only after it has answered a ping; older
+Android clients that ignore control pings use ICE state and connection deadlines.
+
+The `social_ninja` Android app remains unchanged. In reviewed v5.0.109 source,
+`signaling.dart:5402` prefers `from` even for routed signaling, and the data-channel
+handler at `signaling.dart:12683` lacks browser-compatible ping/pong handling.
+Use server-supplied `UUID` outside explicitly implemented fan-out mode, and echo a
+ping token as `pong` on the same channel. Review its existing ICE-restart/session
+lifecycle when applying those app fixes. No microphone-only UI change has been
+shown necessary by these results.
+
+SDK changes and source evidence are documented in the
+[SDK protocol audit](https://github.com/steveseguin/ninjasdk/blob/codex/protocol-audit-integrated/docs/protocol-audit.md).

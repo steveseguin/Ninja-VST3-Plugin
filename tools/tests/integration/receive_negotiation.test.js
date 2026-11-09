@@ -5,6 +5,7 @@
 // fallback (send-only tracks, balanced BUNDLE, singular trickled candidates).
 // Local signaling and synthetic audio only; no physical inputs or public stream.
 const assert = require("node:assert/strict");
+const { assertSignaling, assertControl } = require("../helpers/assert-signaling.cjs");
 const crypto = require("node:crypto");
 const http = require("node:http");
 const dgram = require("node:dgram");
@@ -17,7 +18,7 @@ const { cliExecutable, pluginBundle } = require("./build_paths");
 const { startTestTone } = require("../helpers/paced_tone");
 
 async function check(name, { videoFirst = false, dataFirst = false, encrypted = false, relay = false, discoveryFailure = false, candidateBundle = false,
-    earlyIce = false, omitSession = false, reorder = false, audioFirst = false, sendRecv = false, password = "", failureProbe = false, nativeRouting = false } = {}) {
+    earlyIce = false, omitSession = false, reorder = false, audioFirst = false, sendRecv = false, password = "", failureProbe = false, nativeRouting = false, conflictingIceUuid = false } = {}) {
     const key = crypto.createHash("sha256").update((password || "someEncryptionKey123") + "vdo.ninja").digest();
     const withoutCandidates = description => ({ ...description,
         sdp: description.sdp.split("\r\n").filter(line => !/^a=(candidate:|end-of-candidates)/.test(line)).join("\r\n") });
@@ -75,9 +76,9 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
     const videoTimer = videoSource ? setInterval(() => videoSource.onFrame({
         width: 160, height: 120, data: Buffer.alloc(160 * 120 * 3 / 2, 80)
     }), 100) : null;
-    if (videoFirst) peer.addTransceiver(video, { direction: "sendonly" });
+    if (videoFirst && !dataFirst) peer.addTransceiver(video, { direction: "sendonly" });
     if (!dataFirst) peer.addTransceiver(audio, { direction: sendRecv ? "sendrecv" : "sendonly" });
-    if (audioFirst) peer.addTransceiver(video, { direction: "sendonly" });
+    if (audioFirst && !dataFirst) peer.addTransceiver(video, { direction: "sendonly" });
     const dc = dataFirst || nativeRouting ? peer.createDataChannel("sendChannel") : null;
     const tone = startTestTone(source);
     let child, logs = "", failure, started = false, answerSeen = false, preferencesSeen = false, mediaAnswerSeen = false, pongSeen = false;
@@ -86,17 +87,30 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
     if (dc) dc.onmessage = ({ data }) => {
         chain = chain.then(async () => {
             const message = decode(data);
+            assertControl(JSON.parse(data));
             if (typeof message.audio === "boolean") {
                 assert.equal(message.audio, true);
                 assert.equal(message.video, false);
                 preferencesSeen = true;
                 dc.send(JSON.stringify({ ping: 123456789 }));
+                if (conflictingIceUuid) {
+                    for (const candidate of candidates) {
+                        dc.send(JSON.stringify(encode({ UUID: "wrong-peer", session: "native-session", candidates: [candidate], type: "local" })));
+                        dc.send(JSON.stringify(encode({ uuid: "another-wrong-peer", session: "obsolete-session", candidate, type: "local" })));
+                    }
+                }
                 if (!dataFirst) return;
                 assert.equal(peer.getSenders().length, 0, "Media sent before preferences");
+                // Deliberately include video despite video:false to verify that
+                // an app's mixed offer cannot prevent its audio from playing.
+                if (videoFirst) peer.addTransceiver(video, { direction: "sendonly" });
                 peer.addTransceiver(audio, { direction: "sendonly" });
+                if (audioFirst) peer.addTransceiver(video, { direction: "sendonly" });
                 const offer = await peer.createOffer();
                 await peer.setLocalDescription(offer);
-                dc.send(JSON.stringify(encode({ description: relay ? withoutCandidates(offer) : offer })));
+                // The browser's DC receiver replaces this destination UUID
+                // with the channel owner; it must not create a new media peer.
+                dc.send(JSON.stringify(encode({ UUID: "server-assigned-viewer", description: relay ? withoutCandidates(offer) : offer })));
             } else if (message.pong === 123456789) {
                 pongSeen = true;
             } else if (message.description) {
@@ -110,10 +124,11 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
     const candidates = [];
     peer.onicecandidate = ({ candidate }) => { if (candidate) candidates.push(candidate.toJSON()); };
     server.on("connection", socket => {
-        const send = payload => socket.send(JSON.stringify(encode({ UUID: "native-publisher", ...(omitSession ? {} : { session: "native-session" }), ...payload })));
+        const send = payload => socket.send(JSON.stringify(encode({ UUID: "native-publisher", ...(nativeRouting ? { from: "deliberately-wrong-sender" } : {}), ...(omitSession ? {} : { session: "native-session" }), ...payload })));
         socket.on("message", raw => {
             chain = chain.then(async () => {
                 const message = decode(raw);
+                assertSignaling(JSON.parse(raw));
                 if (nativeRouting && message.request !== "play") {
                     // The official relay rewrites UUID to its assigned sender
                     // identity. Android prefers a supplied `from` over UUID;
@@ -248,7 +263,12 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
             assert.ok(pongSeen, "Publisher liveness ping was not answered");
         }
         if (nativeRouting) assert.ok(preferencesSeen && pongSeen, "Native control channel did not open");
+        if (conflictingIceUuid) {
+            assert.doesNotMatch(logs, /Mapped publisher datachannel to peer session (wrong-peer|another-wrong-peer)/,
+                "Data-channel ICE was routed by its embedded UUID instead of the channel peer");
+        }
         assert.match(logs, /Peer connection connected:/);
+        if (video) assert.match(logs, /Ignoring non-audio remote track/, "Offered video was not explicitly ignored");
         assert.doesNotMatch(logs, /no media transport|Failed to apply remote offer|Peer connection failed:/);
         const rms = Number(logs.match(/output_rms=([\d.]+)/)?.[1]);
         assert.ok(rms > 0.01, "No received tone\n" + logs);
@@ -280,6 +300,16 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
 }
 
 (async () => {
+    if (process.argv.includes("--video-tracks")) {
+        await check("data-first publisher includes video after audio-only preferences", { dataFirst: true, encrypted: true, videoFirst: true });
+        await check("native audio-first offer retains playable audio", { encrypted: true, audioFirst: true });
+        await check("native video-first offer retains playable audio", { encrypted: true, videoFirst: true });
+        return;
+    }
+    if (process.argv.includes("--data-channel-ice-routing")) {
+        await check("data-channel ICE binds to its source peer", { dataFirst: true, encrypted: true, conflictingIceUuid: true });
+        return;
+    }
     if (process.argv.includes("--sender-routing")) {
         await check("native microphone publisher with server-assigned sender routing", { encrypted: true, nativeRouting: true });
         return;
@@ -304,6 +334,7 @@ async function check(name, { videoFirst = false, dataFirst = false, encrypted = 
     }
     await check("data-channel preferences before media", { dataFirst: true });
     await check("encrypted data-channel preferences before media", { dataFirst: true, encrypted: true });
+    await check("data-channel ICE binds to its source peer", { dataFirst: true, encrypted: true, conflictingIceUuid: true });
     await check("native microphone publisher with server-assigned sender routing", { encrypted: true, nativeRouting: true });
     await check("native audio-only");
     await check("valid ICE survives malformed bundle entries and null mids", { encrypted: true, candidateBundle: true });

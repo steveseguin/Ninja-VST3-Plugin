@@ -1,6 +1,6 @@
 {
   "name": "vst",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Integration tooling for WebRTC VST",
   "main": "index.js",
   "scripts": {
@@ -10,12 +10,13 @@
     "test:hardening": "node tools/tests/integration/crypto_compat.test.js && node tools/tests/integration/signaling_recovery.test.js && node tools/tests/integration/signaling_limits.test.js && node tools/tests/integration/signaling_fuzz.test.js",
     "test:extended": "node tools/tests/extended_validation.js",
     "test:media-faults": "node tools/tests/integration/media_fault_recovery.test.js",
+    "test:network-reconnect": "node tools/tests/integration/network_reconnect.test.js && node tools/tests/integration/network_reconnect.test.js --encrypted-room && node tools/tests/integration/network_reconnect.test.js --no-pong && node tools/tests/integration/network_reconnect.test.js --connect-timeout",
     "test:audio-soak": "node tools/tests/integration/audio_quality_soak.test.js",
     "test:playback-quality": "node tools/tests/integration/playback_quality.test.js",
     "test:playback-matrix": "node tools/tests/integration/playback_matrix.test.js",
-    "test:sdk": "node tools/tests/integration/sdk_publish_options.test.js && node tools/tests/integration/sdk_requests.test.js",
+    "test:sdk": "node tools/tests/integration/sdk_publish_options.test.js && node tools/tests/integration/sdk_requests.test.js && node --test tools/tests/integration/sdk_protocol.test.js tools/tests/integration/sdk_turn_discovery.test.js",
     "test:cli-loopback": "node tools/tests/integration/cli_loopback.test.js",
-    "test:publish-audio": "node tools/tests/integration/publish_audio.test.js",
+    "test:publish-audio": "node tools/tests/integration/publisher_preferences.test.js --restart && node tools/tests/integration/publish_audio.test.js",
     "test:play-request-audio-only": "node tools/tests/integration/play_request_audio_only.test.js",
     "test:play-ignore-video": "node tools/tests/integration/play_ignores_video_track.test.js",
     "test:play-room-live": "node tools/tests/integration/play_room_audio_live.test.js",

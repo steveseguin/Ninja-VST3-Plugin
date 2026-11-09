@@ -2,6 +2,7 @@
 "use strict";
 
 const fs = require("fs");
+const { assertSignaling } = require("../helpers/assert-signaling.cjs");
 const { spawn } = require("child_process");
 
 const { rootDir, cliExecutable, pluginBundle } = require("./build_paths");
@@ -19,8 +20,7 @@ const timeoutMs = parseInt(process.env.WEBRTC_TEST_TIMEOUT_MS || "20000", 10);
 
 let connected = false;
 let playRequestSeen = false;
-let playRequestAudio = null;
-let playRequestVideo = null;
+let contractError = null;
 
 const cli = spawn(cliExecutable, [pluginBundle], {
     cwd: rootDir,
@@ -75,12 +75,7 @@ function onOutput(prefix, chunk) {
         const payload = parseSignalingLine(line);
         if (payload && payload.request === "play") {
             playRequestSeen = true;
-            if (Object.prototype.hasOwnProperty.call(payload, "audio")) {
-                playRequestAudio = payload.audio;
-            }
-            if (Object.prototype.hasOwnProperty.call(payload, "video")) {
-                playRequestVideo = payload.video;
-            }
+            try { assertSignaling(payload); } catch (error) { contractError = error; }
         }
     }
 }
@@ -103,19 +98,17 @@ cli.on("exit", (code) => {
     console.log("\n=== play_request_audio_only.test.js ===");
     console.log("connected:", connected ? "PASS" : "FAIL");
     console.log("play request seen:", playRequestSeen ? "PASS" : "FAIL");
-    console.log("play.request.audio:", playRequestAudio);
-    console.log("play.request.video:", playRequestVideo);
+    console.log("signaling contract:", contractError ? contractError.message : "PASS");
 
     const passed = code === 0 &&
         connected &&
         playRequestSeen &&
-        playRequestAudio === true &&
-        playRequestVideo === false;
+        contractError === null;
 
     if (!passed) {
-        console.error("[FAIL] Expected play request to include {audio:true, video:false}.");
+        console.error("[FAIL] Expected only the VDO.Ninja play request and streamID; media preferences belong on sendChannel.");
         process.exit(1);
     }
-    console.log("[PASS] Play signaling includes explicit audio-only flags.");
+    console.log("[PASS] Play signaling matches VDO.Ninja; receive-negotiation verifies audio-only data-channel preferences.");
     process.exit(0);
 });

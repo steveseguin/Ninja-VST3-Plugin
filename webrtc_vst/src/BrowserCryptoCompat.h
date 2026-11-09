@@ -18,8 +18,8 @@ inline std::string encodeBrowserPassword(const std::string& text) {
 }
 
 // VDO.Ninja's legacy AES phrase encoder uses Uint8Array(str.length) and
-// charCodeAt: the LOW BYTE OF EACH UTF-16 CODE UNIT, not UTF-8. Only AES key
-// material uses this; stream/room/password hashes must remain UTF-8 SHA-256.
+// charCodeAt: the LOW BYTE OF EACH UTF-16 CODE UNIT, not UTF-8. AES key material
+// and payloads use this; stream/room/password hashes remain UTF-8 SHA-256.
 inline std::string browserAesKeyBytes(const std::string& utf8) {
     std::string bytes;
     for (size_t i = 0; i < utf8.size();) {
@@ -46,6 +46,19 @@ inline std::string browserAesKeyBytes(const std::string& utf8) {
         } else bytes += static_cast<char>(point & 255);
     }
     return bytes;
+}
+
+inline std::string browserAesPlaintext(const std::string& bytes) {
+    std::string utf8;
+    utf8.reserve(bytes.size());
+    for (unsigned char byte : bytes) {
+        if (byte < 128) utf8 += static_cast<char>(byte);
+        else {
+            utf8 += static_cast<char>(0xc0 | (byte >> 6));
+            utf8 += static_cast<char>(0x80 | (byte & 63));
+        }
+    }
+    return utf8;
 }
 
 } // namespace webrtc_vst

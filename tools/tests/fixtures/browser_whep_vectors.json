@@ -1,0 +1,165 @@
+{
+  "source": "vdo.ninja@3ea79516:webrtc.js:whepSettingsMarker",
+  "vectors": [
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": null
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": false
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": true
+      },
+      "marker": "true"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": 0
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": -1
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": 1000
+      },
+      "marker": "1000"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": 1e-7
+      },
+      "marker": "1e-7"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": 0.000001
+      },
+      "marker": "0.000001"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": 100000000000000000000
+      },
+      "marker": "100000000000000000000"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": 1e+21
+      },
+      "marker": "1e+21"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": ""
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "0"
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": " false "
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "FALSE"
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "1000"
+      },
+      "marker": "1000"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": " FALSE﻿"
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "  "
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "　0 "
+      },
+      "marker": "https://owned.invalid/whep|owned"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "false"
+      },
+      "marker": "false"
+    },
+    {
+      "settings": {
+        "url": "https://owned.invalid/whep",
+        "token": "owned",
+        "started": "᠎false᠎"
+      },
+      "marker": "᠎false᠎"
+    }
+  ]
+}

@@ -6,6 +6,13 @@ const SDK = require("../../../js_sdk/vdoninja-sdk-node.js");
 (async () => {
     const sdk = new SDK({password:"test &é+pass"});
     try {
+        for (const vector of require('../fixtures/browser_crypto_vectors.json').encryption) {
+            const reference = new SDK({ password: vector.rawPassword, salt: vector.salt });
+            assert.equal(await reference._decryptMessage(vector.ciphertextHex, vector.ivHex), vector.plaintext);
+            const [encrypted, iv] = await reference._encryptMessage(vector.plaintext);
+            const decoder = crypto.createDecipheriv('aes-256-cbc', Buffer.from(vector.keyHex, 'hex'), Buffer.from(iv, 'hex'));
+            assert.equal(Buffer.concat([decoder.update(Buffer.from(encrypted, 'hex')), decoder.final()]).toString('latin1'), vector.plaintext);
+        }
         assert.equal(sdk.password,encodeURIComponent("test &é+pass"));
         for(const salt of ["vdo.ninja","SALT","mix &+/=?#-é🔊"]) {
             sdk.salt=salt;

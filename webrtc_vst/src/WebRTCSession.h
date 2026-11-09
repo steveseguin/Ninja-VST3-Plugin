@@ -105,6 +105,7 @@ private:
         std::shared_ptr<rtc::Track> whepVideoTrack;
         bool whepTransport{false};
         std::string whepParentKey, whepChildKey;
+        std::string whepMarker;
         std::string uuid;
         std::string sessionId;
         std::string streamId;
@@ -112,9 +113,13 @@ private:
         bool loggedPendingIceLimit = false;
         uint32_t nextTimestamp{0};
         bool negotiationReady{false};
+        bool allowAudio{false}; // Publisher waits for data-channel preferences.
         bool remoteDescriptionSet{false};
         bool localDescriptionSet{false};
         bool loggedFirstOutgoingFrame{false};
+        std::chrono::steady_clock::time_point connectDeadline{}, disconnectedAt{}, nextPingAt{}, pingSentAt{};
+        uint64_t pingToken{0};
+        bool pongSupported{false}; // Older native apps may ignore control pings.
         uint64_t outgoingSendCount{0};
         uint64_t outgoingDroppedNotOpenCount{0};
     };
@@ -158,6 +163,12 @@ private:
     void sendSignalingMessageLocked(const nlohmann::json& payload);
     bool isConnectedLocked() const;
     void requestPlayRefresh(const std::string& reason);
+    void refreshTurnServers(); // Worker only; HTTP never holds mutex_.
+    void maintainPeerConnections(); // Worker only; timers never run on the audio thread.
+    void handlePeerControl(const nlohmann::json& message, const PeerKey& sourceKey = {});
+    void configureControlChannel(const PeerKey& key, const std::shared_ptr<rtc::DataChannel>& dc, bool publishing);
+    void addPublisherAudioTrackLocked(PeerSession& session, const PeerKey& key);
+    void handleViewerPreferences(const PeerKey& key, const nlohmann::json& message);
 
     void emitStatus(const std::string& status) const;
     void log(const std::string& line) const;
@@ -181,6 +192,7 @@ private:
 
     std::unique_ptr<VDONinjaSignalingClient> signalingClient_;
     std::vector<rtc::IceServer> turnServers_; // guarded by mutex_
+    std::chrono::steady_clock::time_point nextTurnRefreshAt_{}; // guarded by mutex_
 
 
     mutable SpinLock mutex_;
@@ -209,6 +221,7 @@ private:
     std::atomic<size_t> pendingPeerCleanup_{0};
     std::unordered_map<PeerKey, PeerSession> peerSessions_;
     std::unordered_map<std::string, PeerKey> sessionByUuid_;
+    std::deque<std::pair<PeerKey, std::chrono::steady_clock::time_point>> retiredSessionKeys_;
     std::vector<PendingIce> pendingGlobalIce_;
     std::string salt_;
     bool logSignalingMessages_{false};
@@ -261,6 +274,10 @@ private:
     std::vector<float> plcDecodeScratch_;
     std::vector<float> plcResampledScratch_;
     std::chrono::steady_clock::time_point lastPlayRefreshAt_{};
+    std::chrono::steady_clock::time_point nextPlayRefreshAt_{};
+    bool playRefreshPending_{false};
+    unsigned playRefreshAttempts_{0};
+    uint64_t nextPingToken_{0};
 };
 
 } // namespace webrtc_vst
