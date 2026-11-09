@@ -1,7 +1,6 @@
 #pragma once
 #include <nlohmann/json.hpp>
 #include <algorithm>
-#include <charconv>
 #include <cctype>
 #include <cmath>
 #include <string>
@@ -32,10 +31,9 @@ inline std::string_view whepTrim(std::string_view value) {
 // String(number) formatting used by webrtc.js:whepSettingsMarker. In particular,
 // numeric timestamps and their string forms identify the same publication.
 inline std::string whepNumberMarker(double number) {
-    char buffer[64];
-    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), number);
-    if (result.ec != std::errc{}) return {};
-    std::string digits(buffer, result.ptr);
+    // The JSON serializer supplies locale-independent round-trip digits without
+    // floating-point to_chars, which requires macOS 13.3 despite our 11 target.
+    std::string digits = nlohmann::json(number).dump();
     const auto exponentAt = digits.find('e');
     const int exponent = exponentAt == std::string::npos ? 0 : std::stoi(digits.substr(exponentAt + 1));
     if (exponentAt != std::string::npos) digits.resize(exponentAt);
