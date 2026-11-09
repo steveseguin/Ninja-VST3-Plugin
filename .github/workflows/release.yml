@@ -95,6 +95,10 @@ jobs:
           ctest --test-dir build/webrtc_vst_win -C Release --output-on-failure --parallel 1
           if ($LASTEXITCODE -ne 0) { throw "Native release tests failed" }
 
+      - name: Validate package version metadata
+        shell: pwsh
+        run: node --test tools/tests/offline/version.test.js
+
       - name: Validate Windows support tools
         shell: pwsh
         run: |

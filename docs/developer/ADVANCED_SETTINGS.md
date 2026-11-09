@@ -368,7 +368,7 @@ Additional tests of the unchanged published binary passed after publication:
   audio and normal process shutdown.
 
 
-### Protocol compatibility and recovery in 0.2.12
+### Protocol compatibility and recovery in 0.2.13
 
 The reference is VDO.Ninja `3ea79516`, particularly `session.watch`,
 `receiveChannel.onmessage`, publisher preference handling and the TURN fallback
@@ -425,4 +425,18 @@ lifecycle when applying those app fixes. No microphone-only UI change has been
 shown necessary by these results.
 
 SDK changes and source evidence are documented in the
-[SDK protocol audit](https://github.com/steveseguin/ninjasdk/blob/codex/protocol-audit-integrated/docs/protocol-audit.md).
+[SDK protocol audit](https://github.com/steveseguin/ninjasdk/blob/main/docs/protocol-audit.md).
+
+Android reconnect follow-up: `_requestIceRestart` at `signaling.dart:2781` captures
+`sessionId`, waits 500 ms, then looks up `_sessions[remoteUuid]` again. Replacing
+the peer in that interval passes the old session ID with the new peer to
+`_createOffer`. A standalone Dart probe executing that unchanged method reproduced
+`old/new`. Capture both peer and session, then require both to remain current
+before offering; repeat the checks after awaits in `_createOffer` (`10262`). Its
+error path must also avoid closing a newer peer. This is a confirmed callback
+race in a controlled probe, not a reproduced physical-phone handover failure.
+
+The Android outgoing `from` assignments are conditional on a nonempty `UUID`.
+In this checkout, `UUID` is initialized/reset to empty (`1207`, `2477`) and is not
+assigned elsewhere, so those branches do not show active `from` injection.
+The incoming preference for `from` (`5402`) remains the routing defect.
