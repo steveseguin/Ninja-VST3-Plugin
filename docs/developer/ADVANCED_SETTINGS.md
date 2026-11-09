@@ -440,3 +440,48 @@ The Android outgoing `from` assignments are conditional on a nonempty `UUID`.
 In this checkout, `UUID` is initialized/reset to empty (`1207`, `2477`) and is not
 assigned elsewhere, so those branches do not show active `from` injection.
 The incoming preference for `from` (`5402`) remains the routing defect.
+
+### Published 0.2.13 package validation
+
+The [0.2.13 Windows release](https://github.com/steveseguin/Ninja-VST3-Plugin/releases/tag/v0.2.13)
+was built from `2a178ea`. Both public downloads matched the signed artifact hashes.
+The installer produced the same plugin binary as the ZIP. Bundle and class
+metadata all report 0.2.13, and dependency inspection found no external OpenSSL
+or Visual C++ runtime requirement. Windows builds must use
+`-DSMTG_USE_STATIC_CRT=ON` when producing these standalone packages.
+
+The final build passed all 14 native tests and 22 offline checks. The downloaded
+bundle passed REAPER with eight instances in four live audio pairs, editor and
+bypass cycles, saved-project reload and a fresh host process. Audacity passed
+five editor open/close cycles and clean shutdown; that smoke check does not
+measure Audacity playback.
+
+Additional testing after publication used the public downloaded bundle:
+
+- The full `npm run test:integration` gate passed again, including SDK/security,
+  advanced settings, receive negotiation, forced TURN, video-bearing offers,
+  plugin loopback and publisher preference/restart checks.
+- All four network-recovery variants passed, including encrypted rooms, repeated
+  IP/port changes, signaling loss, unavailable publishers, stale sessions, stopped
+  retries and an initially stalled connection. Eight address changes recovered
+  audio in 8.99–9.05 seconds. The no-pong fixture recovered in 30.11 seconds.
+- BrowserStack Samsung Galaxy S23 / Android 13 Chrome published through the
+  unmodified VDO.Ninja checkout; received RMS was 0.177798. This tests Chrome on
+  Android, not the native app APK.
+- All six stereo playback formats passed: 44.1 kHz/128 frames, 48 kHz/32, 256 and
+  1024 frames, 96 kHz/64 frames and 192 kHz/256 frames. Measured output had no
+  silent, nonfinite or clipped blocks in the analyzed playback windows.
+- Another 4,008 malformed signaling mutations/boundaries passed using seed
+  `2220413`, followed by real relayed SRTP with 5% loss, 15 ms jitter and a
+  three-second outage with successful recovery.
+
+The user's native Android microphone stream also produced decoded audio during
+pre-release validation. Physical Wi-Fi-to-cellular handover was not exercised;
+the address-change and blackout tests above use controlled owned endpoints.
+The Android app source remains unchanged.
+
+Source validation at the release commit also passed
+[Linux CI](https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/42547161739)
+and both Apple Silicon and Intel jobs in
+[macOS CI](https://github.com/steveseguin/Ninja-VST3-Plugin/actions/runs/42547161837).
+The public 0.2.13 assets are Windows packages.

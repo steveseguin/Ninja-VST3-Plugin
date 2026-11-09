@@ -31,6 +31,7 @@ $env:VCPKG_ROOT = "$env:USERPROFILE\\deps\\vcpkg"
 cmake -S webrtc_vst -B build/webrtc_vst_win `
   -G "Visual Studio 17 2022" `
   -DCMAKE_BUILD_TYPE=Release `
+  -DSMTG_USE_STATIC_CRT=ON `
   -DVST3_SDK_ROOT="$PWD\vst3sdk"
 
 cmake --build build/webrtc_vst_win --config Release --target webrtc_vst webrtc_vst_cli_host
